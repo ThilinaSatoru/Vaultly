@@ -1,22 +1,26 @@
 import { BookOpen, ChevronLeft, ChevronRight, Download, LoaderCircle, Minus, Pencil, Plus, X, ZoomIn } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
-import { api, formatSize, type Category, type MediaDetail, type SeriesSummary, type Tag } from "./media";
+import { api, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
 
 interface MediaViewerProps {
   itemId: number;
+  seriesContext: SeriesViewerContext | null;
+  onNavigateItem: (id: number) => void;
   categories: Category[];
   tags: Tag[];
+  people: Person[];
   onCategoryCreated: (name: string) => Promise<Category>;
   onTagCreated: (name: string) => Promise<Tag>;
+  onPersonCreated: (name: string) => Promise<Person>;
   onOpenSeries: (id: number) => void;
   onClose: () => void;
   onChanged: () => void;
 }
 
-export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTagCreated, onOpenSeries, onClose, onChanged }: MediaViewerProps) {
+export function MediaViewer({ itemId, seriesContext, onNavigateItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged }: MediaViewerProps) {
   const [item, setItem] = useState<MediaDetail | null>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [archive, setArchive] = useState(false);
@@ -28,11 +32,15 @@ export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTag
   const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [seriesIds, setSeriesIds] = useState<number[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const seriesIndex = seriesContext?.items.findIndex((entry) => entry.id === itemId) ?? -1;
+  const previousItem = seriesIndex > 0 ? seriesContext?.items[seriesIndex - 1] : undefined;
+  const nextItem = seriesContext && seriesIndex >= 0 ? seriesContext.items[seriesIndex + 1] : undefined;
 
   useEffect(() => {
     let active = true;
     setItem(null);
     setPages([]);
+    setArchive(false);
     setPage(0);
     setFit("screen");
     setComicZoom(100);
@@ -69,6 +77,12 @@ export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTag
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") { onClose(); return; }
       if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      if (seriesContext && event.altKey && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+        event.preventDefault();
+        const target = event.key === "ArrowLeft" ? previousItem : nextItem;
+        if (target) onNavigateItem(target.id);
+        return;
+      }
       if (item?.media_type === "comic") {
         if (event.key === "ArrowRight") setPage((value) => Math.min(pages.length - 1, value + 1));
         if (event.key === "ArrowLeft") setPage((value) => Math.max(0, value - 1));
@@ -87,7 +101,7 @@ export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTag
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [item, pages.length, onClose]);
+  }, [item, pages.length, seriesContext, previousItem, nextItem, onClose, onNavigateItem]);
 
   const rename = async () => {
     if (!item) return;
@@ -139,6 +153,20 @@ export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTag
     }
   };
 
+  const updatePeople = async (role: "cast" | "artist", personIds: number[]) => {
+    if (!item) return;
+    setSaving(true); setError("");
+    try {
+      const result = await api<{ people: Person[] }>(`/api/items/${item.id}/people/${role}`, {
+        method: "PUT", body: JSON.stringify({ personIds }),
+      });
+      setItem(role === "cast" ? { ...item, cast: result.people } : { ...item, artists: result.people });
+      onChanged();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : `Could not update ${role}.`);
+    } finally { setSaving(false); }
+  };
+
   const updateSeries = async (ids: number[]) => {
     if (!item) return;
     setSaving(true);
@@ -165,8 +193,11 @@ export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTag
     <div className="viewer-backdrop" role="presentation" onMouseDown={onClose}>
       <section className="viewer" role="dialog" aria-modal="true" aria-label={item?.title || "Media viewer"} onMouseDown={(event) => event.stopPropagation()}>
         <header className="viewer-header">
-          <div><strong>{item?.title || "Opening media…"}</strong><span>{item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Close viewer"><X size={21} /></button>
+          <div><strong>{item?.title || "Opening media…"}</strong><span>{seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
+          <div className="viewer-header-actions">
+            {seriesContext && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file in set"><ChevronLeft size={17} /> Previous</button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file in set">Next <ChevronRight size={17} /></button></>}
+            <button className="icon-button" type="button" onClick={onClose} aria-label="Close viewer"><X size={21} /></button>
+          </div>
         </header>
 
         <div className="viewer-main">
@@ -209,12 +240,17 @@ export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTag
             <div className="viewer-detail-row"><span>{item.file_extension ? "File name" : "Folder name"}</span><strong title={item.filename}>{item.filename}</strong></div>
             <div className="viewer-detail-row"><span>Path</span><strong title={item.relative_path}>{item.relative_path}</strong></div>
             {item.media_type === "video" && <p className="detail-hint">Space/K pause · ←/→ seek 5s · Shift + ←/→ seek 30s · M mute · F fullscreen</p>}
+            {seriesContext && <p className="detail-hint">Alt + ←/→ moves to the previous or next file in this set.</p>}
             <button className="secondary-button" type="button" onClick={rename} disabled={saving}><Pencil size={16} /> Edit title</button>
             {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
             <h3>Categories</h3>
             <TagCombobox label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
             <h3>Tags</h3>
             <TagCombobox label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
+            <h3>Cast</h3>
+            <TagCombobox label="Cast" tags={people} selectedIds={item.cast.map((person) => person.id)} onChange={(ids) => void updatePeople("cast", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add people" />
+            <h3>Artists</h3>
+            <TagCombobox label="Artists" tags={people} selectedIds={item.artists.map((person) => person.id)} onChange={(ids) => void updatePeople("artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add artists" />
             <h3>Series & sets</h3>
             <TagCombobox label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
             {seriesIds.length > 0 && <div className="viewer-series-links">{seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) =>

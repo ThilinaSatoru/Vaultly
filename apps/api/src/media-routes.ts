@@ -32,6 +32,8 @@ const listInput = z.object({
   category: z.coerce.number().int().positive().optional(),
   categories: idListInput.optional(),
   tags: idListInput.optional(),
+  cast: idListInput.optional(),
+  artists: idListInput.optional(),
   sort: z.enum(["title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
 }).refine((value) => value.minMb === undefined || value.maxMb === undefined || value.minMb <= value.maxMb,
@@ -157,6 +159,21 @@ function tagsByItem(itemIds: number[]): Map<number, Array<{ id: number; name: st
   return result;
 }
 
+function creditsByItem(itemIds: number[]) {
+  const result = new Map<number, { cast: Array<{ id: number; name: string }>; artists: Array<{ id: number; name: string }> }>();
+  if (!itemIds.length) return result;
+  const rows = database.prepare(`
+    SELECT ip.item_id, ip.role, p.id, p.name FROM item_people ip JOIN people p ON p.id = ip.person_id
+    WHERE ip.item_id IN (${itemIds.map(() => "?").join(",")}) ORDER BY p.name COLLATE NOCASE
+  `).all(...itemIds) as unknown as Array<{ item_id: number; role: "cast" | "artist"; id: number; name: string }>;
+  for (const row of rows) {
+    const credits = result.get(row.item_id) ?? { cast: [], artists: [] };
+    credits[row.role === "cast" ? "cast" : "artists"].push({ id: row.id, name: row.name });
+    result.set(row.item_id, credits);
+  }
+  return result;
+}
+
 export async function registerMediaRoutes(app: FastifyInstance) {
   app.get("/api/items/formats", async (request) => {
     const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
@@ -236,6 +253,14 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       conditions.push("EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id AND it.tag_id = ?)");
       values.push(tagId);
     }
+    for (const personId of new Set(input.cast?.split(",").map(Number) ?? [])) {
+      conditions.push("EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = m.id AND ip.role = 'cast' AND ip.person_id = ?)");
+      values.push(personId);
+    }
+    for (const personId of new Set(input.artists?.split(",").map(Number) ?? [])) {
+      conditions.push("EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = m.id AND ip.role = 'artist' AND ip.person_id = ?)");
+      values.push(personId);
+    }
 
     const where = conditions.join(" AND ");
     const order = input.sort === "recent" ? "m.modified_at_ms DESC, m.id DESC"
@@ -251,7 +276,9 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       ${itemSelect} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
     `).all(...values, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
     const tags = tagsByItem(rows.map((row) => row.id));
-    const items = rows.map((row) => ({ ...row, tags: tags.get(row.id) ?? [] }));
+    const credits = creditsByItem(rows.map((row) => row.id));
+    const items = rows.map((row) => ({ ...row, tags: tags.get(row.id) ?? [],
+      cast: credits.get(row.id)?.cast ?? [], artists: credits.get(row.id)?.artists ?? [] }));
     return { items, total: total.count, page: input.page, pageSize: 48 };
   });
 
@@ -262,7 +289,8 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     const categoryIds = database.prepare("SELECT category_id FROM item_categories WHERE item_id = ?").all(id)
       .map((row) => (row as { category_id: number }).category_id);
     const tags = tagsByItem([id]).get(id) ?? [];
-    return { ...item, category_ids: categoryIds, tags };
+    const credits = creditsByItem([id]).get(id);
+    return { ...item, category_ids: categoryIds, tags, cast: credits?.cast ?? [], artists: credits?.artists ?? [] };
   });
 
   app.patch("/api/items/:id", async (request, reply) => {

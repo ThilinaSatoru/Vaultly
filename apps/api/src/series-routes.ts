@@ -7,6 +7,7 @@ const idsInput = z.array(z.number().int().positive()).max(1000);
 const detailsInput = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(3000).default(""),
+  preferredType: z.enum(["video", "comic", "story", "mixed"]).optional(),
 });
 
 interface SeriesRow {
@@ -14,6 +15,10 @@ interface SeriesRow {
   title: string;
   description: string;
   item_count: number;
+  video_count: number;
+  comic_count: number;
+  story_count: number;
+  preferred_type: "video" | "comic" | "story" | "mixed";
   cover_item_id: number | null;
   cover_item_type: "comic" | "video" | "story" | null;
   cover_item_path: string | null;
@@ -39,9 +44,15 @@ function seriesTags(ids: number[]) {
 
 function getSeries(id: number) {
   const row = database.prepare(`
-    SELECT s.id, s.title, s.description,
+    SELECT s.id, s.title, s.description, s.preferred_type,
       (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
         WHERE si.series_id = s.id AND m.available = 1) AS item_count,
+      (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
+        WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'video') AS video_count,
+      (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
+        WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'comic') AS comic_count,
+      (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
+        WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'story') AS story_count,
       (SELECT m.id FROM series_items si JOIN media_items m ON m.id = si.item_id
         WHERE si.series_id = s.id AND m.available = 1 ORDER BY si.position LIMIT 1) AS cover_item_id,
       (SELECT m.media_type FROM series_items si JOIN media_items m ON m.id = si.item_id
@@ -76,9 +87,15 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       values.push(tagId);
     }
     const rows = database.prepare(`
-      SELECT s.id, s.title, s.description,
+      SELECT s.id, s.title, s.description, s.preferred_type,
         (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
           WHERE si.series_id = s.id AND m.available = 1) AS item_count,
+        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
+          WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'video') AS video_count,
+        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
+          WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'comic') AS comic_count,
+        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
+          WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'story') AS story_count,
         (SELECT m.id FROM series_items si JOIN media_items m ON m.id = si.item_id
           WHERE si.series_id = s.id AND m.available = 1 ORDER BY si.position LIMIT 1) AS cover_item_id,
         (SELECT m.media_type FROM series_items si JOIN media_items m ON m.id = si.item_id
@@ -94,8 +111,9 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/series", async (request, reply) => {
-    const { title, description } = detailsInput.parse(request.body);
-    const result = database.prepare("INSERT INTO series(title, description) VALUES (?, ?)").run(title, description);
+    const { title, description, preferredType } = detailsInput.parse(request.body);
+    const result = database.prepare("INSERT INTO series(title, description, preferred_type) VALUES (?, ?, ?)")
+      .run(title, description, preferredType ?? "mixed");
     return reply.code(201).send(getSeries(Number(result.lastInsertRowid)));
   });
 
@@ -116,9 +134,9 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
 
   app.patch("/api/series/:id", async (request, reply) => {
     const { id } = idInput.parse(request.params);
-    const { title, description } = detailsInput.parse(request.body);
-    const changed = database.prepare("UPDATE series SET title = ?, description = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(title, description, id).changes;
+    const { title, description, preferredType } = detailsInput.parse(request.body);
+    const changed = database.prepare("UPDATE series SET title = ?, description = ?, preferred_type = COALESCE(?, preferred_type), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(title, description, preferredType ?? null, id).changes;
     if (!changed) return reply.code(404).send({ message: "Series or set not found." });
     return getSeries(id);
   });

@@ -77,6 +77,21 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_item_tags_tag_item
     ON item_tags(tag_id, item_id);
 
+  CREATE TABLE IF NOT EXISTS people (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS item_people (
+    item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('cast', 'artist')),
+    PRIMARY KEY (item_id, person_id, role)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_item_people_role_person ON item_people(role, person_id, item_id);
+
   CREATE TABLE IF NOT EXISTS series (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -142,6 +157,11 @@ const rootFolderItems = database.prepare(`
 const correctRootFilename = database.prepare("UPDATE media_items SET filename = ? WHERE id = ?");
 for (const item of rootFolderItems) {
   correctRootFilename.run(item.root_path.split(/[\\/]/).filter(Boolean).at(-1) || item.root_path, item.id);
+}
+
+const seriesColumns = (database.prepare("PRAGMA table_info(series)").all() as Array<{ name: string }>).map((column) => column.name);
+if (!seriesColumns.includes("preferred_type")) {
+  database.exec("ALTER TABLE series ADD COLUMN preferred_type TEXT NOT NULL DEFAULT 'mixed'");
 }
 
 database.exec("CREATE INDEX IF NOT EXISTS idx_media_items_format ON media_items(available, media_type, file_extension)");

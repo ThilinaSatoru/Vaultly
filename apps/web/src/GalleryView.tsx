@@ -1,13 +1,19 @@
 import { BookOpen, ChevronDown, Clapperboard, FolderPlus, Image, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
-import { api, formatCount, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type SeriesSummary, type Tag } from "./media";
+import { BulkActionDialog } from "./BulkActionDialog";
+import { api, formatCount, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
 
 interface GalleryViewProps {
   type?: MediaType;
   search: string;
   categories: Category[];
   tags: Tag[];
+  people: Person[];
+  onTagCreated: (name: string) => Promise<Tag>;
+  onCategoryCreated: (name: string) => Promise<Category>;
+  onPersonCreated: (name: string) => Promise<Person>;
+  onChanged: () => void;
   sources: Array<{ id: number; name: string }>;
   onOpen: (id: number) => void;
   onAddSource: () => void;
@@ -20,7 +26,7 @@ const galleryNames: Record<MediaType, string> = {
   story: "Stories",
 };
 
-function MediaCard({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
+function MediaCard({ item, selected, onSelect, onOpen }: { item: MediaItem; selected: boolean; onSelect: () => void; onOpen: () => void }) {
   const [hovered, setHovered] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
@@ -56,8 +62,10 @@ function MediaCard({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
   };
 
   return (
-    <button
-      className="media-card"
+    <article className={`media-card media-card-selectable${selected ? " is-selected" : ""}`}>
+      <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
+      <button
+      className="media-card-open"
       type="button"
       onClick={onOpen}
       onMouseEnter={startPreview}
@@ -88,15 +96,21 @@ function MediaCard({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
         <h3 title={item.title}>{item.title}</h3>
         <p title={item.relative_path}>{item.source_name} · {item.relative_path}</p>
         {item.tags.length > 0 && <div className="media-card-tags" title={item.tags.map((tag) => tag.name).join(", ")}>{item.tags.slice(0, 3).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}{item.tags.length > 3 && <span className="tag-badge">+{item.tags.length - 3}</span>}</div>}
+        {(item.cast.length > 0 || item.artists.length > 0) && <div className="media-card-people" title={[...item.cast.map((person) => `Cast: ${person.name}`), ...item.artists.map((person) => `Artist: ${person.name}`)].join(" · ")}>{item.cast.length > 0 && <span>Cast: {item.cast.map((person) => person.name).join(", ")}</span>}{item.artists.length > 0 && <span>Artists: {item.artists.map((person) => person.name).join(", ")}</span>}</div>}
         <div className="media-card-meta"><span>{formatSize(item.size_bytes)}</span><span>{item.media_type === "comic" ? `${item.file_count} ${item.file_count === 1 ? "file" : "pages"}` : item.category_names || "Uncategorized"}</span></div>
       </div>
-    </button>
+      </button>
+    </article>
   );
 }
 
-export function GalleryView({ type, search, categories, tags, sources, onOpen, onAddSource, refreshKey }: GalleryViewProps) {
+export function GalleryView({ type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, sources, onOpen, onAddSource, refreshKey }: GalleryViewProps) {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [selectedCastIds, setSelectedCastIds] = useState<number[]>([]);
+  const [selectedArtistIds, setSelectedArtistIds] = useState<number[]>([]);
+  const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [filename, setFilename] = useState("");
   const [pathText, setPathText] = useState("");
   const [debouncedFilename, setDebouncedFilename] = useState("");
@@ -140,6 +154,7 @@ export function GalleryView({ type, search, categories, tags, sources, onOpen, o
   }, [type, selectedType, refreshKey]);
 
   useEffect(() => { setExtension(""); if (type) setSelectedType(""); }, [type]);
+  useEffect(() => { setSelectedItemIds([]); }, [type]);
   useEffect(() => { if (sourceId && !sources.some((source) => String(source.id) === sourceId)) setSourceId(""); }, [sourceId, sources]);
 
   useEffect(() => {
@@ -154,7 +169,12 @@ export function GalleryView({ type, search, categories, tags, sources, onOpen, o
       : current.filter((id) => tags.some((tag) => tag.id === id)));
   }, [tags]);
 
-  useEffect(() => { setPage(0); }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, sort]);
+  useEffect(() => {
+    setSelectedCastIds((current) => current.filter((id) => people.some((person) => person.id === id)));
+    setSelectedArtistIds((current) => current.filter((id) => people.some((person) => person.id === id)));
+  }, [people]);
+
+  useEffect(() => { setPage(0); }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -174,6 +194,8 @@ export function GalleryView({ type, search, categories, tags, sources, onOpen, o
     if (untagged) params.set("untagged", "1");
     if (selectedCategoryIds.length) params.set("categories", selectedCategoryIds.join(","));
     if (selectedTagIds.length) params.set("tags", selectedTagIds.join(","));
+    if (selectedCastIds.length) params.set("cast", selectedCastIds.join(","));
+    if (selectedArtistIds.length) params.set("artists", selectedArtistIds.join(","));
     setLoading(true);
     api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
       .then((data) => { setResult(data); setError(""); })
@@ -184,16 +206,24 @@ export function GalleryView({ type, search, categories, tags, sources, onOpen, o
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, sort, page, refreshKey]);
+  }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
 
   const title = type ? galleryNames[type] : "All media";
-  const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length);
-  const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged].filter(Boolean).length;
+  const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
+  const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
   const clearFilters = () => {
     setFilename(""); setPathText(""); setDebouncedFilename(""); setDebouncedPath("");
     setSelectedType(""); setSourceId(""); setExtension(""); setSeriesFilter("");
     setMinMb(""); setMaxMb(""); setModifiedFrom(""); setModifiedTo("");
-    setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSort("title");
+    setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSelectedCastIds([]); setSelectedArtistIds([]); setSort("title");
+  };
+  const toggleItem = (id: number) => setSelectedItemIds((current) => current.includes(id)
+    ? current.filter((value) => value !== id) : current.length < 500 ? [...current, id] : current);
+  const selectPage = () => setSelectedItemIds((current) => [...new Set([...current, ...(result?.items.map((item) => item.id) ?? [])])].slice(0, 500));
+  const createSeries = async (name: string) => {
+    const created = await api<SeriesSummary>("/api/series", { method: "POST", body: JSON.stringify({ title: name }) });
+    setSeriesOptions((current) => [...current, created].sort((a, b) => a.title.localeCompare(b.title)));
+    return created;
   };
 
   return (
@@ -233,16 +263,23 @@ export function GalleryView({ type, search, categories, tags, sources, onOpen, o
         <label className="gallery-filter-field"><span>Maximum size (MB)</span><input type="number" min="0" step="0.1" value={maxMb} onChange={(event) => setMaxMb(event.target.value)} placeholder="No maximum" /></label>
         <label className="gallery-filter-field"><span>Modified from</span><input type="date" value={modifiedFrom} max={modifiedTo || undefined} onChange={(event) => setModifiedFrom(event.target.value)} /></label>
         <label className="gallery-filter-field"><span>Modified through</span><input type="date" value={modifiedTo} min={modifiedFrom || undefined} onChange={(event) => setModifiedTo(event.target.value)} /></label>
+        <TagCombobox label="Cast (match all)" tags={people} selectedIds={selectedCastIds} onChange={setSelectedCastIds} placeholder="Any cast" />
+        <TagCombobox label="Artists (match all)" tags={people} selectedIds={selectedArtistIds} onChange={setSelectedArtistIds} placeholder="Any artist" />
         <label className="gallery-filter-check"><input type="checkbox" checked={uncategorized} onChange={(event) => { setUncategorized(event.target.checked); if (event.target.checked) setSelectedCategoryIds([]); }} /> Uncategorized only</label>
         <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
       </div>}
+
+      <div className="gallery-selection-bar">
+        <button className="secondary-button" type="button" onClick={selectPage} disabled={!result?.items.length}>Select page</button>
+        {selectedItemIds.length > 0 && <><span>{selectedItemIds.length} selected{selectedItemIds.length >= 500 ? " · limit reached" : ""}</span><button className="primary-button" type="button" onClick={() => setBulkOpen(true)}>Bulk actions</button><button className="gallery-clear-button" type="button" onClick={() => setSelectedItemIds([])}>Clear selection</button></>}
+      </div>
 
       {error && <p className="page-error" role="alert">{error}</p>}
       {loading ? (
         <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading media…</span></div>
       ) : result && result.items.length > 0 ? (
         <>
-          <div className="media-grid">{result.items.map((item) => <MediaCard key={item.id} item={item} onOpen={() => onOpen(item.id)} />)}</div>
+          <div className="media-grid">{result.items.map((item) => <MediaCard key={item.id} item={item} selected={selectedItemIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id)} />)}</div>
           <div className="pagination">
             <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
             <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>
@@ -257,6 +294,7 @@ export function GalleryView({ type, search, categories, tags, sources, onOpen, o
           {!search && !hasFilters && <button className="primary-button" type="button" onClick={onAddSource}>Add source</button>}
         </div>
       )}
+      {bulkOpen && <BulkActionDialog itemIds={selectedItemIds} tags={tags} categories={categories} people={people} series={seriesOptions} onTagCreated={onTagCreated} onCategoryCreated={onCategoryCreated} onPersonCreated={onPersonCreated} onSeriesCreated={createSeries} onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); setSelectedItemIds([]); onChanged(); }} />}
     </section>
   );
 }

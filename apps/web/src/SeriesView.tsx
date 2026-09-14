@@ -1,14 +1,14 @@
 import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Clapperboard, Image, Layers3, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
-import { api, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type Tag } from "./media";
+import { api, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 
 interface SeriesViewProps {
   initialSeriesId?: number | null;
   tags: Tag[];
   onTagCreated: (name: string) => Promise<Tag>;
   onTagsChanged: () => void;
-  onOpenItem: (id: number) => void;
+  onOpenItem: (id: number, context: SeriesViewerContext) => void;
 }
 
 function PreviewImage({ src, retry }: { src: string; retry: boolean }) {
@@ -44,12 +44,27 @@ function itemArtwork(id: number, type: MediaType, relativePath: string) {
   return `/api/items/${id}/thumbnail`;
 }
 
+type SetType = MediaType | "mixed";
+const setSections: Array<{ type: SetType; title: string }> = [
+  { type: "video", title: "Video sets" }, { type: "comic", title: "Comic sets" },
+  { type: "story", title: "Story sets" }, { type: "mixed", title: "Mixed sets" },
+];
+
+function setType(entry: SeriesSummary): SetType {
+  if (!entry.item_count) return entry.preferred_type;
+  const types = [entry.video_count > 0, entry.comic_count > 0, entry.story_count > 0].filter(Boolean).length;
+  if (types > 1) return "mixed";
+  return entry.video_count ? "video" : entry.comic_count ? "comic" : "story";
+}
+
 export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsChanged, onOpenItem }: SeriesViewProps) {
   const [seriesList, setSeriesList] = useState<SeriesSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(initialSeriesId);
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
   const [search, setSearch] = useState("");
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [groupFilter, setGroupFilter] = useState<"all" | SetType>("all");
+  const [preferredType, setPreferredType] = useState<SetType>("mixed");
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -78,6 +93,7 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
       setDetail(result);
       setTitle(result.title);
       setDescription(result.description);
+      setPreferredType(result.preferred_type);
       setError("");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not open this set.");
@@ -102,7 +118,7 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
     if (!title.trim()) return;
     setBusy(true); setError("");
     try {
-      const created = await api<SeriesSummary>("/api/series", { method: "POST", body: JSON.stringify({ title: title.trim(), description: description.trim() }) });
+      const created = await api<SeriesSummary>("/api/series", { method: "POST", body: JSON.stringify({ title: title.trim(), description: description.trim(), preferredType }) });
       await loadList();
       setShowCreate(false);
       setSelectedId(created.id);
@@ -115,7 +131,7 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
     if (!detail) return;
     setBusy(true); setError("");
     try {
-      await api(`/api/series/${detail.id}`, { method: "PATCH", body: JSON.stringify({ title: title.trim(), description: description.trim() }) });
+      await api(`/api/series/${detail.id}`, { method: "PATCH", body: JSON.stringify({ title: title.trim(), description: description.trim(), preferredType }) });
       await Promise.all([loadDetail(detail.id), loadList()]);
       setEditing(false);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not update this set."); }
@@ -180,7 +196,8 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
 
   const visible = seriesList.filter((entry) =>
     (entry.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()) || entry.description.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
-    && selectedTagIds.every((id) => entry.tags.some((tag) => tag.id === id)));
+    && selectedTagIds.every((id) => entry.tags.some((tag) => tag.id === id))
+    && (groupFilter === "all" || setType(entry) === groupFilter));
 
   if (selectedId !== null) return <section className="series-view">
     <button className="series-back" type="button" onClick={() => { setSelectedId(null); setEditing(false); setItemSearch(""); }}><ArrowLeft size={17} /> All series & sets</button>
@@ -189,10 +206,11 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
       <div className="series-hero">
         <Cover series={detail} version={coverVersion} />
         <div className="series-hero-body">
-          <p className="eyebrow">Ordered collection · {detail.item_count} items</p>
+          <p className="eyebrow">{setSections.find((section) => section.type === setType(detail))?.title} · {detail.item_count} items</p>
           {editing ? <form className="series-edit" onSubmit={updateDetails}>
             <input aria-label="Set title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
             <textarea aria-label="Set description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
+            <select aria-label="Preferred content type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></select>
             <div><button className="primary-button" type="submit" disabled={busy}>Save</button><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button></div>
           </form> : <><h1>{detail.title}</h1><p>{detail.description || "A set for related comics, videos, PDFs, and sequels."}</p></>}
           <div className="series-actions">
@@ -211,7 +229,7 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
         {detail.items.map((item, index) => <div className="series-member" key={item.id}>
           <span className="series-member-number">{index + 1}</span>
           <div className="series-member-art">{item.media_type === "video" ? <Clapperboard size={20} /> : item.media_type === "story" ? <BookOpen size={20} /> : <Image size={20} />}<PreviewImage src={itemArtwork(item.id, item.media_type, item.relative_path)} retry={item.media_type === "story"} /></div>
-          <button className="series-member-title" type="button" onClick={() => onOpenItem(item.id)}><strong>{item.title}</strong><span>{item.media_type} · {item.source_name}</span></button>
+          <button className="series-member-title" type="button" onClick={() => onOpenItem(item.id, { seriesId: detail.id, seriesTitle: detail.title, items: detail.items.map((entry) => ({ id: entry.id, title: entry.title })) })}><strong>{item.title}</strong><span>{item.media_type} · {item.source_name}</span></button>
           <div className="series-member-controls">
             <button type="button" title="Move earlier" aria-label={`Move ${item.title} earlier`} disabled={busy || index === 0} onClick={() => { const ids = detail.items.map((entry) => entry.id); [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]]; void updateItems(ids); }}><ArrowUp size={16} /></button>
             <button type="button" title="Move later" aria-label={`Move ${item.title} later`} disabled={busy || index === detail.items.length - 1} onClick={() => { const ids = detail.items.map((entry) => entry.id); [ids[index + 1], ids[index]] = [ids[index], ids[index + 1]]; void updateItems(ids); }}><ArrowDown size={16} /></button>
@@ -232,17 +250,24 @@ export function SeriesView({ initialSeriesId = null, tags, onTagCreated, onTagsC
 
   return <section className="series-view">
     <div className="page-heading"><div><p className="eyebrow">Your library</p><h1>Series & sets</h1><p>Keep sequels and related media together in viewing order. Each set can have its own cover and tags.</p></div>
-      <button className="primary-button" type="button" onClick={() => { setTitle(""); setDescription(""); setError(""); setShowCreate(true); }}><Plus size={18} /> New set</button></div>
+      <button className="primary-button" type="button" onClick={() => { setTitle(""); setDescription(""); setPreferredType(groupFilter === "all" ? "mixed" : groupFilter); setError(""); setShowCreate(true); }}><Plus size={18} /> New set</button></div>
     <div className="series-filters"><div className="series-search"><Search size={17} /><input aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div>
       <TagCombobox label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>
+    <div className="series-type-tabs" role="group" aria-label="Set content type">{(["all", "video", "comic", "story", "mixed"] as const).map((value) =>
+      <button key={value} type="button" className={groupFilter === value ? "active" : ""} onClick={() => setGroupFilter(value)}>{value === "all" ? "All" : value === "story" ? "Stories" : value === "comic" ? "Comics" : value === "video" ? "Videos" : "Mixed"}</button>)}</div>
     {error && <p className="page-error" role="alert">{error}</p>}
-    {loading ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading sets…</div> : visible.length ? <div className="series-grid">{visible.map((entry) =>
-      <button key={entry.id} type="button" className="series-card" onClick={() => setSelectedId(entry.id)}><Cover series={entry} version={coverVersion} /><div className="series-card-body"><h2>{entry.title}</h2><p>{entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.slice(0, 4).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}</div></div></button>)}</div>
+    {loading ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading sets…</div> : visible.length ? setSections.map((section) => {
+      const entries = visible.filter((entry) => setType(entry) === section.type);
+      if (!entries.length) return null;
+      return <div className="series-type-section" key={section.type}><h2>{section.title} <span>{entries.length}</span></h2><div className="series-grid">{entries.map((entry) =>
+        <button key={entry.id} type="button" className="series-card" onClick={() => setSelectedId(entry.id)}><Cover series={entry} version={coverVersion} /><div className="series-card-body"><h2>{entry.title}</h2><p>{entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.slice(0, 4).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}</div></div></button>)}</div></div>;
+    })
       : <div className="gallery-empty"><Layers3 size={38} /><h2>{seriesList.length ? "No matching sets" : "No series or sets yet"}</h2><p>{seriesList.length ? "Try another search or tag combination." : "Create a set, then add related media in the order you want."}</p></div>}
     {showCreate && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><section className="dialog" role="dialog" aria-modal="true" aria-label="Create series or set" onMouseDown={(event) => event.stopPropagation()}>
       <button className="icon-button dialog-close" type="button" onClick={() => setShowCreate(false)} aria-label="Close"><X size={19} /></button><div className="dialog-icon"><Layers3 size={24} /></div><h2>New series or set</h2><p className="dialog-intro">Group any mix of videos, comics, and PDFs without moving your files.</p>
       <form onSubmit={create}><label htmlFor="series-title">Title</label><input id="series-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required />
         <label htmlFor="series-description">Description</label><textarea id="series-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
+        <label htmlFor="series-type">Content type</label><select id="series-type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></select>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>Create set</button></div></form>
     </section></div>}

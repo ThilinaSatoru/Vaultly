@@ -17,15 +17,17 @@ import {
   Search,
   Tag as TagIcon,
   Trash2,
+  Users,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CategoriesView } from "./CategoriesView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
+import { PeopleView } from "./PeopleView";
 import { SeriesView } from "./SeriesView";
 import { TagsView } from "./TagsView";
-import { api, formatCount, type Category, type MediaType, type Tag } from "./media";
+import { api, formatCount, type Category, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
 
 type SourceStatus = "idle" | "scanning" | "ready" | "error";
 
@@ -42,7 +44,7 @@ interface LibrarySource {
   story_count: number;
 }
 
-type Section = "all" | MediaType | "series" | "categories" | "tags" | "sources";
+type Section = "all" | MediaType | "series" | "categories" | "tags" | "people" | "sources";
 
 const formatScanDate = (value: string | null) => {
   if (!value) return "Not scanned yet";
@@ -134,7 +136,7 @@ function AddSourceDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
 
           <div className="mixed-note">
             <Grid2X2 size={18} />
-            <div><strong>Mixed media is supported</strong><span>Every nested folder is scanned and classified automatically.</span></div>
+            <div><strong>Mixed media is supported</strong><span>Nested folders are scanned. Existing category, tag, and known cast/artist names in filenames are added automatically.</span></div>
           </div>
 
           {error && <p className="form-error" role="alert">{error}</p>}
@@ -234,13 +236,16 @@ export function App() {
   const [sources, setSources] = useState<LibrarySource[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
+  const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [viewerSeriesContext, setViewerSeriesContext] = useState<SeriesViewerContext | null>(null);
   const [selectedSeriesId, setSelectedSeriesId] = useState<number | null>(null);
   const [seriesNavigationKey, setSeriesNavigationKey] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const wasScanning = useRef(false);
 
   const loadSources = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -264,6 +269,11 @@ export function App() {
     catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load tags."); }
   }, []);
 
+  const loadPeople = useCallback(async () => {
+    try { setPeople(await api<Person[]>("/api/people")); }
+    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load people."); }
+  }, []);
+
   const createTag = async (name: string): Promise<Tag> => {
     const created = await api<Tag>("/api/tags", { method: "POST", body: JSON.stringify({ name }) });
     setTags((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
@@ -276,11 +286,25 @@ export function App() {
     return created;
   };
 
+  const createPerson = async (name: string): Promise<Person> => {
+    const created = await api<Person>("/api/people", { method: "POST", body: JSON.stringify({ name }) });
+    setPeople((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
+  };
+
   useEffect(() => { void loadSources(); }, [loadSources]);
   useEffect(() => { void loadCategories(); }, [loadCategories]);
   useEffect(() => { void loadTags(); }, [loadTags]);
+  useEffect(() => { void loadPeople(); }, [loadPeople]);
 
   const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
+  useEffect(() => {
+    if (wasScanning.current && !isScanning) {
+      setRefreshKey((value) => value + 1);
+      void loadCategories(); void loadTags(); void loadPeople();
+    }
+    wasScanning.current = isScanning;
+  }, [isScanning, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
     if (!isScanning) return;
     const timer = window.setInterval(() => void loadSources(true), 1200);
@@ -289,7 +313,7 @@ export function App() {
 
   const totalItems = sources.reduce((total, source) => total + source.item_count, 0);
   const selectSection = (nextSection: Section) => { setSection(nextSection); setSearch(""); setSelectedSeriesId(null); };
-  const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); };
+  const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
 
   return (
     <div className="app-shell">
@@ -305,6 +329,7 @@ export function App() {
           <p>Manage</p>
           <button className={section === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("categories")}><Folder size={19} /> Categories</button>
           <button className={section === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("tags")}><TagIcon size={19} /> Tags</button>
+          <button className={section === "people" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("people")}><Users size={19} /> People</button>
           <button className={section === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("sources")}><HardDrive size={19} /> Sources</button>
         </nav>
       </aside>
@@ -318,7 +343,7 @@ export function App() {
         <div className="content">
           {section === "sources" ? <>
           <div className="page-heading">
-            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Vaultly scans nested folders and sorts supported media automatically.</p></div>
+            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames.</p></div>
             <button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button>
           </div>
 
@@ -334,7 +359,7 @@ export function App() {
           {loading ? (
             <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading sources…</span></div>
           ) : sources.length > 0 ? (
-            <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} onChanged={() => loadSources(true)} />)}</div>
+            <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} onChanged={() => { void loadSources(true); refreshMedia(); }} />)}</div>
           ) : (
             <section className="empty-state">
               <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
@@ -345,19 +370,26 @@ export function App() {
             </section>
           )}
           </> : section === "series" ? (
-            <SeriesView key={seriesNavigationKey} initialSeriesId={selectedSeriesId} tags={tags} onTagCreated={createTag} onTagsChanged={() => void loadTags()} onOpenItem={setSelectedItemId} />
+            <SeriesView key={seriesNavigationKey} initialSeriesId={selectedSeriesId} tags={tags} onTagCreated={createTag} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => { setViewerSeriesContext(context); setSelectedItemId(id); }} />
           ) : section === "categories" ? (
             <CategoriesView categories={categories} onChanged={() => { void loadCategories(); setRefreshKey((value) => value + 1); }} />
           ) : section === "tags" ? (
             <TagsView tags={tags} onChanged={() => { void loadTags(); setRefreshKey((value) => value + 1); }} />
+          ) : section === "people" ? (
+            <PeopleView people={people} onChanged={() => { void loadPeople(); setRefreshKey((value) => value + 1); }} />
           ) : (
             <GalleryView
               type={section === "all" ? undefined : section}
               search={search}
               categories={categories}
               tags={tags}
+              people={people}
+              onTagCreated={createTag}
+              onCategoryCreated={createCategory}
+              onPersonCreated={createPerson}
+              onChanged={refreshMedia}
               sources={sources.map((source) => ({ id: source.id, name: source.name }))}
-              onOpen={setSelectedItemId}
+              onOpen={(id) => { setViewerSeriesContext(null); setSelectedItemId(id); }}
               onAddSource={() => { setSection("sources"); setShowAddSource(true); }}
               refreshKey={refreshKey}
             />
@@ -366,7 +398,7 @@ export function App() {
       </main>
 
       {showAddSource && <AddSourceDialog onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
-      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setSection("series"); }} onClose={() => setSelectedItemId(null)} onChanged={refreshMedia} />}
+      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} onNavigateItem={setSelectedItemId} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setViewerSeriesContext(null); setSection("series"); }} onClose={() => { setSelectedItemId(null); setViewerSeriesContext(null); }} onChanged={refreshMedia} />}
     </div>
   );
 }

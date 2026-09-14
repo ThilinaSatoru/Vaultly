@@ -14,6 +14,8 @@ export interface MediaItem {
   file_count: number;
   category_names: string;
   tags: Tag[];
+  cast: Person[];
+  artists: Person[];
 }
 
 export interface MediaDetail extends MediaItem {
@@ -32,6 +34,13 @@ export interface Tag {
   item_count?: number;
 }
 
+export interface Person {
+  id: number;
+  name: string;
+  cast_count?: number;
+  artist_count?: number;
+}
+
 export interface ItemPage {
   items: MediaItem[];
   total: number;
@@ -44,6 +53,10 @@ export interface SeriesSummary {
   title: string;
   description: string;
   item_count: number;
+  video_count: number;
+  comic_count: number;
+  story_count: number;
+  preferred_type: MediaType | "mixed";
   cover_item_id: number | null;
   cover_item_type: MediaType | null;
   cover_item_path: string | null;
@@ -65,6 +78,12 @@ export interface SeriesItem {
 
 export interface SeriesDetail extends SeriesSummary {
   items: SeriesItem[];
+}
+
+export interface SeriesViewerContext {
+  seriesId: number;
+  seriesTitle: string;
+  items: Array<{ id: number; title: string }>;
 }
 
 export const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {

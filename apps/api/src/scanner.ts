@@ -1,6 +1,7 @@
 import { opendir, stat } from "node:fs/promises";
 import path from "node:path";
 import { database } from "./database.js";
+import { FilenameMetadataMatcher } from "./filename-metadata.js";
 
 const videoExtensions = new Set([
   ".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg",
@@ -115,6 +116,20 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
       database.exec("BEGIN IMMEDIATE");
       try {
         database.prepare("UPDATE media_items SET available = 0 WHERE source_id = ?").run(sourceId);
+        const categories = database.prepare("SELECT id, name FROM categories").all() as Array<{ id: number; name: string }>;
+        const tags = database.prepare("SELECT id, name FROM tags").all() as Array<{ id: number; name: string }>;
+        const people = database.prepare(`
+          SELECT p.id, p.name,
+            MAX(CASE WHEN ip.role = 'cast' THEN 1 ELSE 0 END) AS is_cast,
+            MAX(CASE WHEN ip.role = 'artist' THEN 1 ELSE 0 END) AS is_artist
+          FROM people p LEFT JOIN item_people ip ON ip.person_id = p.id GROUP BY p.id
+        `).all() as Array<{ id: number; name: string; is_cast: number; is_artist: number }>;
+        const categoryMatcher = new FilenameMetadataMatcher(categories);
+        const tagMatcher = new FilenameMetadataMatcher(tags);
+        const peopleMatcher = new FilenameMetadataMatcher(people.filter((person) => person.is_cast || person.is_artist));
+        const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) VALUES (?, ?)");
+        const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) VALUES (?, ?)");
+        const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");
         const upsert = database.prepare(`
           INSERT INTO media_items (
             source_id, media_type, title, filename, file_extension, relative_path,
@@ -128,10 +143,11 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             file_count = excluded.file_count,
             available = 1,
             updated_at = CURRENT_TIMESTAMP
+          RETURNING id
         `);
 
         for (const item of items) {
-          upsert.run(
+          const row = upsert.get(
             sourceId,
             item.mediaType,
             item.title,
@@ -141,7 +157,17 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             item.sizeBytes,
             item.modifiedAtMs,
             item.fileCount,
-          );
+          ) as { id: number };
+          for (const category of categoryMatcher.match(item.filename, item.fileExtension)) {
+            addCategory.run(row.id, category.id);
+          }
+          for (const tag of tagMatcher.match(item.filename, item.fileExtension)) {
+            addTag.run(row.id, tag.id);
+          }
+          for (const person of peopleMatcher.match(item.filename, item.fileExtension)) {
+            if (person.is_cast) addPerson.run(row.id, person.id, "cast");
+            if (person.is_artist) addPerson.run(row.id, person.id, "artist");
+          }
         }
 
         database.prepare(`
