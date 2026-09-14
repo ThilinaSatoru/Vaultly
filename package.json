@@ -1,0 +1,15 @@
+{
+  "name": "vaultly",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"pnpm --filter @vaultly/api dev\" \"pnpm --filter @vaultly/web dev\"",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
