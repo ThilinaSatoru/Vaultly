@@ -36,4 +36,7 @@ test("classifies mixed and nested media without indexing individual comic pages"
     ["video", "Sample Movie"],
   ]);
   expect(items.find((item) => item.title === "Issue 01")?.fileCount).toBe(2);
+  expect(items.find((item) => item.title === "Issue 01")?.fileExtension).toBe("");
+  expect(items.find((item) => item.title === "My Story")?.filename).toBe("My Story.pdf");
+  expect(items.find((item) => item.title === "My Story")?.fileExtension).toBe("pdf");
 });

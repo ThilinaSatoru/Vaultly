@@ -1,11 +1,14 @@
-import { BookOpen, ChevronDown, Clapperboard, FolderPlus, Image, LoaderCircle, Play, Search } from "lucide-react";
+import { BookOpen, ChevronDown, Clapperboard, FolderPlus, Image, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { api, formatCount, formatSize, type Category, type ItemPage, type MediaItem, type MediaType } from "./media";
+import { TagCombobox } from "./TagCombobox";
+import { api, formatCount, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type SeriesSummary, type Tag } from "./media";
 
 interface GalleryViewProps {
   type?: MediaType;
   search: string;
   categories: Category[];
+  tags: Tag[];
+  sources: Array<{ id: number; name: string }>;
   onOpen: (id: number) => void;
   onAddSource: () => void;
   refreshKey: number;
@@ -84,40 +87,114 @@ function MediaCard({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
       <div className="media-card-body">
         <h3 title={item.title}>{item.title}</h3>
         <p title={item.relative_path}>{item.source_name} · {item.relative_path}</p>
+        {item.tags.length > 0 && <div className="media-card-tags" title={item.tags.map((tag) => tag.name).join(", ")}>{item.tags.slice(0, 3).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}{item.tags.length > 3 && <span className="tag-badge">+{item.tags.length - 3}</span>}</div>}
         <div className="media-card-meta"><span>{formatSize(item.size_bytes)}</span><span>{item.media_type === "comic" ? `${item.file_count} ${item.file_count === 1 ? "file" : "pages"}` : item.category_names || "Uncategorized"}</span></div>
       </div>
     </button>
   );
 }
 
-export function GalleryView({ type, search, categories, onOpen, onAddSource, refreshKey }: GalleryViewProps) {
-  const [categoryId, setCategoryId] = useState("");
-  const [sort, setSort] = useState<"title" | "recent" | "size">("title");
+export function GalleryView({ type, search, categories, tags, sources, onOpen, onAddSource, refreshKey }: GalleryViewProps) {
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [filename, setFilename] = useState("");
+  const [pathText, setPathText] = useState("");
+  const [debouncedFilename, setDebouncedFilename] = useState("");
+  const [debouncedPath, setDebouncedPath] = useState("");
+  const [selectedType, setSelectedType] = useState<MediaType | "">("");
+  const [sourceId, setSourceId] = useState("");
+  const [extension, setExtension] = useState("");
+  const [seriesFilter, setSeriesFilter] = useState("");
+  const [minMb, setMinMb] = useState("");
+  const [maxMb, setMaxMb] = useState("");
+  const [modifiedFrom, setModifiedFrom] = useState("");
+  const [modifiedTo, setModifiedTo] = useState("");
+  const [uncategorized, setUncategorized] = useState(false);
+  const [untagged, setUntagged] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [formats, setFormats] = useState<Array<{ extension: string; item_count: number }>>([]);
+  const [seriesOptions, setSeriesOptions] = useState<SeriesSummary[]>([]);
+  const [sort, setSort] = useState<"title" | "filename" | "recent" | "oldest" | "size" | "smallest">("title");
   const [page, setPage] = useState(0);
   const [result, setResult] = useState<ItemPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => { setPage(0); }, [type, search, categoryId, sort]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setDebouncedFilename(filename); setDebouncedPath(pathText); }, 180);
+    return () => window.clearTimeout(timer);
+  }, [filename, pathText]);
+
+  useEffect(() => {
+    let active = true;
+    const effectiveType = type || selectedType;
+    void Promise.all([
+      api<Array<{ extension: string; item_count: number }>>(`/api/items/formats${effectiveType ? `?type=${effectiveType}` : ""}`),
+      api<SeriesSummary[]>("/api/series"),
+    ]).then(([nextFormats, nextSeries]) => {
+      if (!active) return;
+      setFormats(nextFormats);
+      setSeriesOptions(nextSeries);
+    }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load filter choices."); });
+    return () => { active = false; };
+  }, [type, selectedType, refreshKey]);
+
+  useEffect(() => { setExtension(""); if (type) setSelectedType(""); }, [type]);
+  useEffect(() => { if (sourceId && !sources.some((source) => String(source.id) === sourceId)) setSourceId(""); }, [sourceId, sources]);
+
+  useEffect(() => {
+    setSelectedCategoryIds((current) => current.every((id) => categories.some((category) => category.id === id))
+      ? current
+      : current.filter((id) => categories.some((category) => category.id === id)));
+  }, [categories]);
+
+  useEffect(() => {
+    setSelectedTagIds((current) => current.every((id) => tags.some((tag) => tag.id === id))
+      ? current
+      : current.filter((id) => tags.some((tag) => tag.id === id)));
+  }, [tags]);
+
+  useEffect(() => { setPage(0); }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({ page: String(page), sort });
-    if (type) params.set("type", type);
+    if (type || selectedType) params.set("type", type || selectedType);
     if (search.trim()) params.set("q", search.trim());
-    if (categoryId) params.set("category", categoryId);
+    if (debouncedFilename.trim()) params.set("filename", debouncedFilename.trim());
+    if (debouncedPath.trim()) params.set("path", debouncedPath.trim());
+    if (sourceId) params.set("source", sourceId);
+    if (extension) params.set("extension", extension);
+    if (seriesFilter) params.set("series", seriesFilter);
+    if (minMb) params.set("minMb", minMb);
+    if (maxMb) params.set("maxMb", maxMb);
+    if (modifiedFrom) params.set("modifiedFrom", modifiedFrom);
+    if (modifiedTo) params.set("modifiedTo", modifiedTo);
+    if (uncategorized) params.set("uncategorized", "1");
+    if (untagged) params.set("untagged", "1");
+    if (selectedCategoryIds.length) params.set("categories", selectedCategoryIds.join(","));
+    if (selectedTagIds.length) params.set("tags", selectedTagIds.join(","));
     setLoading(true);
     api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
       .then((data) => { setResult(data); setError(""); })
       .catch((requestError) => {
         if (controller.signal.aborted) return;
+        setResult(null);
         setError(requestError instanceof Error ? requestError.message : "Could not load media.");
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [type, search, categoryId, sort, page, refreshKey]);
+  }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, sort, page, refreshKey]);
 
   const title = type ? galleryNames[type] : "All media";
+  const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length);
+  const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged].filter(Boolean).length;
+  const clearFilters = () => {
+    setFilename(""); setPathText(""); setDebouncedFilename(""); setDebouncedPath("");
+    setSelectedType(""); setSourceId(""); setExtension(""); setSeriesFilter("");
+    setMinMb(""); setMaxMb(""); setModifiedFrom(""); setModifiedTo("");
+    setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSort("title");
+  };
 
   return (
     <section className="gallery-view">
@@ -127,24 +204,38 @@ export function GalleryView({ type, search, categories, onOpen, onAddSource, ref
       </div>
 
       <div className="gallery-toolbar">
-        <label className="select-wrap">
-          <span>Category</span>
-          <select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>
-            <option value="">All categories</option>
-            {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-          </select>
-          <ChevronDown size={16} />
-        </label>
+        <label className="gallery-filter-field"><span>File name</span><input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Search filenames" aria-label="File name contains" /></label>
+        <TagCombobox label="Categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized} placeholder="All categories" />
+        <TagCombobox label="Tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged} placeholder="All tags" />
         <label className="select-wrap">
           <span>Sort</span>
           <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
             <option value="title">Title A–Z</option>
+            <option value="filename">Filename A–Z</option>
             <option value="recent">Recently modified</option>
+            <option value="oldest">Oldest modified</option>
             <option value="size">Largest first</option>
+            <option value="smallest">Smallest first</option>
           </select>
           <ChevronDown size={16} />
         </label>
+        <button className={`gallery-more-button${advancedOpen ? " is-open" : ""}`} type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal size={16} /> More filters{extraFilterCount > 0 ? ` (${extraFilterCount})` : ""}</button>
+        {hasFilters && <button className="gallery-clear-button" type="button" onClick={clearFilters}><X size={15} /> Clear filters</button>}
       </div>
+
+      {advancedOpen && <div className="gallery-advanced" aria-label="More filters">
+        {!type && <label className="gallery-filter-field"><span>Media type</span><select value={selectedType} onChange={(event) => { setSelectedType(event.target.value as MediaType | ""); setExtension(""); }}><option value="">All types</option><option value="comic">Comics</option><option value="video">Videos</option><option value="story">PDF stories</option></select></label>}
+        <label className="gallery-filter-field"><span>Source folder</span><select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
+        <label className="gallery-filter-field"><span>File format</span><select value={extension} onChange={(event) => setExtension(event.target.value)}><option value="">All formats</option>{formats.map((format) => <option key={format.extension || "folder"} value={format.extension || "folder"}>{format.extension ? `.${format.extension.toUpperCase()}` : "Image folder"} ({format.item_count})</option>)}</select></label>
+        <label className="gallery-filter-field"><span>Series / set</span><select value={seriesFilter} onChange={(event) => setSeriesFilter(event.target.value)}><option value="">All items</option><option value="grouped">In any set</option><option value="ungrouped">Not in a set</option>{seriesOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>
+        <label className="gallery-filter-field"><span>Path contains</span><input value={pathText} onChange={(event) => setPathText(event.target.value)} placeholder="Folder or relative path" /></label>
+        <label className="gallery-filter-field"><span>Minimum size (MB)</span><input type="number" min="0" step="0.1" value={minMb} onChange={(event) => setMinMb(event.target.value)} placeholder="No minimum" /></label>
+        <label className="gallery-filter-field"><span>Maximum size (MB)</span><input type="number" min="0" step="0.1" value={maxMb} onChange={(event) => setMaxMb(event.target.value)} placeholder="No maximum" /></label>
+        <label className="gallery-filter-field"><span>Modified from</span><input type="date" value={modifiedFrom} max={modifiedTo || undefined} onChange={(event) => setModifiedFrom(event.target.value)} /></label>
+        <label className="gallery-filter-field"><span>Modified through</span><input type="date" value={modifiedTo} min={modifiedFrom || undefined} onChange={(event) => setModifiedTo(event.target.value)} /></label>
+        <label className="gallery-filter-check"><input type="checkbox" checked={uncategorized} onChange={(event) => { setUncategorized(event.target.checked); if (event.target.checked) setSelectedCategoryIds([]); }} /> Uncategorized only</label>
+        <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
+      </div>}
 
       {error && <p className="page-error" role="alert">{error}</p>}
       {loading ? (
@@ -161,9 +252,9 @@ export function GalleryView({ type, search, categories, onOpen, onAddSource, ref
       ) : (
         <div className="gallery-empty">
           {search ? <Search size={34} /> : <FolderPlus size={34} />}
-          <h2>{search || categoryId ? "No matching media" : `No ${type ? title.toLowerCase() : "media"} indexed yet`}</h2>
-          <p>{search || categoryId ? "Try another search or category." : "Add a source folder, or scan an existing source again."}</p>
-          {!search && !categoryId && <button className="primary-button" type="button" onClick={onAddSource}>Add source</button>}
+          <h2>{search || hasFilters ? "No matching media" : `No ${type ? title.toLowerCase() : "media"} indexed yet`}</h2>
+          <p>{search || hasFilters ? "Try adjusting the filename, category, tag, or other filters." : "Add a source folder, or scan an existing source again."}</p>
+          {!search && !hasFilters && <button className="primary-button" type="button" onClick={onAddSource}>Add source</button>}
         </div>
       )}
     </section>

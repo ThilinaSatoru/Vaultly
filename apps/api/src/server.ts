@@ -7,10 +7,12 @@ import { database, type SourceRow } from "./database.js";
 import { pickDirectory } from "./folder-picker.js";
 import { scanSource } from "./scanner.js";
 import { registerMediaRoutes } from "./media-routes.js";
+import { registerSeriesRoutes } from "./series-routes.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
 await app.register(registerMediaRoutes);
+await app.register(registerSeriesRoutes);
 
 const sourceInput = z.object({
   name: z.string().trim().min(1).max(80).optional(),

@@ -62,7 +62,89 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_item_categories_category_item
     ON item_categories(category_id, item_id);
 
+  CREATE TABLE IF NOT EXISTS tags (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS item_tags (
+    item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (item_id, tag_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_item_tags_tag_item
+    ON item_tags(tag_id, item_id);
+
+  CREATE TABLE IF NOT EXISTS series (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    cover_data BLOB,
+    cover_mime TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS series_items (
+    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (series_id, item_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_series_items_item ON series_items(item_id);
+  CREATE INDEX IF NOT EXISTS idx_series_items_order ON series_items(series_id, position);
+
+  CREATE TABLE IF NOT EXISTS series_tags (
+    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (series_id, tag_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_series_tags_tag ON series_tags(tag_id, series_id);
+
 `);
+
+// Filename and format are stored separately from the relative path so a filename
+// filter never matches an unrelated parent directory.
+const mediaColumns = (database.prepare("PRAGMA table_info(media_items)").all() as Array<{ name: string }>).map((column) => column.name);
+const needsFilename = !mediaColumns.includes("filename");
+const needsExtension = !mediaColumns.includes("file_extension");
+if (needsFilename) database.exec("ALTER TABLE media_items ADD COLUMN filename TEXT NOT NULL DEFAULT ''");
+if (needsExtension) database.exec("ALTER TABLE media_items ADD COLUMN file_extension TEXT NOT NULL DEFAULT ''");
+if (needsFilename || needsExtension) {
+  const knownExtensions = new Set(["mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "mpeg", "mpg", "pdf", "cbz", "zip"]);
+  const rows = database.prepare(`
+    SELECT m.id, m.relative_path, s.root_path FROM media_items m JOIN sources s ON s.id = m.source_id
+  `).all() as Array<{ id: number; relative_path: string; root_path: string }>;
+  const update = database.prepare("UPDATE media_items SET filename = ?, file_extension = ? WHERE id = ?");
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      const filename = (row.relative_path === "." ? row.root_path : row.relative_path).split(/[\\/]/).filter(Boolean).at(-1) || row.relative_path;
+      const suffix = filename.includes(".") ? filename.slice(filename.lastIndexOf(".") + 1).toLowerCase() : "";
+      update.run(filename, knownExtensions.has(suffix) ? suffix : "", row.id);
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+// Earlier indexes can include an image-folder comic at the source root.
+const rootFolderItems = database.prepare(`
+  SELECT m.id, s.root_path FROM media_items m JOIN sources s ON s.id = m.source_id
+  WHERE m.relative_path = '.' AND m.filename = '.'
+`).all() as Array<{ id: number; root_path: string }>;
+const correctRootFilename = database.prepare("UPDATE media_items SET filename = ? WHERE id = ?");
+for (const item of rootFolderItems) {
+  correctRootFilename.run(item.root_path.split(/[\\/]/).filter(Boolean).at(-1) || item.root_path, item.id);
+}
+
+database.exec("CREATE INDEX IF NOT EXISTS idx_media_items_format ON media_items(available, media_type, file_extension)");
 
 database.exec("PRAGMA optimize");
 

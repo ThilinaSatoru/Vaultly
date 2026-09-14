@@ -6,11 +6,14 @@ export interface MediaItem {
   source_name: string;
   media_type: MediaType;
   title: string;
+  filename: string;
+  file_extension: string;
   relative_path: string;
   size_bytes: number;
   modified_at_ms: number;
   file_count: number;
   category_names: string;
+  tags: Tag[];
 }
 
 export interface MediaDetail extends MediaItem {
@@ -23,11 +26,45 @@ export interface Category {
   item_count: number;
 }
 
+export interface Tag {
+  id: number;
+  name: string;
+  item_count?: number;
+}
+
 export interface ItemPage {
   items: MediaItem[];
   total: number;
   page: number;
   pageSize: number;
+}
+
+export interface SeriesSummary {
+  id: number;
+  title: string;
+  description: string;
+  item_count: number;
+  cover_item_id: number | null;
+  cover_item_type: MediaType | null;
+  cover_item_path: string | null;
+  has_cover: number;
+  tags: Tag[];
+}
+
+export interface SeriesItem {
+  id: number;
+  title: string;
+  media_type: MediaType;
+  relative_path: string;
+  size_bytes: number;
+  modified_at_ms: number;
+  file_count: number;
+  source_name: string;
+  position: number;
+}
+
+export interface SeriesDetail extends SeriesSummary {
+  items: SeriesItem[];
 }
 
 export const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {

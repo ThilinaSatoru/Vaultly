@@ -12,6 +12,8 @@ const comicArchiveExtensions = new Set([".cbz", ".zip"]);
 interface ScannedItem {
   mediaType: "comic" | "video" | "story";
   title: string;
+  filename: string;
+  fileExtension: string;
   relativePath: string;
   sizeBytes: number;
   modifiedAtMs: number;
@@ -64,6 +66,8 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
       items.push({
         mediaType,
         title: titleFromFilename(entry.name),
+        filename: entry.name,
+        fileExtension: extension.slice(1),
         relativePath: path.relative(rootPath, absolutePath),
         sizeBytes: fileStat.size,
         modifiedAtMs: Math.round(fileStat.mtimeMs),
@@ -82,6 +86,8 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
       items.push({
         mediaType: "comic",
         title: currentDirectory === rootPath ? path.basename(rootPath) : path.basename(currentDirectory),
+        filename: path.basename(currentDirectory),
+        fileExtension: "",
         relativePath: relativeDirectory,
         sizeBytes: totalSize,
         modifiedAtMs: Math.round(latestModification),
@@ -111,9 +117,12 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
         database.prepare("UPDATE media_items SET available = 0 WHERE source_id = ?").run(sourceId);
         const upsert = database.prepare(`
           INSERT INTO media_items (
-            source_id, media_type, title, relative_path, size_bytes, modified_at_ms, file_count, available
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            source_id, media_type, title, filename, file_extension, relative_path,
+            size_bytes, modified_at_ms, file_count, available
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
           ON CONFLICT(source_id, media_type, relative_path) DO UPDATE SET
+            filename = excluded.filename,
+            file_extension = excluded.file_extension,
             size_bytes = excluded.size_bytes,
             modified_at_ms = excluded.modified_at_ms,
             file_count = excluded.file_count,
@@ -126,6 +135,8 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             sourceId,
             item.mediaType,
             item.title,
+            item.filename,
+            item.fileExtension,
             item.relativePath,
             item.sizeBytes,
             item.modifiedAtMs,

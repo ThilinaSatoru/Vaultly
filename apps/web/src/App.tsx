@@ -9,11 +9,13 @@ import {
   HardDrive,
   Image,
   Library,
+  Layers3,
   LoaderCircle,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
+  Tag as TagIcon,
   Trash2,
   X,
 } from "lucide-react";
@@ -21,7 +23,9 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { CategoriesView } from "./CategoriesView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
-import { api, formatCount, type Category, type MediaType } from "./media";
+import { SeriesView } from "./SeriesView";
+import { TagsView } from "./TagsView";
+import { api, formatCount, type Category, type MediaType, type Tag } from "./media";
 
 type SourceStatus = "idle" | "scanning" | "ready" | "error";
 
@@ -38,7 +42,7 @@ interface LibrarySource {
   story_count: number;
 }
 
-type Section = "all" | MediaType | "categories" | "sources";
+type Section = "all" | MediaType | "series" | "categories" | "tags" | "sources";
 
 const formatScanDate = (value: string | null) => {
   if (!value) return "Not scanned yet";
@@ -229,10 +233,13 @@ export function App() {
   const [search, setSearch] = useState("");
   const [sources, setSources] = useState<LibrarySource[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [selectedSeriesId, setSelectedSeriesId] = useState<number | null>(null);
+  const [seriesNavigationKey, setSeriesNavigationKey] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const loadSources = useCallback(async (quiet = false) => {
@@ -252,8 +259,26 @@ export function App() {
     catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load categories."); }
   }, []);
 
+  const loadTags = useCallback(async () => {
+    try { setTags(await api<Tag[]>("/api/tags")); }
+    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load tags."); }
+  }, []);
+
+  const createTag = async (name: string): Promise<Tag> => {
+    const created = await api<Tag>("/api/tags", { method: "POST", body: JSON.stringify({ name }) });
+    setTags((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
+  };
+
+  const createCategory = async (name: string): Promise<Category> => {
+    const created = await api<Category>("/api/categories", { method: "POST", body: JSON.stringify({ name }) });
+    setCategories((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
+  };
+
   useEffect(() => { void loadSources(); }, [loadSources]);
   useEffect(() => { void loadCategories(); }, [loadCategories]);
+  useEffect(() => { void loadTags(); }, [loadTags]);
 
   const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
   useEffect(() => {
@@ -263,8 +288,8 @@ export function App() {
   }, [isScanning, loadSources]);
 
   const totalItems = sources.reduce((total, source) => total + source.item_count, 0);
-  const selectSection = (nextSection: Section) => { setSection(nextSection); setSearch(""); };
-  const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); };
+  const selectSection = (nextSection: Section) => { setSection(nextSection); setSearch(""); setSelectedSeriesId(null); };
+  const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); };
 
   return (
     <div className="app-shell">
@@ -276,8 +301,10 @@ export function App() {
           <button className={section === "comic" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("comic")}><Image size={19} /> Comics</button>
           <button className={section === "video" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("video")}><Clapperboard size={19} /> Videos</button>
           <button className={section === "story" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("story")}><BookOpen size={19} /> Stories</button>
+          <button className={section === "series" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("series")}><Layers3 size={19} /> Series & sets</button>
           <p>Manage</p>
           <button className={section === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("categories")}><Folder size={19} /> Categories</button>
+          <button className={section === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("tags")}><TagIcon size={19} /> Tags</button>
           <button className={section === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("sources")}><HardDrive size={19} /> Sources</button>
         </nav>
       </aside>
@@ -317,13 +344,19 @@ export function App() {
               <span>Nothing is uploaded or moved.</span>
             </section>
           )}
-          </> : section === "categories" ? (
+          </> : section === "series" ? (
+            <SeriesView key={seriesNavigationKey} initialSeriesId={selectedSeriesId} tags={tags} onTagCreated={createTag} onTagsChanged={() => void loadTags()} onOpenItem={setSelectedItemId} />
+          ) : section === "categories" ? (
             <CategoriesView categories={categories} onChanged={() => { void loadCategories(); setRefreshKey((value) => value + 1); }} />
+          ) : section === "tags" ? (
+            <TagsView tags={tags} onChanged={() => { void loadTags(); setRefreshKey((value) => value + 1); }} />
           ) : (
             <GalleryView
               type={section === "all" ? undefined : section}
               search={search}
               categories={categories}
+              tags={tags}
+              sources={sources.map((source) => ({ id: source.id, name: source.name }))}
               onOpen={setSelectedItemId}
               onAddSource={() => { setSection("sources"); setShowAddSource(true); }}
               refreshKey={refreshKey}
@@ -333,7 +366,7 @@ export function App() {
       </main>
 
       {showAddSource && <AddSourceDialog onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
-      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} categories={categories} onClose={() => setSelectedItemId(null)} onChanged={refreshMedia} />}
+      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setSection("series"); }} onClose={() => setSelectedItemId(null)} onChanged={refreshMedia} />}
     </div>
   );
 }

@@ -11,13 +11,31 @@ const pageInput = z.object({
   id: z.coerce.number().int().positive(),
   page: z.coerce.number().int().nonnegative(),
 });
+const idListInput = z.string().regex(/^\d+(,\d+)*$/).max(500)
+  .refine((value) => value.split(",").length <= 50);
+const dateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => !Number.isNaN(new Date(`${value}T00:00:00`).getTime()));
 const listInput = z.object({
   type: z.enum(["comic", "video", "story"]).optional(),
   q: z.string().trim().max(200).optional(),
+  filename: z.string().trim().max(200).optional(),
+  path: z.string().trim().max(200).optional(),
+  source: z.coerce.number().int().positive().optional(),
+  extension: z.union([z.literal("folder"), z.string().regex(/^[a-z0-9]{1,10}$/)]).optional(),
+  minMb: z.coerce.number().finite().nonnegative().max(1_000_000).optional(),
+  maxMb: z.coerce.number().finite().nonnegative().max(1_000_000).optional(),
+  modifiedFrom: dateInput.optional(),
+  modifiedTo: dateInput.optional(),
+  series: z.string().regex(/^(grouped|ungrouped|[1-9]\d*)$/).optional(),
+  uncategorized: z.enum(["1"]).optional(),
+  untagged: z.enum(["1"]).optional(),
   category: z.coerce.number().int().positive().optional(),
-  sort: z.enum(["title", "recent", "size"]).default("title"),
+  categories: idListInput.optional(),
+  tags: idListInput.optional(),
+  sort: z.enum(["title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
-});
+}).refine((value) => value.minMb === undefined || value.maxMb === undefined || value.minMb <= value.maxMb,
+  { message: "Minimum size must not exceed maximum size." });
 
 interface MediaPathRow {
   id: number;
@@ -112,7 +130,7 @@ async function sendLocalFile(
 }
 
 const itemSelect = `
-  SELECT m.id, m.source_id, m.media_type, m.title, m.relative_path, m.size_bytes,
+  SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes,
     m.modified_at_ms, m.file_count, s.name AS source_name,
     COALESCE((SELECT group_concat(c.name, ', ')
       FROM item_categories ic JOIN categories c ON c.id = ic.category_id
@@ -120,7 +138,35 @@ const itemSelect = `
   FROM media_items m JOIN sources s ON s.id = m.source_id
 `;
 
+interface TagRow { item_id: number; id: number; name: string }
+
+function tagsByItem(itemIds: number[]): Map<number, Array<{ id: number; name: string }>> {
+  const result = new Map<number, Array<{ id: number; name: string }>>();
+  if (itemIds.length === 0) return result;
+  const placeholders = itemIds.map(() => "?").join(", ");
+  const rows = database.prepare(`
+    SELECT it.item_id, t.id, t.name FROM item_tags it
+    JOIN tags t ON t.id = it.tag_id
+    WHERE it.item_id IN (${placeholders}) ORDER BY t.name COLLATE NOCASE
+  `).all(...itemIds) as unknown as TagRow[];
+  for (const row of rows) {
+    const tags = result.get(row.item_id) ?? [];
+    tags.push({ id: row.id, name: row.name });
+    result.set(row.item_id, tags);
+  }
+  return result;
+}
+
 export async function registerMediaRoutes(app: FastifyInstance) {
+  app.get("/api/items/formats", async (request) => {
+    const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
+    return database.prepare(`
+      SELECT file_extension AS extension, COUNT(*) AS item_count FROM media_items
+      WHERE available = 1 ${type ? "AND media_type = ?" : ""}
+      GROUP BY file_extension ORDER BY file_extension
+    `).all(...(type ? [type] : []));
+  });
+
   app.get("/api/items", async (request) => {
     const input = listInput.parse(request.query);
     const conditions = ["m.available = 1"];
@@ -130,9 +176,54 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       conditions.push("m.media_type = ?");
       values.push(input.type);
     }
-    if (input.category) {
+    if (input.source) {
+      conditions.push("m.source_id = ?");
+      values.push(input.source);
+    }
+    if (input.filename) {
+      conditions.push("m.filename LIKE ? ESCAPE '\\'");
+      values.push(`%${input.filename.replace(/[\\%_]/g, "\\$&")}%`);
+    }
+    if (input.path) {
+      conditions.push("m.relative_path LIKE ? ESCAPE '\\'");
+      values.push(`%${input.path.replace(/[\\%_]/g, "\\$&")}%`);
+    }
+    if (input.extension) {
+      conditions.push("m.file_extension = ?");
+      values.push(input.extension === "folder" ? "" : input.extension);
+    }
+    if (input.minMb !== undefined) {
+      conditions.push("m.size_bytes >= ?");
+      values.push(Math.round(input.minMb * 1024 * 1024));
+    }
+    if (input.maxMb !== undefined) {
+      conditions.push("m.size_bytes <= ?");
+      values.push(Math.round(input.maxMb * 1024 * 1024));
+    }
+    if (input.modifiedFrom) {
+      conditions.push("m.modified_at_ms >= ?");
+      values.push(new Date(`${input.modifiedFrom}T00:00:00`).getTime());
+    }
+    if (input.modifiedTo) {
+      conditions.push("m.modified_at_ms <= ?");
+      values.push(new Date(`${input.modifiedTo}T23:59:59.999`).getTime());
+    }
+    if (input.series === "ungrouped") {
+      conditions.push("NOT EXISTS (SELECT 1 FROM series_items si WHERE si.item_id = m.id)");
+    } else if (input.series === "grouped") {
+      conditions.push("EXISTS (SELECT 1 FROM series_items si WHERE si.item_id = m.id)");
+    } else if (input.series) {
+      conditions.push("EXISTS (SELECT 1 FROM series_items si WHERE si.item_id = m.id AND si.series_id = ?)");
+      values.push(Number(input.series));
+    }
+    if (input.uncategorized) conditions.push("NOT EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id)");
+    if (input.untagged) conditions.push("NOT EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id)");
+    for (const categoryId of new Set([
+      ...(input.category ? [input.category] : []),
+      ...(input.categories?.split(",").map(Number) ?? []),
+    ])) {
       conditions.push("EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id AND ic.category_id = ?)");
-      values.push(input.category);
+      values.push(categoryId);
     }
     if (input.q) {
       for (const token of input.q.split(/\s+/).filter(Boolean)) {
@@ -141,19 +232,26 @@ export async function registerMediaRoutes(app: FastifyInstance) {
         values.push(pattern, pattern);
       }
     }
+    for (const tagId of new Set(input.tags?.split(",").map(Number) ?? [])) {
+      conditions.push("EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id AND it.tag_id = ?)");
+      values.push(tagId);
+    }
 
     const where = conditions.join(" AND ");
-    const order = input.sort === "recent"
-      ? "m.modified_at_ms DESC, m.id DESC"
-      : input.sort === "size"
-        ? "m.size_bytes DESC, m.id DESC"
-        : "m.title COLLATE NOCASE ASC, m.id ASC";
+    const order = input.sort === "recent" ? "m.modified_at_ms DESC, m.id DESC"
+      : input.sort === "oldest" ? "m.modified_at_ms ASC, m.id ASC"
+        : input.sort === "size" ? "m.size_bytes DESC, m.id DESC"
+          : input.sort === "smallest" ? "m.size_bytes ASC, m.id ASC"
+            : input.sort === "filename" ? "m.filename COLLATE NOCASE ASC, m.id ASC"
+              : "m.title COLLATE NOCASE ASC, m.id ASC";
     const total = database.prepare(`
       SELECT COUNT(*) AS count FROM media_items m WHERE ${where}
     `).get(...values) as { count: number };
-    const items = database.prepare(`
+    const rows = database.prepare(`
       ${itemSelect} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
-    `).all(...values, input.page * 48);
+    `).all(...values, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
+    const tags = tagsByItem(rows.map((row) => row.id));
+    const items = rows.map((row) => ({ ...row, tags: tags.get(row.id) ?? [] }));
     return { items, total: total.count, page: input.page, pageSize: 48 };
   });
 
@@ -163,7 +261,8 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     if (!item) return reply.code(404).send({ message: "Media item not found." });
     const categoryIds = database.prepare("SELECT category_id FROM item_categories WHERE item_id = ?").all(id)
       .map((row) => (row as { category_id: number }).category_id);
-    return { ...item, category_ids: categoryIds };
+    const tags = tagsByItem([id]).get(id) ?? [];
+    return { ...item, category_ids: categoryIds, tags };
   });
 
   app.patch("/api/items/:id", async (request, reply) => {
@@ -244,6 +343,74 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       LEFT JOIN media_items m ON m.id = ic.item_id AND m.available = 1
       GROUP BY c.id ORDER BY c.name COLLATE NOCASE
     `).all();
+  });
+
+  app.get("/api/tags", async () => {
+    return database.prepare(`
+      SELECT t.id, t.name, COUNT(m.id) AS item_count
+      FROM tags t
+      LEFT JOIN item_tags it ON it.tag_id = t.id
+      LEFT JOIN media_items m ON m.id = it.item_id AND m.available = 1
+      GROUP BY t.id ORDER BY t.name COLLATE NOCASE
+    `).all();
+  });
+
+  app.post("/api/tags", async (request, reply) => {
+    const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(request.body);
+    try {
+      const result = database.prepare("INSERT INTO tags(name) VALUES (?)").run(name);
+      return reply.code(201).send({ id: Number(result.lastInsertRowid), name, item_count: 0 });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+        return reply.code(409).send({ message: "That tag already exists." });
+      }
+      throw error;
+    }
+  });
+
+  app.patch("/api/tags/:id", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(request.body);
+    try {
+      const result = database.prepare("UPDATE tags SET name = ? WHERE id = ?").run(name, id);
+      if (!result.changes) return reply.code(404).send({ message: "Tag not found." });
+      return { id, name };
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+        return reply.code(409).send({ message: "That tag already exists." });
+      }
+      throw error;
+    }
+  });
+
+  app.delete("/api/tags/:id", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const result = database.prepare("DELETE FROM tags WHERE id = ?").run(id);
+    if (!result.changes) return reply.code(404).send({ message: "Tag not found." });
+    return reply.code(204).send();
+  });
+
+  app.put("/api/items/:id/tags", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { tagIds } = z.object({ tagIds: z.array(z.number().int().positive()).max(100) }).parse(request.body);
+    if (!mediaRow(id)) return reply.code(404).send({ message: "Media item not found." });
+    const uniqueIds = [...new Set(tagIds)];
+    for (const tagId of uniqueIds) {
+      if (!database.prepare("SELECT id FROM tags WHERE id = ?").get(tagId)) {
+        return reply.code(400).send({ message: `Tag ${tagId} does not exist.` });
+      }
+    }
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.prepare("DELETE FROM item_tags WHERE item_id = ?").run(id);
+      const insert = database.prepare("INSERT INTO item_tags(item_id, tag_id) VALUES (?, ?)");
+      for (const tagId of uniqueIds) insert.run(id, tagId);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return { id, tags: tagsByItem([id]).get(id) ?? [] };
   });
 
   app.post("/api/categories", async (request, reply) => {

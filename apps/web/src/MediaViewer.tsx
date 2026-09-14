@@ -1,17 +1,22 @@
 import { BookOpen, ChevronLeft, ChevronRight, Download, LoaderCircle, Minus, Pencil, Plus, X, ZoomIn } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
-import { api, formatSize, type Category, type MediaDetail } from "./media";
+import { TagCombobox } from "./TagCombobox";
+import { api, formatSize, type Category, type MediaDetail, type SeriesSummary, type Tag } from "./media";
 
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
 
 interface MediaViewerProps {
   itemId: number;
   categories: Category[];
+  tags: Tag[];
+  onCategoryCreated: (name: string) => Promise<Category>;
+  onTagCreated: (name: string) => Promise<Tag>;
+  onOpenSeries: (id: number) => void;
   onClose: () => void;
   onChanged: () => void;
 }
 
-export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaViewerProps) {
+export function MediaViewer({ itemId, categories, tags, onCategoryCreated, onTagCreated, onOpenSeries, onClose, onChanged }: MediaViewerProps) {
   const [item, setItem] = useState<MediaDetail | null>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [archive, setArchive] = useState(false);
@@ -20,6 +25,8 @@ export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaVie
   const [comicZoom, setComicZoom] = useState(100);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
+  const [seriesIds, setSeriesIds] = useState<number[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -30,6 +37,8 @@ export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaVie
     setFit("screen");
     setComicZoom(100);
     setError("");
+    setSeriesOptions([]);
+    setSeriesIds([]);
     api<MediaDetail>(`/api/items/${itemId}`)
       .then(async (detail) => {
         if (!active) return;
@@ -40,6 +49,14 @@ export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaVie
         }
       })
       .catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not open item."); });
+    Promise.all([
+      api<SeriesSummary[]>("/api/series"),
+      api<Array<{ id: number; name: string }>>(`/api/items/${itemId}/series`),
+    ]).then(([allSeries, memberships]) => {
+      if (!active) return;
+      setSeriesOptions(allSeries.map((entry) => ({ id: entry.id, name: entry.title })));
+      setSeriesIds(memberships.map((entry) => entry.id));
+    }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load series and sets."); });
     return () => { active = false; };
   }, [itemId]);
 
@@ -89,11 +106,8 @@ export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaVie
     }
   };
 
-  const setCategory = async (categoryId: number, checked: boolean) => {
+  const updateCategories = async (categoryIds: number[]) => {
     if (!item) return;
-    const categoryIds = checked
-      ? [...item.category_ids, categoryId]
-      : item.category_ids.filter((id) => id !== categoryId);
     setSaving(true);
     setError("");
     try {
@@ -105,6 +119,46 @@ export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaVie
     } finally {
       setSaving(false);
     }
+  };
+
+  const updateTags = async (tagIds: number[]) => {
+    if (!item) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await api<{ tags: Tag[] }>(`/api/items/${item.id}/tags`, {
+        method: "PUT",
+        body: JSON.stringify({ tagIds }),
+      });
+      setItem({ ...item, tags: result.tags });
+      onChanged();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not update tags.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const updateSeries = async (ids: number[]) => {
+    if (!item) return;
+    setSaving(true);
+    setError("");
+    try {
+      const result = await api<Array<{ id: number; name: string }>>(`/api/items/${item.id}/series`, {
+        method: "PUT", body: JSON.stringify({ seriesIds: ids }),
+      });
+      setSeriesIds(result.map((entry) => entry.id));
+      onChanged();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not update series and sets.");
+    } finally { setSaving(false); }
+  };
+
+  const createSeries = async (name: string) => {
+    const created = await api<SeriesSummary>("/api/series", { method: "POST", body: JSON.stringify({ title: name }) });
+    const option = { id: created.id, name: created.title };
+    setSeriesOptions((current) => [...current, option].sort((a, b) => a.name.localeCompare(b.name)));
+    return option;
   };
 
   return (
@@ -152,14 +206,19 @@ export function MediaViewer({ itemId, categories, onClose, onChanged }: MediaVie
           {error && <p className="form-error" role="alert">{error}</p>}
           {item && <>
             <div className="viewer-detail-row"><span>Type</span><strong>{item.media_type}</strong></div>
+            <div className="viewer-detail-row"><span>{item.file_extension ? "File name" : "Folder name"}</span><strong title={item.filename}>{item.filename}</strong></div>
             <div className="viewer-detail-row"><span>Path</span><strong title={item.relative_path}>{item.relative_path}</strong></div>
             {item.media_type === "video" && <p className="detail-hint">Space/K pause · ←/→ seek 5s · Shift + ←/→ seek 30s · M mute · F fullscreen</p>}
             <button className="secondary-button" type="button" onClick={rename} disabled={saving}><Pencil size={16} /> Edit title</button>
             {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
             <h3>Categories</h3>
-            {categories.length === 0 ? <p className="detail-hint">Create a category from the Categories page to organize this item.</p> : <div className="category-checks">{categories.map((category) => (
-              <label key={category.id}><input type="checkbox" checked={item.category_ids.includes(category.id)} onChange={(event) => void setCategory(category.id, event.target.checked)} disabled={saving} /> {category.name}</label>
-            ))}</div>}
+            <TagCombobox label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
+            <h3>Tags</h3>
+            <TagCombobox label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
+            <h3>Series & sets</h3>
+            <TagCombobox label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
+            {seriesIds.length > 0 && <div className="viewer-series-links">{seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) =>
+              <button key={entry.id} type="button" onClick={() => onOpenSeries(entry.id)}>View {entry.name}</button>)}</div>}
           </>}
         </aside>
       </section>
