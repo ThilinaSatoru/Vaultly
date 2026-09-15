@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { collectItems } from "./scanner.js";
+import { collectItems, inferCollectionPattern } from "./scanner.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -39,4 +39,17 @@ test("classifies mixed and nested media without indexing individual comic pages"
   expect(items.find((item) => item.title === "Issue 01")?.fileExtension).toBe("");
   expect(items.find((item) => item.title === "My Story")?.filename).toBe("My Story.pdf");
   expect(items.find((item) => item.title === "My Story")?.fileExtension).toBe("pdf");
+});
+
+test("recognizes conservative sequel filename patterns", () => {
+  expect(inferCollectionPattern("Northern Lights S02E04 1080p.mkv")).toEqual({ title: "Northern Lights", order: 20004 });
+  expect(inferCollectionPattern("Northern.Lights - Vol 03.pdf")).toEqual({ title: "Northern Lights", order: 3 });
+  expect(inferCollectionPattern("Northern Lights 01.cbz")).toEqual({ title: "Northern Lights", order: 1 });
+  expect(inferCollectionPattern("Northern Lights 2.mkv")).toEqual({ title: "Northern Lights", order: 2 });
+  expect(inferCollectionPattern("Northern Lights (3).pdf")).toEqual({ title: "Northern Lights", order: 3 });
+  expect(inferCollectionPattern("Northern Lights 2x05.mkv")).toEqual({ title: "Northern Lights", order: 20005 });
+  expect(inferCollectionPattern("04 - Northern Lights.cbz")).toEqual({ title: "Northern Lights", order: 4 });
+  expect(inferCollectionPattern("Northern Lights IV.cbz")).toEqual({ title: "Northern Lights", order: 4 });
+  expect(inferCollectionPattern("Northern Lights 2024.mkv")).toBeNull();
+  expect(inferCollectionPattern("Single Movie.mkv")).toBeNull();
 });

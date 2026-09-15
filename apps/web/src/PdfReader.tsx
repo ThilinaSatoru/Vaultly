@@ -2,16 +2,27 @@ import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-rea
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 type FitMode = "width" | "page" | "custom";
 
-export function PdfReader({ itemId }: { itemId: number }) {
+const storedFitMode = (): FitMode => {
+  const value = window.localStorage.getItem("vaultly.pdf.fit");
+  return value === "width" || value === "custom" ? value : "page";
+};
+
+const storedZoom = () => {
+  const value = Number(window.localStorage.getItem("vaultly.pdf.zoom"));
+  return Number.isFinite(value) ? Math.max(25, Math.min(400, value)) : 100;
+};
+
+export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: number; onPreviousItem?: () => void; onNextItem?: () => void }) {
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
-  const [fitMode, setFitMode] = useState<FitMode>("page");
-  const [zoomPercent, setZoomPercent] = useState(100);
+  const [fitMode, setFitMode] = useState<FitMode>(storedFitMode);
+  const [zoomPercent, setZoomPercent] = useState(storedZoom);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [loading, setLoading] = useState(true);
   const [rendering, setRendering] = useState(false);
@@ -19,6 +30,9 @@ export function PdfReader({ itemId }: { itemId: number }) {
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => { window.localStorage.setItem("vaultly.pdf.fit", fitMode); }, [fitMode]);
+  useEffect(() => { window.localStorage.setItem("vaultly.pdf.zoom", String(zoomPercent)); }, [zoomPercent]);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -124,19 +138,40 @@ export function PdfReader({ itemId }: { itemId: number }) {
   useEffect(() => {
     if (!pdfDocument) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
-      if (event.key === "PageDown" || event.key === "ArrowRight") {
+      const targetElement = event.target instanceof HTMLElement ? event.target : null;
+      if (targetElement?.closest("input, textarea, select, [contenteditable]")) return;
+      const activatingControl = Boolean(targetElement?.closest("button, a"));
+      if (matchesShortcut(event, "reader.nextPage")) {
         event.preventDefault();
-        setPageNumber((value) => Math.min(pdfDocument.numPages, value + 1));
+        if (pageNumber < pdfDocument.numPages) setPageNumber(pageNumber + 1);
+        else if (onNextItem && readBooleanPreference("vaultly.reader.continuous", true)) onNextItem();
       }
-      if (event.key === "PageUp" || event.key === "ArrowLeft") {
+      if (matchesShortcut(event, "reader.previousPage")) {
         event.preventDefault();
-        setPageNumber((value) => Math.max(1, value - 1));
+        if (pageNumber > 1) setPageNumber(pageNumber - 1);
+        else if (onPreviousItem && readBooleanPreference("vaultly.reader.continuous", true)) onPreviousItem();
+      }
+      if (matchesShortcut(event, "reader.scrollUp")) {
+        event.preventDefault();
+        scrollRef.current?.scrollBy({ top: -readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800), behavior: "smooth" });
+      }
+      if (matchesShortcut(event, "reader.scrollDown")) {
+        event.preventDefault();
+        scrollRef.current?.scrollBy({ top: readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800), behavior: "smooth" });
+      }
+      if (matchesShortcut(event, "reader.zoomIn") && !activatingControl) {
+        event.preventDefault();
+        changeZoom(25);
+      }
+      if (matchesShortcut(event, "reader.resetFit")) {
+        event.preventDefault();
+        setZoomPercent(100);
+        setFitMode("page");
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pdfDocument]);
+  }, [pdfDocument, pageNumber, onPreviousItem, onNextItem]);
 
   const changeZoom = (delta: number) => {
     setZoomPercent((value) => Math.max(25, Math.min(400, value + delta)));
@@ -146,7 +181,7 @@ export function PdfReader({ itemId }: { itemId: number }) {
   return (
     <div className="pdf-reader">
       <div className="pdf-toolbar">
-        <button type="button" onClick={() => setPageNumber((value) => Math.max(1, value - 1))} disabled={!pdfDocument || pageNumber <= 1} aria-label="Previous page"><ChevronLeft size={18} /></button>
+        <button type="button" onClick={() => pageNumber > 1 ? setPageNumber(pageNumber - 1) : onPreviousItem?.()} disabled={!pdfDocument || (pageNumber <= 1 && !onPreviousItem)} aria-label="Previous page"><ChevronLeft size={18} /></button>
         <label className="pdf-page-control">
           <span className="visually-hidden">Page number</span>
           <input type="number" min={1} max={pdfDocument?.numPages ?? 1} value={pageNumber} onChange={(event) => {
@@ -155,9 +190,9 @@ export function PdfReader({ itemId }: { itemId: number }) {
           }} />
           <span>/ {pdfDocument?.numPages ?? "—"}</span>
         </label>
-        <button type="button" onClick={() => setPageNumber((value) => Math.min(pdfDocument?.numPages ?? 1, value + 1))} disabled={!pdfDocument || pageNumber >= pdfDocument.numPages} aria-label="Next page"><ChevronRight size={18} /></button>
+        <button type="button" onClick={() => pdfDocument && pageNumber < pdfDocument.numPages ? setPageNumber(pageNumber + 1) : onNextItem?.()} disabled={!pdfDocument || (pageNumber >= pdfDocument.numPages && !onNextItem)} aria-label="Next page"><ChevronRight size={18} /></button>
         <div className="pdf-toolbar-divider" />
-        <select aria-label="Page fit" value={fitMode} onChange={(event) => setFitMode(event.target.value as FitMode)}>
+        <select aria-label="Page fit" value={fitMode} onChange={(event) => { setFitMode(event.target.value as FitMode); window.requestAnimationFrame(() => scrollRef.current?.focus({ preventScroll: true })); }}>
           <option value="page">Fit page</option>
           <option value="width">Fit width</option>
           <option value="custom">{zoomPercent}%</option>
@@ -165,7 +200,12 @@ export function PdfReader({ itemId }: { itemId: number }) {
         <button type="button" onClick={() => changeZoom(-25)} aria-label="Zoom out"><Minus size={17} /></button>
         <button type="button" onClick={() => changeZoom(25)} aria-label="Zoom in"><Plus size={17} /></button>
       </div>
-      <div className={`pdf-scroll${fitMode === "page" ? " pdf-scroll-fit-page" : ""}`} ref={scrollRef}>
+      <div
+        className={`pdf-scroll${fitMode === "page" ? " pdf-scroll-fit-page" : ""}`}
+        ref={scrollRef}
+        tabIndex={-1}
+        onPointerDown={() => scrollRef.current?.focus({ preventScroll: true })}
+      >
         {loading && <div className="pdf-status"><LoaderCircle className="spin" size={25} /> Opening PDF…</div>}
         {error && <div className="pdf-status pdf-error" role="alert">{error}</div>}
         <canvas ref={canvasRef} className={pdfDocument && hasPage ? "pdf-canvas" : "pdf-canvas hidden"} aria-label={`PDF page ${pageNumber}`} />

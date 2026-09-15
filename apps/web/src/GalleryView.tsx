@@ -1,10 +1,12 @@
-import { BookOpen, ChevronDown, Clapperboard, FolderPlus, Image, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, BookOpen, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
 import { BulkActionDialog } from "./BulkActionDialog";
 import { api, formatCount, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
+import type { LibraryView } from "./App";
 
 interface GalleryViewProps {
+  view: LibraryView;
   type?: MediaType;
   search: string;
   categories: Category[];
@@ -16,6 +18,7 @@ interface GalleryViewProps {
   onChanged: () => void;
   sources: Array<{ id: number; name: string }>;
   onOpen: (id: number) => void;
+  onOpenSeries: (id: number) => void;
   onAddSource: () => void;
   refreshKey: number;
 }
@@ -26,7 +29,7 @@ const galleryNames: Record<MediaType, string> = {
   story: "Stories",
 };
 
-function MediaCard({ item, selected, onSelect, onOpen }: { item: MediaItem; selected: boolean; onSelect: () => void; onOpen: () => void }) {
+function MediaCard({ item, selected, onSelect, onOpen, onFavorite }: { item: MediaItem; selected: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void }) {
   const [hovered, setHovered] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
@@ -64,6 +67,7 @@ function MediaCard({ item, selected, onSelect, onOpen }: { item: MediaItem; sele
   return (
     <article className={`media-card media-card-selectable${selected ? " is-selected" : ""}`}>
       <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
+      <button className={`media-card-favorite${item.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>
       <button
       className="media-card-open"
       type="button"
@@ -104,7 +108,21 @@ function MediaCard({ item, selected, onSelect, onOpen }: { item: MediaItem; sele
   );
 }
 
-export function GalleryView({ type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, sources, onOpen, onAddSource, refreshKey }: GalleryViewProps) {
+function CollectionCard({ series, onOpen }: { series: SeriesSummary; onOpen: () => void }) {
+  const fallback = series.cover_item_id === null || !series.cover_item_type ? null
+    : series.cover_item_type === "comic" && !/\.(cbz|zip)$/i.test(series.cover_item_path ?? "")
+      ? `/api/items/${series.cover_item_id}/pages/0`
+      : `/api/items/${series.cover_item_id}/thumbnail`;
+  const cover = series.has_cover ? `/api/series/${series.id}/cover` : fallback;
+  return <article className="media-card collection-media-card">
+    <button className="media-card-open" type="button" onClick={onOpen} aria-label={`Open collection ${series.title}`}>
+      <div className="media-art collection-art"><Layers3 size={44} />{cover && <img src={cover} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
+      <div className="media-card-body"><h3 title={series.title}>{series.title}</h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{series.tags.slice(0, 3).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
+    </button>
+  </article>;
+}
+
+export function GalleryView({ view, type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, sources, onOpen, onOpenSeries, onAddSource, refreshKey }: GalleryViewProps) {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [selectedCastIds, setSelectedCastIds] = useState<number[]>([]);
@@ -131,6 +149,8 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
   const [sort, setSort] = useState<"title" | "filename" | "recent" | "oldest" | "size" | "smallest">("title");
   const [page, setPage] = useState(0);
   const [result, setResult] = useState<ItemPage | null>(null);
+  const [categoryOverview, setCategoryOverview] = useState<{ categories: Category[]; uncategorized_count: number } | null>(null);
+  const [browseCategory, setBrowseCategory] = useState<number | "uncategorized" | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -153,6 +173,16 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
     return () => { active = false; };
   }, [type, selectedType, refreshKey]);
 
+  useEffect(() => {
+    if (view !== "categories") return;
+    let active = true;
+    setCategoryOverview(null);
+    api<{ categories: Category[]; uncategorized_count: number }>(`/api/categories/overview${type ? `?type=${type}` : ""}`)
+      .then((data) => { if (active) { setCategoryOverview(data); setError(""); } })
+      .catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load categories."); });
+    return () => { active = false; };
+  }, [view, type, refreshKey]);
+
   useEffect(() => { setExtension(""); if (type) setSelectedType(""); }, [type]);
   useEffect(() => { setSelectedItemIds([]); }, [type]);
   useEffect(() => { if (sourceId && !sources.some((source) => String(source.id) === sourceId)) setSourceId(""); }, [sourceId, sources]);
@@ -174,13 +204,29 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
     setSelectedArtistIds((current) => current.filter((id) => people.some((person) => person.id === id)));
   }, [people]);
 
-  useEffect(() => { setPage(0); }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
+  useEffect(() => { setPage(0); }, [type, view, browseCategory, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
+    if (view === "categories" && browseCategory === null) {
+      setResult(null);
+      setLoading(false);
+      return () => controller.abort();
+    }
     const params = new URLSearchParams({ page: String(page), sort });
     if (type || selectedType) params.set("type", type || selectedType);
-    if (search.trim()) params.set("q", search.trim());
+    if (view === "favorites") params.set("favorite", "1");
+    if (view === "categories" && browseCategory === "uncategorized") params.set("uncategorized", "1");
+    if (view === "categories" && typeof browseCategory === "number") params.set("category", String(browseCategory));
+    if (view === "browse" && search.trim()) params.set("q", search.trim());
+    if (view !== "browse") {
+      setLoading(true);
+      api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
+        .then((data) => { setResult(data); setError(""); })
+        .catch((requestError) => { if (!controller.signal.aborted) { setResult(null); setError(requestError instanceof Error ? requestError.message : "Could not load media."); } })
+        .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      return () => controller.abort();
+    }
     if (debouncedFilename.trim()) params.set("filename", debouncedFilename.trim());
     if (debouncedPath.trim()) params.set("path", debouncedPath.trim());
     if (sourceId) params.set("source", sourceId);
@@ -206,9 +252,11 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
+  }, [view, browseCategory, type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
 
-  const title = type ? galleryNames[type] : "All media";
+  const libraryTitle = type ? galleryNames[type] : "All media";
+  const selectedCategoryName = browseCategory === "uncategorized" ? "Uncategorized" : categoryOverview?.categories.find((category) => category.id === browseCategory)?.name;
+  const title = view === "categories" ? selectedCategoryName ? `${libraryTitle} · ${selectedCategoryName}` : `${libraryTitle} categories` : view === "favorites" ? `${libraryTitle} favorites` : libraryTitle;
   const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
   const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
   const clearFilters = () => {
@@ -225,15 +273,42 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
     setSeriesOptions((current) => [...current, created].sort((a, b) => a.title.localeCompare(b.title)));
     return created;
   };
+  const toggleFavorite = async (item: MediaItem) => {
+    const favorite = item.favorite ? 0 : 1;
+    try {
+      await api(`/api/items/${item.id}/favorite`, { method: "PUT", body: JSON.stringify({ favorite: Boolean(favorite) }) });
+      setResult((current) => current ? {
+        ...current,
+        items: view === "favorites" && !favorite ? current.items.filter((entry) => entry.id !== item.id) : current.items.map((entry) => entry.id === item.id ? { ...entry, favorite } : entry),
+        total: view === "favorites" && !favorite ? Math.max(0, current.total - 1) : current.total,
+      } : current);
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not update favorite."); }
+  };
+  const renderCards = (items: MediaItem[], keyPrefix = "") => {
+    const shownSeries = new Set<number>();
+    return items.flatMap((item) => {
+      const memberships = (item.series_ids ?? []).map((id) => seriesOptions.find((series) => series.id === id)).filter((series): series is SeriesSummary => Boolean(series));
+      if (!memberships.length) return [<MediaCard key={`${keyPrefix}item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id)} onFavorite={() => void toggleFavorite(item)} />];
+      return memberships.filter((series) => !shownSeries.has(series.id)).map((series) => {
+        shownSeries.add(series.id);
+        return <CollectionCard key={`${keyPrefix}series-${series.id}`} series={series} onOpen={() => onOpenSeries(series.id)} />;
+      });
+    });
+  };
 
   return (
     <section className="gallery-view">
       <div className="page-heading gallery-heading">
-        <div><p className="eyebrow">Your library</p><h1>{title}</h1><p>{search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
-        <span className="result-count">{loading && !result ? "Loading…" : `${formatCount(result?.total ?? 0)} items`}</span>
+        <div>{view === "categories" && browseCategory !== null && <button className="category-back" type="button" onClick={() => { setBrowseCategory(null); setSelectedItemIds([]); }}><ArrowLeft size={16} /> All categories</button>}<p className="eyebrow">Your library</p><h1>{title}</h1><p>{view === "categories" && browseCategory === null ? "Choose a category to open its media library." : search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
+        <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : `${formatCount(result?.total ?? 0)} items`}</span>
       </div>
 
-      <div className="gallery-toolbar">
+      {view === "categories" && browseCategory === null && categoryOverview && <div className="category-selection-grid">
+        {categoryOverview.categories.map((category) => <button className="category-selection-card" type="button" key={category.id} onClick={() => setBrowseCategory(category.id)}><span className="category-selection-icon"><Folder size={23} /></span><strong>{category.name}</strong><small>{formatCount(category.item_count)} items</small></button>)}
+        {categoryOverview.uncategorized_count > 0 && <button className="category-selection-card" type="button" onClick={() => setBrowseCategory("uncategorized")}><span className="category-selection-icon"><FolderPlus size={23} /></span><strong>Uncategorized</strong><small>{formatCount(categoryOverview.uncategorized_count)} items</small></button>}
+      </div>}
+
+      {view === "browse" && <div className="gallery-toolbar">
         <label className="gallery-filter-field"><span>File name</span><input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Search filenames" aria-label="File name contains" /></label>
         <TagCombobox label="Categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized} placeholder="All categories" />
         <TagCombobox label="Tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged} placeholder="All tags" />
@@ -251,9 +326,9 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
         </label>
         <button className={`gallery-more-button${advancedOpen ? " is-open" : ""}`} type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal size={16} /> More filters{extraFilterCount > 0 ? ` (${extraFilterCount})` : ""}</button>
         {hasFilters && <button className="gallery-clear-button" type="button" onClick={clearFilters}><X size={15} /> Clear filters</button>}
-      </div>
+      </div>}
 
-      {advancedOpen && <div className="gallery-advanced" aria-label="More filters">
+      {view === "browse" && advancedOpen && <div className="gallery-advanced" aria-label="More filters">
         {!type && <label className="gallery-filter-field"><span>Media type</span><select value={selectedType} onChange={(event) => { setSelectedType(event.target.value as MediaType | ""); setExtension(""); }}><option value="">All types</option><option value="comic">Comics</option><option value="video">Videos</option><option value="story">PDF stories</option></select></label>}
         <label className="gallery-filter-field"><span>Source folder</span><select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
         <label className="gallery-filter-field"><span>File format</span><select value={extension} onChange={(event) => setExtension(event.target.value)}><option value="">All formats</option>{formats.map((format) => <option key={format.extension || "folder"} value={format.extension || "folder"}>{format.extension ? `.${format.extension.toUpperCase()}` : "Image folder"} ({format.item_count})</option>)}</select></label>
@@ -269,17 +344,17 @@ export function GalleryView({ type, search, categories, tags, people, onTagCreat
         <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
       </div>}
 
-      <div className="gallery-selection-bar">
+      {!(view === "categories" && browseCategory === null) && <div className="gallery-selection-bar">
         <button className="secondary-button" type="button" onClick={selectPage} disabled={!result?.items.length}>Select page</button>
         {selectedItemIds.length > 0 && <><span>{selectedItemIds.length} selected{selectedItemIds.length >= 500 ? " · limit reached" : ""}</span><button className="primary-button" type="button" onClick={() => setBulkOpen(true)}>Bulk actions</button><button className="gallery-clear-button" type="button" onClick={() => setSelectedItemIds([])}>Clear selection</button></>}
-      </div>
+      </div>}
 
       {error && <p className="page-error" role="alert">{error}</p>}
-      {loading ? (
+      {view === "categories" && browseCategory === null ? (!categoryOverview && !error ? <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading categories…</span></div> : categoryOverview && categoryOverview.categories.length === 0 && categoryOverview.uncategorized_count === 0 ? <div className="gallery-empty"><Folder size={34} /><h2>No categorized media</h2><p>Assign categories to media, then return here.</p></div> : null) : loading ? (
         <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading media…</span></div>
       ) : result && result.items.length > 0 ? (
         <>
-          <div className="media-grid">{result.items.map((item) => <MediaCard key={item.id} item={item} selected={selectedItemIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id)} />)}</div>
+          <div className="media-grid">{renderCards(result.items)}</div>
           <div className="pagination">
             <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
             <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>

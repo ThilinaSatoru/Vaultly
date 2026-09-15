@@ -24,6 +24,29 @@ interface ScannedItem {
 const titleFromFilename = (filename: string) =>
   path.basename(filename, path.extname(filename)).replace(/[._]+/g, " ").trim();
 
+export function inferCollectionPattern(filename: string): { title: string; order: number } | null {
+  const stem = path.basename(filename, path.extname(filename));
+  const seasonEpisode = stem.match(/^(.*?)[\s._-]+(?:s(\d{1,2})e(\d{1,3})|(\d{1,2})x(\d{1,3}))(?:\b|[\s._-])/i);
+  const explicit = stem.match(/^(.*?)[\s._-]+(?:part|pt|vol(?:ume)?|chapter|ch|episode|ep|issue|book|disc|disk|cd|no\.?|number|#|v)[\s._-]*(\d{1,4})(?:\b|[\s._-])/i);
+  const parenthesized = stem.match(/^(.*?)\s*[[(](\d{1,3})[\])](?:\s|$)/);
+  const padded = stem.match(/^(.*?)[\s._-]+(0\d{1,2})(?:\b|[\s._-])/);
+  const simple = stem.match(/^(.*?)[\s._-]+(\d{1,3})(?:\s+of\s+\d{1,3})?$/i);
+  const leading = stem.match(/^[[(]?(\d{1,3})[\])]?\s*[-._ ]+(.{2,})$/);
+  const roman = stem.match(/^(.*?)[\s._-]+(I|II|III|IV|V|VI|VII|VIII|IX|X)$/i);
+  const match = seasonEpisode ?? explicit ?? parenthesized ?? padded ?? simple ?? leading ?? roman;
+  if (!match) return null;
+  const rawTitle = leading ? leading[2] : match[1];
+  const title = rawTitle.replace(/[._-]+/g, " ").replace(/\s+/g, " ").replace(/^\[|\]$/g, "").trim();
+  if (title.length < 2) return null;
+  const romanValues: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7, VIII: 8, IX: 9, X: 10 };
+  const order = seasonEpisode
+    ? Number(seasonEpisode[2] ?? seasonEpisode[4]) * 10_000 + Number(seasonEpisode[3] ?? seasonEpisode[5])
+    : leading ? Number(leading[1])
+      : roman ? romanValues[roman[2].toUpperCase()]
+        : Number(match[2]);
+  return Number.isFinite(order) ? { title, order } : null;
+}
+
 export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
   const items: ScannedItem[] = [];
   const directories = [rootPath];
@@ -145,6 +168,7 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `);
+        const indexedItems: Array<{ id: number; item: ScannedItem }> = [];
 
         for (const item of items) {
           const row = upsert.get(
@@ -158,6 +182,7 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             item.modifiedAtMs,
             item.fileCount,
           ) as { id: number };
+          indexedItems.push({ id: row.id, item });
           for (const category of categoryMatcher.match(item.filename, item.fileExtension)) {
             addCategory.run(row.id, category.id);
           }
@@ -168,6 +193,36 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             if (person.is_cast) addPerson.run(row.id, person.id, "cast");
             if (person.is_artist) addPerson.run(row.id, person.id, "artist");
           }
+        }
+
+        const collectionGroups = new Map<string, { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> }>();
+        for (const indexed of indexedItems) {
+          const pattern = inferCollectionPattern(indexed.item.filename);
+          if (!pattern) continue;
+          // Image-folder comics must be sibling folders. Video/PDF sequels may span season or volume folders.
+          const parent = indexed.item.mediaType === "comic" ? path.dirname(indexed.item.relativePath).replace(/\\/g, "/").toLocaleLowerCase() : "";
+          const key = `${sourceId}|${indexed.item.mediaType}|${parent}|${pattern.title.toLocaleLowerCase()}`;
+          const group = collectionGroups.get(key) ?? { title: pattern.title, mediaType: indexed.item.mediaType, entries: [] };
+          group.entries.push({ id: indexed.id, order: pattern.order, path: indexed.item.relativePath });
+          collectionGroups.set(key, group);
+        }
+        const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
+        const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
+        const addSeriesItem = database.prepare("INSERT OR IGNORE INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)");
+        for (const [autoKey, group] of collectionGroups) {
+          let series = findAutoSeries.get(autoKey) as { id: number } | undefined;
+          if (!series && group.entries.length < 2) continue;
+          if (!series) {
+            const placeholders = group.entries.map(() => "?").join(",");
+            const alreadyGrouped = database.prepare(`SELECT 1 FROM series_items WHERE item_id IN (${placeholders}) LIMIT 1`)
+              .get(...group.entries.map((entry) => entry.id));
+            if (alreadyGrouped) continue;
+            createAutoSeries.run(group.title, group.mediaType, autoKey);
+            series = findAutoSeries.get(autoKey) as { id: number } | undefined;
+          }
+          if (!series) continue;
+          group.entries.sort((a, b) => a.order - b.order || a.path.localeCompare(b.path));
+          group.entries.forEach((entry, position) => addSeriesItem.run(series!.id, entry.id, position));
         }
 
         database.prepare(`

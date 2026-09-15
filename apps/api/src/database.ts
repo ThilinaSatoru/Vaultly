@@ -35,6 +35,7 @@ database.exec(`
     size_bytes INTEGER NOT NULL DEFAULT 0,
     modified_at_ms INTEGER NOT NULL DEFAULT 0,
     file_count INTEGER NOT NULL DEFAULT 1,
+    favorite INTEGER NOT NULL DEFAULT 0,
     available INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -98,6 +99,8 @@ database.exec(`
     description TEXT NOT NULL DEFAULT '',
     cover_data BLOB,
     cover_mime TEXT,
+    favorite INTEGER NOT NULL DEFAULT 0,
+    auto_key TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
@@ -120,6 +123,15 @@ database.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_series_tags_tag ON series_tags(tag_id, series_id);
 
+  CREATE TABLE IF NOT EXISTS series_categories (
+    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    PRIMARY KEY (series_id, category_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_series_categories_category
+    ON series_categories(category_id, series_id);
+
 `);
 
 // Filename and format are stored separately from the relative path so a filename
@@ -127,8 +139,10 @@ database.exec(`
 const mediaColumns = (database.prepare("PRAGMA table_info(media_items)").all() as Array<{ name: string }>).map((column) => column.name);
 const needsFilename = !mediaColumns.includes("filename");
 const needsExtension = !mediaColumns.includes("file_extension");
+const needsFavorite = !mediaColumns.includes("favorite");
 if (needsFilename) database.exec("ALTER TABLE media_items ADD COLUMN filename TEXT NOT NULL DEFAULT ''");
 if (needsExtension) database.exec("ALTER TABLE media_items ADD COLUMN file_extension TEXT NOT NULL DEFAULT ''");
+if (needsFavorite) database.exec("ALTER TABLE media_items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
 if (needsFilename || needsExtension) {
   const knownExtensions = new Set(["mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "mpeg", "mpg", "pdf", "cbz", "zip"]);
   const rows = database.prepare(`
@@ -163,6 +177,9 @@ const seriesColumns = (database.prepare("PRAGMA table_info(series)").all() as Ar
 if (!seriesColumns.includes("preferred_type")) {
   database.exec("ALTER TABLE series ADD COLUMN preferred_type TEXT NOT NULL DEFAULT 'mixed'");
 }
+if (!seriesColumns.includes("favorite")) database.exec("ALTER TABLE series ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
+if (!seriesColumns.includes("auto_key")) database.exec("ALTER TABLE series ADD COLUMN auto_key TEXT");
+database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_series_auto_key ON series(auto_key) WHERE auto_key IS NOT NULL");
 
 database.exec("CREATE INDEX IF NOT EXISTS idx_media_items_format ON media_items(available, media_type, file_extension)");
 

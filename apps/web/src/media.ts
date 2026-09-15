@@ -13,6 +13,9 @@ export interface MediaItem {
   modified_at_ms: number;
   file_count: number;
   category_names: string;
+  favorite: number;
+  categories: Array<{ id: number; name: string }>;
+  series_ids: number[];
   tags: Tag[];
   cast: Person[];
   artists: Person[];
@@ -61,7 +64,9 @@ export interface SeriesSummary {
   cover_item_type: MediaType | null;
   cover_item_path: string | null;
   has_cover: number;
+  favorite: number;
   tags: Tag[];
+  categories: Array<{ id: number; name: string }>;
 }
 
 export interface SeriesItem {

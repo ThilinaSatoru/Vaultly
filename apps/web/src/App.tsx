@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Grid2X2,
   HardDrive,
+  Heart,
   Image,
   Library,
   Layers3,
@@ -15,17 +16,19 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   Tag as TagIcon,
   Trash2,
   Users,
   X,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CategoriesView } from "./CategoriesView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
 import { PeopleView } from "./PeopleView";
 import { SeriesView } from "./SeriesView";
+import { SettingsView } from "./SettingsView";
 import { TagsView } from "./TagsView";
 import { api, formatCount, type Category, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
 
@@ -44,7 +47,19 @@ interface LibrarySource {
   story_count: number;
 }
 
-type Section = "all" | MediaType | "series" | "categories" | "tags" | "people" | "sources";
+type Section = "all" | MediaType | "categories" | "tags" | "people" | "sources" | "settings";
+export type LibraryView = "browse" | "categories" | "favorites" | "series";
+
+function LibraryNav({ active, view, icon, label, count, onBrowse, onView }: { active: boolean; view: LibraryView; icon: ReactNode; label: string; count?: string; onBrowse: () => void; onView: (view: LibraryView) => void }) {
+  return <div className={`library-nav-group${active ? " is-active" : ""}`}>
+    <button className={active && view === "browse" ? "nav-active" : "nav-link"} type="button" onClick={onBrowse}>{icon} {label}{count && <span>{count}</span>}</button>
+    {active && <div className="library-submenu">
+      <button className={view === "categories" ? "active" : ""} type="button" onClick={() => onView("categories")}><Folder size={14} /> Categories</button>
+      <button className={view === "favorites" ? "active" : ""} type="button" onClick={() => onView("favorites")}><Heart size={14} /> Favorites</button>
+      <button className={view === "series" ? "active" : ""} type="button" onClick={() => onView("series")}><Layers3 size={14} /> Series & sets</button>
+    </div>}
+  </div>;
+}
 
 const formatScanDate = (value: string | null) => {
   if (!value) return "Not scanned yet";
@@ -232,6 +247,7 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
 
 export function App() {
   const [section, setSection] = useState<Section>("all");
+  const [libraryView, setLibraryView] = useState<LibraryView>("browse");
   const [search, setSearch] = useState("");
   const [sources, setSources] = useState<LibrarySource[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -312,7 +328,8 @@ export function App() {
   }, [isScanning, loadSources]);
 
   const totalItems = sources.reduce((total, source) => total + source.item_count, 0);
-  const selectSection = (nextSection: Section) => { setSection(nextSection); setSearch(""); setSelectedSeriesId(null); };
+  const selectSection = (nextSection: Section) => { setSection(nextSection); setLibraryView("browse"); setSearch(""); setSelectedSeriesId(null); };
+  const selectLibraryView = (view: LibraryView) => { setLibraryView(view); setSearch(""); setSelectedSeriesId(null); };
   const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
 
   return (
@@ -321,22 +338,22 @@ export function App() {
         <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
         <nav aria-label="Main navigation">
           <p>Library</p>
-          <button className={section === "all" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("all")}><Grid2X2 size={19} /> All media <span>{formatCount(totalItems)}</span></button>
-          <button className={section === "comic" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("comic")}><Image size={19} /> Comics</button>
-          <button className={section === "video" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("video")}><Clapperboard size={19} /> Videos</button>
-          <button className={section === "story" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("story")}><BookOpen size={19} /> Stories</button>
-          <button className={section === "series" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("series")}><Layers3 size={19} /> Series & sets</button>
+          <LibraryNav active={section === "all"} view={libraryView} icon={<Grid2X2 size={19} />} label="All media" count={formatCount(totalItems)} onBrowse={() => selectSection("all")} onView={selectLibraryView} />
+          <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
+          <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
+          <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="Stories" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
           <p>Manage</p>
           <button className={section === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("categories")}><Folder size={19} /> Categories</button>
           <button className={section === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("tags")}><TagIcon size={19} /> Tags</button>
           <button className={section === "people" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("people")}><Users size={19} /> People</button>
           <button className={section === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("sources")}><HardDrive size={19} /> Sources</button>
+          <button className={section === "settings" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("settings")}><Settings size={19} /> Settings</button>
         </nav>
       </aside>
 
       <main>
         <header className="topbar">
-          <div className="search-box"><Search size={19} /><input aria-label="Search library" placeholder="Search your library" value={search} onChange={(event) => { setSearch(event.target.value); if (event.target.value) setSection("all"); }} /></div>
+          <div className="search-box"><Search size={19} /><input aria-label="Search library" placeholder="Search your library" value={search} onChange={(event) => { setSearch(event.target.value); if (event.target.value) { setSection("all"); setLibraryView("browse"); } }} /></div>
           <div className="local-pill"><span /> Local only</div>
         </header>
 
@@ -369,16 +386,20 @@ export function App() {
               <span>Nothing is uploaded or moved.</span>
             </section>
           )}
-          </> : section === "series" ? (
-            <SeriesView key={seriesNavigationKey} initialSeriesId={selectedSeriesId} tags={tags} onTagCreated={createTag} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => { setViewerSeriesContext(context); setSelectedItemId(id); }} />
+          </> : section === "settings" ? (
+            <SettingsView />
           ) : section === "categories" ? (
             <CategoriesView categories={categories} onChanged={() => { void loadCategories(); setRefreshKey((value) => value + 1); }} />
           ) : section === "tags" ? (
             <TagsView tags={tags} onChanged={() => { void loadTags(); setRefreshKey((value) => value + 1); }} />
           ) : section === "people" ? (
             <PeopleView people={people} onChanged={() => { void loadPeople(); setRefreshKey((value) => value + 1); }} />
+          ) : libraryView === "series" ? (
+            <SeriesView key={`${seriesNavigationKey}-${section}`} view="browse" mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => { setViewerSeriesContext(context); setSelectedItemId(id); }} />
           ) : (
             <GalleryView
+              key={`${section}-${libraryView}`}
+              view={libraryView}
               type={section === "all" ? undefined : section}
               search={search}
               categories={categories}
@@ -390,6 +411,7 @@ export function App() {
               onChanged={refreshMedia}
               sources={sources.map((source) => ({ id: source.id, name: source.name }))}
               onOpen={(id) => { setViewerSeriesContext(null); setSelectedItemId(id); }}
+              onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setLibraryView("series"); }}
               onAddSource={() => { setSection("sources"); setShowAddSource(true); }}
               refreshKey={refreshKey}
             />
@@ -398,7 +420,7 @@ export function App() {
       </main>
 
       {showAddSource && <AddSourceDialog onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
-      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} onNavigateItem={setSelectedItemId} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setViewerSeriesContext(null); setSection("series"); }} onClose={() => { setSelectedItemId(null); setViewerSeriesContext(null); }} onChanged={refreshMedia} />}
+      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} onNavigateItem={setSelectedItemId} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setViewerSeriesContext(null); setLibraryView("series"); }} onClose={() => { setSelectedItemId(null); setViewerSeriesContext(null); }} onChanged={refreshMedia} />}
     </div>
   );
 }

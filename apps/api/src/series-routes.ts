@@ -23,6 +23,7 @@ interface SeriesRow {
   cover_item_type: "comic" | "video" | "story" | null;
   cover_item_path: string | null;
   has_cover: number;
+  favorite: number;
 }
 
 function seriesTags(ids: number[]) {
@@ -42,9 +43,26 @@ function seriesTags(ids: number[]) {
   return result;
 }
 
+function seriesCategories(ids: number[]) {
+  const result = new Map<number, Array<{ id: number; name: string }>>();
+  if (!ids.length) return result;
+  const rows = database.prepare(`
+    SELECT sc.series_id, c.id, c.name FROM series_categories sc
+    JOIN categories c ON c.id = sc.category_id
+    WHERE sc.series_id IN (${ids.map(() => "?").join(",")})
+    ORDER BY c.name COLLATE NOCASE
+  `).all(...ids) as unknown as Array<{ series_id: number; id: number; name: string }>;
+  for (const row of rows) {
+    const categories = result.get(row.series_id) ?? [];
+    categories.push({ id: row.id, name: row.name });
+    result.set(row.series_id, categories);
+  }
+  return result;
+}
+
 function getSeries(id: number) {
   const row = database.prepare(`
-    SELECT s.id, s.title, s.description, s.preferred_type,
+    SELECT s.id, s.title, s.description, s.preferred_type, s.favorite,
       (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
         WHERE si.series_id = s.id AND m.available = 1) AS item_count,
       (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
@@ -63,7 +81,11 @@ function getSeries(id: number) {
     FROM series s WHERE s.id = ?
   `).get(id) as SeriesRow | undefined;
   if (!row) return undefined;
-  return { ...row, tags: seriesTags([id]).get(id) ?? [] };
+  return {
+    ...row,
+    tags: seriesTags([id]).get(id) ?? [],
+    categories: seriesCategories([id]).get(id) ?? [],
+  };
 }
 
 export async function registerSeriesRoutes(app: FastifyInstance) {
@@ -72,9 +94,10 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/series", async (request) => {
-    const { q, tags } = z.object({
+    const { q, tags, favorite } = z.object({
       q: z.string().trim().max(200).optional(),
       tags: z.string().regex(/^\d+(,\d+)*$/).max(500).optional(),
+      favorite: z.enum(["1"]).optional(),
     }).parse(request.query);
     const conditions = ["1 = 1"];
     const values: Array<string | number> = [];
@@ -82,12 +105,13 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       conditions.push("(s.title LIKE ? OR s.description LIKE ?)");
       values.push(`%${q}%`, `%${q}%`);
     }
+    if (favorite) conditions.push("s.favorite = 1");
     for (const tagId of new Set(tags?.split(",").map(Number) ?? [])) {
       conditions.push("EXISTS (SELECT 1 FROM series_tags st WHERE st.series_id = s.id AND st.tag_id = ?)");
       values.push(tagId);
     }
     const rows = database.prepare(`
-      SELECT s.id, s.title, s.description, s.preferred_type,
+      SELECT s.id, s.title, s.description, s.preferred_type, s.favorite,
         (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
           WHERE si.series_id = s.id AND m.available = 1) AS item_count,
         (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
@@ -107,7 +131,8 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       ORDER BY s.title COLLATE NOCASE, s.id
     `).all(...values) as unknown as SeriesRow[];
     const tagsBySeries = seriesTags(rows.map((row) => row.id));
-    return rows.map((row) => ({ ...row, tags: tagsBySeries.get(row.id) ?? [] }));
+    const categoriesBySeries = seriesCategories(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, tags: tagsBySeries.get(row.id) ?? [], categories: categoriesBySeries.get(row.id) ?? [] }));
   });
 
   app.post("/api/series", async (request, reply) => {
@@ -148,6 +173,15 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
     return reply.code(204).send();
   });
 
+  app.put("/api/series/:id/favorite", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { favorite } = z.object({ favorite: z.boolean() }).parse(request.body);
+    const changed = database.prepare("UPDATE series SET favorite = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(favorite ? 1 : 0, id).changes;
+    if (!changed) return reply.code(404).send({ message: "Series or set not found." });
+    return { id, favorite: favorite ? 1 : 0 };
+  });
+
   app.put("/api/series/:id/tags", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const { tagIds } = z.object({ tagIds: idsInput }).parse(request.body);
@@ -163,6 +197,29 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       database.prepare("DELETE FROM series_tags WHERE series_id = ?").run(id);
       const insert = database.prepare("INSERT INTO series_tags(series_id, tag_id) VALUES (?, ?)");
       for (const tagId of unique) insert.run(id, tagId);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return getSeries(id);
+  });
+
+  app.put("/api/series/:id/categories", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { categoryIds } = z.object({ categoryIds: idsInput }).parse(request.body);
+    if (!getSeries(id)) return reply.code(404).send({ message: "Series or set not found." });
+    const unique = [...new Set(categoryIds)];
+    for (const categoryId of unique) {
+      if (!database.prepare("SELECT id FROM categories WHERE id = ?").get(categoryId)) {
+        return reply.code(400).send({ message: `Category ${categoryId} does not exist.` });
+      }
+    }
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.prepare("DELETE FROM series_categories WHERE series_id = ?").run(id);
+      const insert = database.prepare("INSERT INTO series_categories(series_id, category_id) VALUES (?, ?)");
+      for (const categoryId of unique) insert.run(id, categoryId);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");

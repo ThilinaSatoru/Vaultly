@@ -62,3 +62,33 @@ test("rescan adds filename metadata without replacing manually assigned tags", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("scan creates and extends an ordered collection from matching sequel prefixes", async () => {
+  const token = `Scan Set ${randomUUID().slice(0, 8)}`;
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-series-"));
+  let sourceId = 0;
+  let seriesId = 0;
+  try {
+    await Promise.all([
+      writeFile(path.join(root, `${token} Part 02.mp4`), "two"),
+      writeFile(path.join(root, `${token} Part 01.mp4`), "one"),
+    ]);
+    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)")
+      .run(token, root, process.platform === "win32" ? root.toLowerCase() : root).lastInsertRowid);
+    await scanSource(sourceId, root);
+    const series = database.prepare("SELECT id, title, auto_key FROM series WHERE title = ?").get(token) as { id: number; title: string; auto_key: string };
+    seriesId = series.id;
+    expect(series.auto_key).toBeTruthy();
+    expect(database.prepare(`SELECT m.filename FROM series_items si JOIN media_items m ON m.id = si.item_id
+      WHERE si.series_id = ? ORDER BY si.position, si.item_id`).all(seriesId)).toEqual([
+        { filename: `${token} Part 01.mp4` }, { filename: `${token} Part 02.mp4` },
+      ]);
+    await writeFile(path.join(root, `${token} Part 03.mp4`), "three");
+    await scanSource(sourceId, root);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM series_items WHERE series_id = ?").get(seriesId)).toEqual({ count: 3 });
+  } finally {
+    if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
+    if (seriesId) database.prepare("DELETE FROM series WHERE id = ?").run(seriesId);
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -34,6 +34,7 @@ const listInput = z.object({
   tags: idListInput.optional(),
   cast: idListInput.optional(),
   artists: idListInput.optional(),
+  favorite: z.enum(["1"]).optional(),
   sort: z.enum(["title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
 }).refine((value) => value.minMb === undefined || value.maxMb === undefined || value.minMb <= value.maxMb,
@@ -132,7 +133,7 @@ async function sendLocalFile(
 }
 
 const itemSelect = `
-  SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes,
+  SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes, m.favorite,
     m.modified_at_ms, m.file_count, s.name AS source_name,
     COALESCE((SELECT group_concat(c.name, ', ')
       FROM item_categories ic JOIN categories c ON c.id = ic.category_id
@@ -141,6 +142,31 @@ const itemSelect = `
 `;
 
 interface TagRow { item_id: number; id: number; name: string }
+
+function categoriesByItem(itemIds: number[]): Map<number, Array<{ id: number; name: string }>> {
+  const result = new Map<number, Array<{ id: number; name: string }>>();
+  if (!itemIds.length) return result;
+  const rows = database.prepare(`
+    SELECT ic.item_id, c.id, c.name FROM item_categories ic
+    JOIN categories c ON c.id = ic.category_id
+    WHERE ic.item_id IN (${itemIds.map(() => "?").join(",")}) ORDER BY c.name COLLATE NOCASE
+  `).all(...itemIds) as unknown as Array<{ item_id: number; id: number; name: string }>;
+  for (const row of rows) {
+    const categories = result.get(row.item_id) ?? [];
+    categories.push({ id: row.id, name: row.name });
+    result.set(row.item_id, categories);
+  }
+  return result;
+}
+
+function seriesByItem(itemIds: number[]): Map<number, number[]> {
+  const result = new Map<number, number[]>();
+  if (!itemIds.length) return result;
+  const rows = database.prepare(`SELECT item_id, series_id FROM series_items
+    WHERE item_id IN (${itemIds.map(() => "?").join(",")}) ORDER BY series_id`).all(...itemIds) as Array<{ item_id: number; series_id: number }>;
+  for (const row of rows) result.set(row.item_id, [...(result.get(row.item_id) ?? []), row.series_id]);
+  return result;
+}
 
 function tagsByItem(itemIds: number[]): Map<number, Array<{ id: number; name: string }>> {
   const result = new Map<number, Array<{ id: number; name: string }>>();
@@ -193,6 +219,7 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       conditions.push("m.media_type = ?");
       values.push(input.type);
     }
+    if (input.favorite) conditions.push("m.favorite = 1");
     if (input.source) {
       conditions.push("m.source_id = ?");
       values.push(input.source);
@@ -276,8 +303,10 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       ${itemSelect} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
     `).all(...values, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
     const tags = tagsByItem(rows.map((row) => row.id));
+    const categories = categoriesByItem(rows.map((row) => row.id));
+    const memberships = seriesByItem(rows.map((row) => row.id));
     const credits = creditsByItem(rows.map((row) => row.id));
-    const items = rows.map((row) => ({ ...row, tags: tags.get(row.id) ?? [],
+    const items = rows.map((row) => ({ ...row, series_ids: memberships.get(row.id) ?? [], categories: categories.get(row.id) ?? [], tags: tags.get(row.id) ?? [],
       cast: credits.get(row.id)?.cast ?? [], artists: credits.get(row.id)?.artists ?? [] }));
     return { items, total: total.count, page: input.page, pageSize: 48 };
   });
@@ -289,8 +318,10 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     const categoryIds = database.prepare("SELECT category_id FROM item_categories WHERE item_id = ?").all(id)
       .map((row) => (row as { category_id: number }).category_id);
     const tags = tagsByItem([id]).get(id) ?? [];
+    const categories = categoriesByItem([id]).get(id) ?? [];
+    const seriesIds = seriesByItem([id]).get(id) ?? [];
     const credits = creditsByItem([id]).get(id);
-    return { ...item, category_ids: categoryIds, tags, cast: credits?.cast ?? [], artists: credits?.artists ?? [] };
+    return { ...item, series_ids: seriesIds, categories, category_ids: categoryIds, tags, cast: credits?.cast ?? [], artists: credits?.artists ?? [] };
   });
 
   app.patch("/api/items/:id", async (request, reply) => {
@@ -299,6 +330,15 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     const result = database.prepare("UPDATE media_items SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(title, id);
     if (!result.changes) return reply.code(404).send({ message: "Media item not found." });
     return { id, title };
+  });
+
+  app.put("/api/items/:id/favorite", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { favorite } = z.object({ favorite: z.boolean() }).parse(request.body);
+    const changed = database.prepare("UPDATE media_items SET favorite = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND available = 1")
+      .run(favorite ? 1 : 0, id).changes;
+    if (!changed) return reply.code(404).send({ message: "Media item not found." });
+    return { id, favorite: favorite ? 1 : 0 };
   });
 
   app.get("/api/items/:id/file", async (request, reply) => {
@@ -371,6 +411,25 @@ export async function registerMediaRoutes(app: FastifyInstance) {
       LEFT JOIN media_items m ON m.id = ic.item_id AND m.available = 1
       GROUP BY c.id ORDER BY c.name COLLATE NOCASE
     `).all();
+  });
+
+  app.get("/api/categories/overview", async (request) => {
+    const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
+    const typeClause = type ? "AND m.media_type = ?" : "";
+    const values = type ? [type] : [];
+    const categories = database.prepare(`
+      SELECT c.id, c.name, COUNT(m.id) AS item_count
+      FROM categories c
+      LEFT JOIN item_categories ic ON ic.category_id = c.id
+      LEFT JOIN media_items m ON m.id = ic.item_id AND m.available = 1 ${typeClause}
+      GROUP BY c.id HAVING COUNT(m.id) > 0 ORDER BY c.name COLLATE NOCASE
+    `).all(...values);
+    const uncategorized = database.prepare(`
+      SELECT COUNT(*) AS item_count FROM media_items m
+      WHERE m.available = 1 ${type ? "AND m.media_type = ?" : ""}
+        AND NOT EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id)
+    `).get(...values) as { item_count: number };
+    return { categories, uncategorized_count: uncategorized.item_count };
   });
 
   app.get("/api/tags", async () => {
