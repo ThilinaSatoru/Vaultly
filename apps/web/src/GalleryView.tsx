@@ -1,8 +1,8 @@
-import { ArrowLeft, BookOpen, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
 import { BulkActionDialog } from "./BulkActionDialog";
-import { api, formatCount, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
+import { api, formatCount, formatDuration, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
 import type { LibraryView } from "./App";
 
 interface GalleryViewProps {
@@ -18,6 +18,8 @@ interface GalleryViewProps {
   onChanged: () => void;
   sources: Array<{ id: number; name: string }>;
   onOpen: (id: number) => void;
+  onQueueVideo: (item: MediaItem) => void;
+  queuedVideoIds: number[];
   onOpenSeries: (id: number) => void;
   onAddSource: () => void;
   refreshKey: number;
@@ -29,10 +31,11 @@ const galleryNames: Record<MediaType, string> = {
   story: "Stories",
 };
 
-function MediaCard({ item, selected, onSelect, onOpen, onFavorite }: { item: MediaItem; selected: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void }) {
+function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQueue }: { item: MediaItem; selected: boolean; queued: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void; onQueue: () => void }) {
   const [hovered, setHovered] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
+  const [duration, setDuration] = useState(item.duration_seconds);
   const hoverTimer = useRef<number | null>(null);
   const retryTimer = useRef<number | null>(null);
   const archive = /\.(cbz|zip)$/i.test(item.relative_path);
@@ -52,6 +55,15 @@ function MediaCard({ item, selected, onSelect, onOpen, onFavorite }: { item: Med
     if (retryTimer.current !== null) window.clearTimeout(retryTimer.current);
   }, []);
 
+  useEffect(() => {
+    if (item.media_type !== "video" || duration) return;
+    let active = true;
+    api<{ duration_seconds: number | null }>(`/api/items/${item.id}/video-metadata`)
+      .then((metadata) => { if (active) setDuration(metadata.duration_seconds); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [item.id, item.media_type, duration]);
+
   const handleThumbnailError = () => {
     if (item.media_type !== "story" || thumbnailAttempt >= 8) {
       setThumbnailFailed(true);
@@ -68,6 +80,7 @@ function MediaCard({ item, selected, onSelect, onOpen, onFavorite }: { item: Med
     <article className={`media-card media-card-selectable${selected ? " is-selected" : ""}`}>
       <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
       <button className={`media-card-favorite${item.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>
+      {item.media_type === "video" && <button className={`media-card-queue${queued ? " is-queued" : ""}`} type="button" onClick={onQueue} aria-label={queued ? `${item.title} is in temporary playlist` : `Add ${item.title} to temporary playlist`} title={queued ? "In temporary playlist" : "Add to temporary playlist"}>{queued ? <Check size={17} /> : <ListPlus size={17} />}</button>}
       <button
       className="media-card-open"
       type="button"
@@ -93,7 +106,7 @@ function MediaCard({ item, selected, onSelect, onOpen, onFavorite }: { item: Med
         ) : (
           item.media_type === "video" ? <Clapperboard size={42} /> : item.media_type === "story" ? <BookOpen size={42} /> : <Image size={42} />
         )}
-        <span className="media-type-badge">{item.media_type}</span>
+        <span className="media-type-badge">{item.media_type === "video" ? formatDuration(duration) : item.media_type}</span>
         {item.media_type === "video" && <span className="play-overlay"><Play size={19} fill="currentColor" /></span>}
       </div>
       <div className="media-card-body">
@@ -122,7 +135,7 @@ function CollectionCard({ series, onOpen }: { series: SeriesSummary; onOpen: () 
   </article>;
 }
 
-export function GalleryView({ view, type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, sources, onOpen, onOpenSeries, onAddSource, refreshKey }: GalleryViewProps) {
+export function GalleryView({ view, type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, sources, onOpen, onQueueVideo, queuedVideoIds, onOpenSeries, onAddSource, refreshKey }: GalleryViewProps) {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [selectedCastIds, setSelectedCastIds] = useState<number[]>([]);
@@ -288,13 +301,18 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     const shownSeries = new Set<number>();
     return items.flatMap((item) => {
       const memberships = (item.series_ids ?? []).map((id) => seriesOptions.find((series) => series.id === id)).filter((series): series is SeriesSummary => Boolean(series));
-      if (!memberships.length) return [<MediaCard key={`${keyPrefix}item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id)} onFavorite={() => void toggleFavorite(item)} />];
+      if (!memberships.length) return [<MediaCard key={`${keyPrefix}item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id)} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} />];
       return memberships.filter((series) => !shownSeries.has(series.id)).map((series) => {
         shownSeries.add(series.id);
         return <CollectionCard key={`${keyPrefix}series-${series.id}`} series={series} onOpen={() => onOpenSeries(series.id)} />;
       });
     });
   };
+  const paginationControls = result ? <div className="pagination">
+    <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
+    <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>
+    <button className="secondary-button" type="button" onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * result.pageSize >= result.total}>Next</button>
+  </div> : null;
 
   return (
     <section className="gallery-view">
@@ -354,12 +372,9 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
         <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading media…</span></div>
       ) : result && result.items.length > 0 ? (
         <>
+          {paginationControls}
           <div className="media-grid">{renderCards(result.items)}</div>
-          <div className="pagination">
-            <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
-            <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>
-            <button className="secondary-button" type="button" onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * result.pageSize >= result.total}>Next</button>
-          </div>
+          {paginationControls}
         </>
       ) : (
         <div className="gallery-empty">

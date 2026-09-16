@@ -1,13 +1,15 @@
 import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Clapperboard, Heart, Image, Layers3, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
-import { api, type Category, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
+import { CircleView } from "./CircleView";
+import { api, type Category, type CircleSummary, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 import type { LibraryView } from "./App";
 
 interface SeriesViewProps {
   view: LibraryView;
   mediaType?: MediaType;
   initialSeriesId?: number | null;
+  initialEntityView?: "sets" | "circles";
   categories: Category[];
   tags: Tag[];
   onCategoryCreated: (name: string) => Promise<Category>;
@@ -73,7 +75,7 @@ function SeriesCard({ entry, version, onOpen, onFavorite }: { entry: SeriesSumma
   </article>;
 }
 
-export function SeriesView({ view, mediaType, initialSeriesId = null, categories, tags, onCategoryCreated, onTagCreated, onCategoriesChanged, onTagsChanged, onOpenItem }: SeriesViewProps) {
+export function SeriesView({ view, mediaType, initialSeriesId = null, initialEntityView = "sets", categories, tags, onCategoryCreated, onTagCreated, onCategoriesChanged, onTagsChanged, onOpenItem }: SeriesViewProps) {
   const [seriesList, setSeriesList] = useState<SeriesSummary[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(initialSeriesId);
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
@@ -92,8 +94,12 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, categories
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [coverVersion, setCoverVersion] = useState(0);
+  const [entityView, setEntityView] = useState<"sets" | "circles">(initialEntityView);
+  const [circleCreateRequest, setCircleCreateRequest] = useState(0);
+  const [circleOptions, setCircleOptions] = useState<Array<{ id: number; name: string }>>([]);
+  const [circleIds, setCircleIds] = useState<number[]>([]);
 
-  useEffect(() => { if (initialSeriesId !== null) setSelectedId(initialSeriesId); }, [initialSeriesId]);
+  useEffect(() => { if (initialSeriesId !== null) { setEntityView("sets"); setSelectedId(initialSeriesId); } }, [initialSeriesId]);
 
   const loadList = useCallback(async () => {
     try {
@@ -106,8 +112,14 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, categories
 
   const loadDetail = useCallback(async (id: number) => {
     try {
-      const result = await api<SeriesDetail>(`/api/series/${id}`);
+      const [result, allCircles, memberships] = await Promise.all([
+        api<SeriesDetail>(`/api/series/${id}`),
+        api<CircleSummary[]>("/api/circles"),
+        api<Array<{ id: number; name: string }>>(`/api/series/${id}/circles`),
+      ]);
       setDetail(result);
+      setCircleOptions(allCircles.map((circle) => ({ id: circle.id, name: circle.title })));
+      setCircleIds(memberships.map((circle) => circle.id));
       setTitle(result.title);
       setDescription(result.description);
       setPreferredType(result.preferred_type);
@@ -186,6 +198,23 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, categories
       onCategoriesChanged();
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not update set categories."); }
     finally { setBusy(false); }
+  };
+
+  const updateCircles = async (ids: number[]) => {
+    if (!detail) return;
+    setBusy(true); setError("");
+    try {
+      const memberships = await api<Array<{ id: number; name: string }>>(`/api/series/${detail.id}/circles`, { method: "PUT", body: JSON.stringify({ circleIds: ids }) });
+      setCircleIds(memberships.map((circle) => circle.id));
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not update circle membership."); }
+    finally { setBusy(false); }
+  };
+
+  const createCircle = async (name: string) => {
+    const created = await api<CircleSummary>("/api/circles", { method: "POST", body: JSON.stringify({ title: name, description: "" }) });
+    const option = { id: created.id, name: created.title };
+    setCircleOptions((current) => [...current, option].sort((a, b) => a.name.localeCompare(b.name)));
+    return option;
   };
 
   const toggleFavorite = async (entry: SeriesSummary) => {
@@ -271,6 +300,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, categories
           </div>
           <TagCombobox label="Set tags" tags={tags} selectedIds={detail.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={busy} placeholder="Search or create tags" />
           <TagCombobox label="Set categories" tags={categories} selectedIds={(detail.categories ?? []).map((category) => category.id)} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={busy} placeholder="Search or create categories" />
+          <TagCombobox label="In story circles" tags={circleOptions} selectedIds={circleIds} onChange={(ids) => void updateCircles(ids)} onCreate={createCircle} disabled={busy} placeholder="Search or create circles" />
         </div>
       </div>
 
@@ -299,9 +329,16 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, categories
     </>}
   </section>;
 
+  if (entityView === "circles") return <section className="series-view">
+    <div className="page-heading"><div><p className="eyebrow">Your library</p><h1>{mediaType ? `${mediaType === "story" ? "Story" : mediaType[0].toUpperCase() + mediaType.slice(1)} circles` : "Story circles"}</h1><p>Arrange several collections or comic episode sets as one complete story.</p></div><button className="primary-button" type="button" onClick={() => setCircleCreateRequest((value) => value + 1)}><Plus size={18} /> New circle</button></div>
+    <div className="series-entity-tabs" role="group" aria-label="Collection level"><button type="button" onClick={() => setEntityView("sets")}>Sets</button><button className="active" type="button">Circles</button></div>
+    <CircleView series={seriesList} createRequested={circleCreateRequest} mediaType={mediaType} onOpenSeries={(id) => { setEntityView("sets"); setSelectedId(id); }} />
+  </section>;
+
   return <section className="series-view">
     <div className="page-heading"><div><p className="eyebrow">Your library</p><h1>{mediaType ? `${mediaType === "story" ? "Story" : mediaType[0].toUpperCase() + mediaType.slice(1)} series & sets` : view === "categories" ? "Series & sets by category" : view === "favorites" ? "Favorite series & sets" : "Series & sets"}</h1><p>{view === "categories" ? "Browse sets in dedicated category sections." : view === "favorites" ? "Your favorite collections, kept separate from library filters." : `Collections containing ${mediaType ? `${mediaType} items` : "related media"}, kept in viewing order.`}</p></div>
       {view === "browse" && <button className="primary-button" type="button" onClick={() => { setTitle(""); setDescription(""); setPreferredType(groupFilter === "all" ? "mixed" : groupFilter); setError(""); setShowCreate(true); }}><Plus size={18} /> New set</button>}</div>
+    {view === "browse" && <div className="series-entity-tabs" role="group" aria-label="Collection level"><button className="active" type="button">Sets</button><button type="button" onClick={() => setEntityView("circles")}>Circles</button></div>}
     {view === "browse" && <div className="series-filters"><div className="series-search"><Search size={17} /><input aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div>
       <TagCombobox label="Filter set categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} placeholder="All categories" />
       <TagCombobox label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>}

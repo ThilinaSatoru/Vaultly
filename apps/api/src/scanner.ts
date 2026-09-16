@@ -2,6 +2,7 @@ import { opendir, stat } from "node:fs/promises";
 import path from "node:path";
 import { database } from "./database.js";
 import { FilenameMetadataMatcher } from "./filename-metadata.js";
+import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail } from "./thumbnails.js";
 
 const videoExtensions = new Set([
   ".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg",
@@ -125,7 +126,7 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
 
 const scans = new Map<number, Promise<void>>();
 
-export function scanSource(sourceId: number, rootPath: string): Promise<void> {
+export function scanSource(sourceId: number, rootPath: string, options: { regenerateThumbnails?: boolean } = {}): Promise<void> {
   const existingScan = scans.get(sourceId);
   if (existingScan) return existingScan;
 
@@ -135,7 +136,9 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
     ).run(sourceId);
 
     try {
+      const previousItemIds = (database.prepare("SELECT id FROM media_items WHERE source_id = ?").all(sourceId) as Array<{ id: number }>).map((row) => row.id);
       const items = await collectItems(rootPath);
+      const indexedItems: Array<{ id: number; item: ScannedItem }> = [];
       database.exec("BEGIN IMMEDIATE");
       try {
         database.prepare("UPDATE media_items SET available = 0 WHERE source_id = ?").run(sourceId);
@@ -161,6 +164,10 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
           ON CONFLICT(source_id, media_type, relative_path) DO UPDATE SET
             filename = excluded.filename,
             file_extension = excluded.file_extension,
+            duration_seconds = CASE
+              WHEN media_items.size_bytes != excluded.size_bytes OR media_items.modified_at_ms != excluded.modified_at_ms THEN NULL
+              ELSE media_items.duration_seconds
+            END,
             size_bytes = excluded.size_bytes,
             modified_at_ms = excluded.modified_at_ms,
             file_count = excluded.file_count,
@@ -168,8 +175,6 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `);
-        const indexedItems: Array<{ id: number; item: ScannedItem }> = [];
-
         for (const item of items) {
           const row = upsert.get(
             sourceId,
@@ -225,17 +230,26 @@ export function scanSource(sourceId: number, rootPath: string): Promise<void> {
           group.entries.forEach((entry, position) => addSeriesItem.run(series!.id, entry.id, position));
         }
 
-        database.prepare(`
-          UPDATE sources
-          SET status = 'ready', last_error = NULL, last_scanned_at = CURRENT_TIMESTAMP,
-              updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?
-        `).run(sourceId);
         database.exec("COMMIT");
       } catch (transactionError) {
         database.exec("ROLLBACK");
         throw transactionError;
       }
+      if (options.regenerateThumbnails) {
+        await clearThumbnailCache([...new Set([...previousItemIds, ...indexedItems.map((entry) => entry.id)])]);
+        await Promise.allSettled(indexedItems.filter((entry) => entry.item.mediaType === "video" || entry.item.mediaType === "story").map((entry) => {
+          const inputPath = path.resolve(rootPath, entry.item.relativePath);
+          return entry.item.mediaType === "video"
+            ? getVideoThumbnail(entry.id, inputPath, entry.item.sizeBytes, entry.item.modifiedAtMs)
+            : getPdfThumbnail(entry.id, inputPath, entry.item.sizeBytes, entry.item.modifiedAtMs);
+        }));
+      }
+      database.prepare(`
+        UPDATE sources
+        SET status = 'ready', last_error = NULL, last_scanned_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(sourceId);
     } catch (error) {
       const message = error instanceof Error ? error.message : "The folder could not be scanned.";
       database.prepare(`

@@ -11,6 +11,7 @@ export interface MediaItem {
   relative_path: string;
   size_bytes: number;
   modified_at_ms: number;
+  duration_seconds: number | null;
   file_count: number;
   category_names: string;
   favorite: number;
@@ -91,6 +92,22 @@ export interface SeriesViewerContext {
   items: Array<{ id: number; title: string }>;
 }
 
+export interface CircleSummary {
+  id: number;
+  title: string;
+  description: string;
+  set_count: number;
+  item_count: number;
+  video_count: number;
+  comic_count: number;
+  story_count: number;
+  preferred_type: MediaType | "mixed";
+}
+
+export interface CircleDetail extends CircleSummary {
+  series_ids: number[];
+}
+
 export const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
   const response = await fetch(url, {
     ...options,
@@ -116,4 +133,15 @@ export const formatSize = (bytes: number) => {
     unit += 1;
   }
   return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+};
+
+export const formatDuration = (seconds: number | null | undefined) => {
+  if (!seconds || !Number.isFinite(seconds)) return "--:--";
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const remainder = total % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`
+    : `${minutes}:${String(remainder).padStart(2, "0")}`;
 };

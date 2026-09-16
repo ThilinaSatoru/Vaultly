@@ -1,6 +1,6 @@
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { execFile } from "node:child_process";
-import { mkdir, rename, stat, unlink } from "node:fs/promises";
+import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
@@ -9,9 +9,26 @@ import { runtimeDirectory } from "./database.js";
 const execFileAsync = promisify(execFile);
 const thumbnailDirectory = path.join(runtimeDirectory, "thumbnails");
 const inFlight = new Map<string, Promise<string>>();
+const durationInFlight = new Map<string, Promise<number | null>>();
 const failedPdfUntil = new Map<string, number>();
 const waiting: Array<() => void> = [];
+const probeWaiting: Array<() => void> = [];
 let running = 0;
+let probesRunning = 0;
+
+export async function clearThumbnailCache(itemIds: number[]): Promise<void> {
+  if (!itemIds.length) return;
+  const ids = new Set(itemIds);
+  const files = await readdir(thumbnailDirectory).catch(() => [] as string[]);
+  await Promise.all(files.map(async (filename) => {
+    const match = /^(?:video-mid-v2-|pdf-)?(\d+)-/.exec(filename);
+    if (match && ids.has(Number(match[1]))) await unlink(path.join(thumbnailDirectory, filename)).catch(() => undefined);
+  }));
+  for (const cacheKey of failedPdfUntil.keys()) {
+    const match = /^pdf-(\d+)-/.exec(cacheKey);
+    if (match && ids.has(Number(match[1]))) failedPdfUntil.delete(cacheKey);
+  }
+}
 
 async function exists(filePath: string): Promise<boolean> {
   try { return (await stat(filePath)).size > 0; }
@@ -28,6 +45,16 @@ async function withWorker<T>(task: () => Promise<T>): Promise<T> {
   }
 }
 
+async function withProbe<T>(task: () => Promise<T>): Promise<T> {
+  if (probesRunning >= 2) await new Promise<void>((resolve) => probeWaiting.push(resolve));
+  probesRunning += 1;
+  try { return await task(); }
+  finally {
+    probesRunning -= 1;
+    probeWaiting.shift()?.();
+  }
+}
+
 async function captureFrame(inputPath: string, outputPath: string, seekSeconds: string) {
   await execFileAsync(ffmpegInstaller.path, [
     "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", seekSeconds,
@@ -35,6 +62,28 @@ async function captureFrame(inputPath: string, outputPath: string, seekSeconds: 
     "-q:v", "5", "-y", outputPath,
   ], { windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024 });
   if (!(await exists(outputPath))) throw new Error("FFmpeg did not produce a frame.");
+}
+
+export function getVideoDuration(inputPath: string): Promise<number | null> {
+  const pending = durationInFlight.get(inputPath);
+  if (pending) return pending;
+  const task = withProbe(async () => {
+    let diagnostic = "";
+    try {
+      const result = await execFileAsync(ffmpegInstaller.path, ["-hide_banner", "-i", inputPath], {
+        windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024,
+      });
+      diagnostic = result.stderr;
+    } catch (error) {
+      diagnostic = typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
+    }
+    const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(diagnostic);
+    if (!match) return null;
+    const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+  }).finally(() => durationInFlight.delete(inputPath));
+  durationInFlight.set(inputPath, task);
+  return task;
 }
 
 function renderPdfInWorker(inputPath: string, outputPath: string): Promise<void> {
@@ -70,7 +119,8 @@ export function getVideoThumbnail(
   sizeBytes: number,
   modifiedAtMs: number,
 ): Promise<string> {
-  const cacheKey = `${id}-${sizeBytes}-${Math.round(modifiedAtMs)}`;
+  // Versioned so previously cached opening-frame thumbnails are replaced.
+  const cacheKey = `video-mid-v2-${id}-${sizeBytes}-${Math.round(modifiedAtMs)}`;
   const targetPath = path.join(thumbnailDirectory, `${cacheKey}.jpg`);
   const pending = inFlight.get(cacheKey);
   if (pending) return pending;
@@ -82,8 +132,13 @@ export function getVideoThumbnail(
       await mkdir(thumbnailDirectory, { recursive: true });
       const temporaryPath = path.join(thumbnailDirectory, `${cacheKey}-${process.pid}-${Date.now()}.tmp.jpg`);
       try {
-        try { await captureFrame(inputPath, temporaryPath, "1"); }
-        catch { await captureFrame(inputPath, temporaryPath, "0"); }
+        const duration = await getVideoDuration(inputPath);
+        const middle = duration ? Math.max(0.1, duration * 0.5).toFixed(3) : "10";
+        try { await captureFrame(inputPath, temporaryPath, middle); }
+        catch {
+          try { await captureFrame(inputPath, temporaryPath, "5"); }
+          catch { await captureFrame(inputPath, temporaryPath, "1"); }
+        }
         await rename(temporaryPath, targetPath);
         return targetPath;
       } finally {

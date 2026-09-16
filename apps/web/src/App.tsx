@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   BookOpen,
   Check,
   ChevronRight,
@@ -6,13 +7,16 @@ import {
   Folder,
   FolderOpen,
   Grid2X2,
+  Guitar,
   HardDrive,
   Heart,
   Image,
   Library,
   Layers3,
+  ListVideo,
   LoaderCircle,
   MoreHorizontal,
+  Orbit,
   Plus,
   RefreshCw,
   Search,
@@ -24,13 +28,14 @@ import {
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CategoriesView } from "./CategoriesView";
+import { ChordifyView } from "./ChordifyView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
 import { PeopleView } from "./PeopleView";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
 import { TagsView } from "./TagsView";
-import { api, formatCount, type Category, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
+import { api, formatCount, type Category, type MediaItem, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
 
 type SourceStatus = "idle" | "scanning" | "ready" | "error";
 
@@ -45,10 +50,12 @@ interface LibrarySource {
   comic_count: number;
   video_count: number;
   story_count: number;
+  path_available: boolean;
+  path_error: string | null;
 }
 
-type Section = "all" | MediaType | "categories" | "tags" | "people" | "sources" | "settings";
-export type LibraryView = "browse" | "categories" | "favorites" | "series";
+type Section = "all" | MediaType | "chordify" | "categories" | "tags" | "people" | "sources" | "settings";
+export type LibraryView = "browse" | "categories" | "favorites" | "series" | "circles";
 
 function LibraryNav({ active, view, icon, label, count, onBrowse, onView }: { active: boolean; view: LibraryView; icon: ReactNode; label: string; count?: string; onBrowse: () => void; onView: (view: LibraryView) => void }) {
   return <div className={`library-nav-group${active ? " is-active" : ""}`}>
@@ -57,6 +64,7 @@ function LibraryNav({ active, view, icon, label, count, onBrowse, onView }: { ac
       <button className={view === "categories" ? "active" : ""} type="button" onClick={() => onView("categories")}><Folder size={14} /> Categories</button>
       <button className={view === "favorites" ? "active" : ""} type="button" onClick={() => onView("favorites")}><Heart size={14} /> Favorites</button>
       <button className={view === "series" ? "active" : ""} type="button" onClick={() => onView("series")}><Layers3 size={14} /> Series & sets</button>
+      <button className={view === "circles" ? "active" : ""} type="button" onClick={() => onView("circles")}><Orbit size={14} /> Circles</button>
     </div>}
   </div>;
 }
@@ -173,6 +181,7 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
   const [menuOpen, setMenuOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState("");
+  const displayStatus = source.path_available ? source.status : "unavailable";
 
   const rescan = async () => {
     setWorking(true);
@@ -209,9 +218,9 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
         <div className="source-heading">
           <div className="source-title-line">
             <h3>{source.name}</h3>
-            <span className={`status status-${source.status}`}>
-              {source.status === "scanning" ? <LoaderCircle className="spin" size={13} /> : source.status === "ready" ? <Check size={13} /> : null}
-              {source.status}
+            <span className={`status status-${displayStatus}`}>
+              {displayStatus === "scanning" ? <LoaderCircle className="spin" size={13} /> : displayStatus === "ready" ? <Check size={13} /> : displayStatus === "unavailable" ? <AlertTriangle size={13} /> : null}
+              {displayStatus}
             </span>
           </div>
           <p title={source.root_path}>{source.root_path}</p>
@@ -222,7 +231,7 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
           </button>
           {menuOpen && (
             <div className="source-menu">
-              <button type="button" onClick={rescan}><RefreshCw size={16} /> Scan again</button>
+              <button type="button" onClick={rescan} disabled={!source.path_available}><RefreshCw size={16} /> Scan again</button>
               <button className="danger" type="button" onClick={remove} disabled={source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
             </div>
           )}
@@ -240,6 +249,7 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
         <strong>{formatCount(source.item_count)} items</strong>
       </footer>
       {source.last_error && <p className="scan-error">{source.last_error}</p>}
+      {!source.path_available && <p className="source-unavailable"><AlertTriangle size={15} /> {source.path_error || "The source path or drive is unavailable."}</p>}
       {actionError && <p className="scan-error" role="alert">{actionError}</p>}
     </article>
   );
@@ -257,11 +267,15 @@ export function App() {
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
+  const [viewerFloating, setViewerFloating] = useState(false);
   const [viewerSeriesContext, setViewerSeriesContext] = useState<SeriesViewerContext | null>(null);
   const [selectedSeriesId, setSelectedSeriesId] = useState<number | null>(null);
   const [seriesNavigationKey, setSeriesNavigationKey] = useState(0);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [rescanningAll, setRescanningAll] = useState(false);
   const wasScanning = useRef(false);
+  const libraryLocation = useRef({ x: 0, y: 0 });
 
   const loadSources = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -331,6 +345,37 @@ export function App() {
   const selectSection = (nextSection: Section) => { setSection(nextSection); setLibraryView("browse"); setSearch(""); setSelectedSeriesId(null); };
   const selectLibraryView = (view: LibraryView) => { setLibraryView(view); setSearch(""); setSelectedSeriesId(null); };
   const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
+  const openItem = (id: number, context: SeriesViewerContext | null = null) => {
+    libraryLocation.current = { x: window.scrollX, y: window.scrollY };
+    setViewerSeriesContext(context);
+    setViewerFloating(false);
+    setSelectedItemId(id);
+  };
+  const closeViewer = () => {
+    setSelectedItemId(null);
+    setViewerSeriesContext(null);
+    setViewerFloating(false);
+    window.requestAnimationFrame(() => window.scrollTo(libraryLocation.current.x, libraryLocation.current.y));
+  };
+  const queueVideo = (item: MediaItem) => {
+    setTemporaryPlaylist((current) => current.some((entry) => entry.id === item.id) ? current : [...current, item]);
+    if (selectedItemId === null) {
+      libraryLocation.current = { x: window.scrollX, y: window.scrollY };
+      setViewerSeriesContext(null);
+      setSelectedItemId(item.id);
+    }
+    setViewerFloating(true);
+  };
+  const rescanAll = async () => {
+    setRescanningAll(true);
+    setError("");
+    try {
+      await api("/api/sources/scan", { method: "POST" });
+      await loadSources(true);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not rescan all sources.");
+    } finally { setRescanningAll(false); }
+  };
 
   return (
     <div className="app-shell">
@@ -342,6 +387,8 @@ export function App() {
           <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
           <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
           <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="Stories" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
+          <p>Services</p>
+          <button className={section === "chordify" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("chordify")}><Guitar size={19} /> Chordify</button>
           <p>Manage</p>
           <button className={section === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("categories")}><Folder size={19} /> Categories</button>
           <button className={section === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("tags")}><TagIcon size={19} /> Tags</button>
@@ -354,14 +401,17 @@ export function App() {
       <main>
         <header className="topbar">
           <div className="search-box"><Search size={19} /><input aria-label="Search library" placeholder="Search your library" value={search} onChange={(event) => { setSearch(event.target.value); if (event.target.value) { setSection("all"); setLibraryView("browse"); } }} /></div>
-          <div className="local-pill"><span /> Local only</div>
+          <div className="topbar-actions">
+            {temporaryPlaylist.length > 0 && <button className="playlist-launch" type="button" onClick={() => openItem(temporaryPlaylist[0].id)}><ListVideo size={17} /> Temporary playlist <strong>{temporaryPlaylist.length}</strong></button>}
+            <div className="local-pill"><span /> Local only</div>
+          </div>
         </header>
 
         <div className="content">
           {section === "sources" ? <>
           <div className="page-heading">
             <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames.</p></div>
-            <button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button>
+            <div className="page-heading-actions"><button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || isScanning || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button><button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
           </div>
 
           <section className="summary-strip" aria-label="Source summary">
@@ -386,7 +436,9 @@ export function App() {
               <span>Nothing is uploaded or moved.</span>
             </section>
           )}
-          </> : section === "settings" ? (
+          </> : section === "chordify" ? (
+            <ChordifyView />
+          ) : section === "settings" ? (
             <SettingsView />
           ) : section === "categories" ? (
             <CategoriesView categories={categories} onChanged={() => { void loadCategories(); setRefreshKey((value) => value + 1); }} />
@@ -394,8 +446,8 @@ export function App() {
             <TagsView tags={tags} onChanged={() => { void loadTags(); setRefreshKey((value) => value + 1); }} />
           ) : section === "people" ? (
             <PeopleView people={people} onChanged={() => { void loadPeople(); setRefreshKey((value) => value + 1); }} />
-          ) : libraryView === "series" ? (
-            <SeriesView key={`${seriesNavigationKey}-${section}`} view="browse" mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => { setViewerSeriesContext(context); setSelectedItemId(id); }} />
+          ) : libraryView === "series" || libraryView === "circles" ? (
+            <SeriesView key={`${seriesNavigationKey}-${section}-${libraryView}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
           ) : (
             <GalleryView
               key={`${section}-${libraryView}`}
@@ -409,8 +461,10 @@ export function App() {
               onCategoryCreated={createCategory}
               onPersonCreated={createPerson}
               onChanged={refreshMedia}
-              sources={sources.map((source) => ({ id: source.id, name: source.name }))}
-              onOpen={(id) => { setViewerSeriesContext(null); setSelectedItemId(id); }}
+              sources={sources.map((source) => ({ id: source.id, name: source.path_available ? source.name : `${source.name} (unavailable)` }))}
+              onOpen={(id) => openItem(id)}
+              onQueueVideo={queueVideo}
+              queuedVideoIds={temporaryPlaylist.map((item) => item.id)}
               onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setLibraryView("series"); }}
               onAddSource={() => { setSection("sources"); setShowAddSource(true); }}
               refreshKey={refreshKey}
@@ -420,7 +474,7 @@ export function App() {
       </main>
 
       {showAddSource && <AddSourceDialog onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
-      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} onNavigateItem={setSelectedItemId} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setViewerSeriesContext(null); setLibraryView("series"); }} onClose={() => { setSelectedItemId(null); setViewerSeriesContext(null); }} onChanged={refreshMedia} />}
+      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={setSelectedItemId} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setViewerSeriesContext(null); setViewerFloating(false); setLibraryView("series"); }} onClose={closeViewer} onChanged={refreshMedia} />}
     </div>
   );
 }

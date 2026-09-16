@@ -132,6 +132,53 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_series_categories_category
     ON series_categories(category_id, series_id);
 
+  CREATE TABLE IF NOT EXISTS circles (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    preferred_type TEXT NOT NULL DEFAULT 'mixed',
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS circle_series (
+    circle_id INTEGER NOT NULL REFERENCES circles(id) ON DELETE CASCADE,
+    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (circle_id, series_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_circle_series_order ON circle_series(circle_id, position);
+  CREATE INDEX IF NOT EXISTS idx_circle_series_series ON circle_series(series_id, circle_id);
+
+  CREATE TABLE IF NOT EXISTS chordify_playlists (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS chordify_songs (
+    id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS chordify_playlist_songs (
+    playlist_id INTEGER NOT NULL REFERENCES chordify_playlists(id) ON DELETE CASCADE,
+    song_id INTEGER NOT NULL REFERENCES chordify_songs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (playlist_id, song_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_chordify_playlist_songs_order
+    ON chordify_playlist_songs(playlist_id, position);
+  CREATE INDEX IF NOT EXISTS idx_chordify_playlist_songs_song
+    ON chordify_playlist_songs(song_id);
+
 `);
 
 // Filename and format are stored separately from the relative path so a filename
@@ -140,9 +187,11 @@ const mediaColumns = (database.prepare("PRAGMA table_info(media_items)").all() a
 const needsFilename = !mediaColumns.includes("filename");
 const needsExtension = !mediaColumns.includes("file_extension");
 const needsFavorite = !mediaColumns.includes("favorite");
+const needsDuration = !mediaColumns.includes("duration_seconds");
 if (needsFilename) database.exec("ALTER TABLE media_items ADD COLUMN filename TEXT NOT NULL DEFAULT ''");
 if (needsExtension) database.exec("ALTER TABLE media_items ADD COLUMN file_extension TEXT NOT NULL DEFAULT ''");
 if (needsFavorite) database.exec("ALTER TABLE media_items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
+if (needsDuration) database.exec("ALTER TABLE media_items ADD COLUMN duration_seconds REAL");
 if (needsFilename || needsExtension) {
   const knownExtensions = new Set(["mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "mpeg", "mpg", "pdf", "cbz", "zip"]);
   const rows = database.prepare(`
@@ -180,6 +229,9 @@ if (!seriesColumns.includes("preferred_type")) {
 if (!seriesColumns.includes("favorite")) database.exec("ALTER TABLE series ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
 if (!seriesColumns.includes("auto_key")) database.exec("ALTER TABLE series ADD COLUMN auto_key TEXT");
 database.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_series_auto_key ON series(auto_key) WHERE auto_key IS NOT NULL");
+
+const circleColumns = (database.prepare("PRAGMA table_info(circles)").all() as Array<{ name: string }>).map((column) => column.name);
+if (!circleColumns.includes("preferred_type")) database.exec("ALTER TABLE circles ADD COLUMN preferred_type TEXT NOT NULL DEFAULT 'mixed'");
 
 database.exec("CREATE INDEX IF NOT EXISTS idx_media_items_format ON media_items(available, media_type, file_extension)");
 

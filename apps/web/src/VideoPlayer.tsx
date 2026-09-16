@@ -5,6 +5,7 @@ import { matchesShortcut, readNumberPreference } from "./preferences";
 interface VideoPlayerProps {
   src: string;
   autoPlay: boolean;
+  compact?: boolean;
   onEnded?: () => void;
   onError: (message: string) => void;
 }
@@ -30,7 +31,7 @@ function formatTime(seconds: number) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function VideoPlayer({ src, autoPlay, onEnded, onError }: VideoPlayerProps) {
+export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
@@ -89,6 +90,11 @@ export function VideoPlayer({ src, autoPlay, onEnded, onError }: VideoPlayerProp
       video.removeEventListener("volumechange", onVolume);
     };
   }, [seeking]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (autoPlay && video?.paused) void video.play().catch(() => undefined);
+  }, [autoPlay, src]);
 
   useEffect(() => {
     const onFsChange = () => setFullscreen(document.fullscreenElement === containerRef.current);
@@ -215,7 +221,7 @@ export function VideoPlayer({ src, autoPlay, onEnded, onError }: VideoPlayerProp
     <div
       ref={containerRef}
       tabIndex={-1}
-      className={`video-player ${showControls ? "controls-visible" : "controls-hidden"}`}
+      className={`video-player${compact ? " compact" : ""} ${showControls ? "controls-visible" : "controls-hidden"}`}
       onMouseMove={() => { setShowControls(true); scheduleHide(playing); }}
       onDoubleClick={(event) => { if (event.target === videoRef.current) toggleFullscreen(); }}
       onWheel={(event) => {
@@ -233,7 +239,9 @@ export function VideoPlayer({ src, autoPlay, onEnded, onError }: VideoPlayerProp
         ref={videoRef}
         src={src}
         autoPlay={autoPlay}
+        preload="auto"
         playsInline
+        onCanPlay={() => { if (autoPlay && videoRef.current?.paused) void videoRef.current.play().catch(() => undefined); }}
         onEnded={onEnded}
         onClick={() => {
           togglePlay();

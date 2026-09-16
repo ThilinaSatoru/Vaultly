@@ -3,7 +3,8 @@ export type ShortcutAction =
   | "video.playPause" | "video.fullscreen" | "video.seekBack" | "video.seekForward"
   | "video.seekBackLarge" | "video.seekForwardLarge" | "video.volumeUp" | "video.volumeDown" | "video.mute"
   | "reader.previousPage" | "reader.nextPage" | "reader.scrollUp" | "reader.scrollDown"
-  | "reader.zoomIn" | "reader.resetFit";
+  | "reader.zoomIn" | "reader.resetFit"
+  | "comic.zoomIn" | "comic.zoomOut" | "comic.fitWidth" | "comic.resetFit" | "comic.fullscreen";
 
 export const defaultBindings: Record<ShortcutAction, string[]> = {
   "viewer.close": ["Escape"],
@@ -24,6 +25,11 @@ export const defaultBindings: Record<ShortcutAction, string[]> = {
   "reader.scrollDown": ["ArrowDown"],
   "reader.zoomIn": ["Enter"],
   "reader.resetFit": ["Numpad0"],
+  "comic.zoomIn": ["Shift+ArrowUp"],
+  "comic.zoomOut": ["Shift+ArrowDown"],
+  "comic.fitWidth": ["Enter"],
+  "comic.resetFit": ["Numpad0"],
+  "comic.fullscreen": ["KeyF"],
 };
 
 const bindingKey = "vaultly.keybindings";

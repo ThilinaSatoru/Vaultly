@@ -10,6 +10,8 @@ import { registerMediaRoutes } from "./media-routes.js";
 import { registerSeriesRoutes } from "./series-routes.js";
 import { registerPeopleRoutes } from "./people-routes.js";
 import { registerBulkRoutes } from "./bulk-routes.js";
+import { registerCircleRoutes } from "./circle-routes.js";
+import { registerChordifyRoutes } from "./chordify-routes.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
@@ -17,6 +19,8 @@ await app.register(registerMediaRoutes);
 await app.register(registerSeriesRoutes);
 await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);
+await app.register(registerCircleRoutes);
+await app.register(registerChordifyRoutes);
 
 const sourceInput = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -40,7 +44,15 @@ const sourceSummaryQuery = `
 app.get("/api/health", async () => ({ ok: true }));
 
 app.get("/api/sources", async () => {
-  return database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all();
+  const sources = database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all() as Array<SourceRow & Record<string, unknown>>;
+  return Promise.all(sources.map(async (source) => {
+    try {
+      const sourceStat = await stat(source.root_path);
+      return { ...source, path_available: sourceStat.isDirectory(), path_error: sourceStat.isDirectory() ? null : "The source path is not a directory." };
+    } catch {
+      return { ...source, path_available: false, path_error: "The source path or drive is unavailable." };
+    }
+  }));
 });
 
 app.post("/api/system/pick-directory", async (_request, reply) => {
@@ -81,11 +93,17 @@ app.post("/api/sources", async (request, reply) => {
   }
 });
 
+app.post("/api/sources/scan", async (_request, reply) => {
+  const sources = database.prepare("SELECT * FROM sources ORDER BY id").all() as unknown as SourceRow[];
+  for (const source of sources) void scanSource(source.id, source.root_path, { regenerateThumbnails: true });
+  return reply.code(202).send({ status: "scanning", count: sources.length });
+});
+
 app.post("/api/sources/:id/scan", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
-  void scanSource(source.id, source.root_path);
+  void scanSource(source.id, source.root_path, { regenerateThumbnails: true });
   return reply.code(202).send({ status: "scanning" });
 });
 

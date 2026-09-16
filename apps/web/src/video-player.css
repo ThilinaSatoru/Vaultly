@@ -183,6 +183,16 @@
   min-width: 0;
 }
 
+.video-player.compact .video-controls { padding: 6px 8px 8px; }
+.video-player.compact .video-progress { height: 11px; margin-bottom: 3px; }
+.video-player.compact .video-controls-row { gap: 3px; overflow: hidden; }
+.video-player.compact .video-controls-row button[aria-label^="Back "],
+.video-player.compact .video-controls-row button[aria-label^="Forward "] { display: none; }
+.video-player.compact .video-controls-row .icon-button { min-width: 30px; width: 30px; height: 30px; padding: 4px; }
+.video-player.compact .video-time { min-width: 0; overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; }
+.video-player.compact .video-volume { flex: 0 0 auto; }
+.video-player.compact .video-volume-input { display: none; }
+
 .video-player:fullscreen {
   width: 100vw;
   height: 100vh;
