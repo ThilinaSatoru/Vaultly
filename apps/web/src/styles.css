@@ -443,6 +443,7 @@ main { grid-column: 2; min-width: 0; }
 .chordify-card h2 { overflow: hidden; margin: 0 0 6px; font: 700 .98rem Manrope, sans-serif; text-overflow: ellipsis; white-space: nowrap; }
 .chordify-card p { margin: 0; color: #8e959f; font-size: .76rem; }
 .chordify-detail-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+.chordify-detail-heading .page-heading-actions { flex-wrap: wrap; justify-content: flex-end; }
 .chordify-detail-heading h1 { margin: 0 0 9px; font: 800 clamp(2rem, 4vw, 3rem)/1.05 Manrope, sans-serif; letter-spacing: -.045em; }
 .chordify-detail-heading > div > p:last-child { margin: 0; color: var(--muted); }
 .chordify-danger { color: #ff9c91 !important; }
@@ -454,6 +455,17 @@ main { grid-column: 2; min-width: 0; }
 .chordify-add-song label { display: block; margin: 0 0 6px; color: #9da3ac; font-size: .75rem; }
 .chordify-add-song input { width: 100%; min-height: 43px; padding: 0 11px; color: white; border: 1px solid #343842; border-radius: 8px; outline: 0; background: #0e1014; }
 .chordify-add-song input:focus { border-color: #88d943; }
+.chordify-import { margin: 0 0 20px; padding: 17px; border: 1px solid #384039; border-radius: 11px; background: #12161a; }
+.chordify-import-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 13px; }
+.chordify-import-heading > div { display: flex; flex-direction: column; gap: 4px; }
+.chordify-import-heading strong { font: 700 .9rem Manrope, sans-serif; }
+.chordify-import-heading span { color: #8d949d; font-size: .77rem; line-height: 1.45; }
+.chordify-import textarea { width: 100%; min-height: 180px; padding: 12px; resize: vertical; color: #e7e9ec; border: 1px solid #343842; border-radius: 8px; outline: 0; background: #0c0e12; font: .76rem/1.5 ui-monospace, monospace; }
+.chordify-import textarea:focus { border-color: #88d943; }
+.chordify-import-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 11px; }
+.chordify-import-actions label { cursor: pointer; }
+.chordify-import-actions label input { display: none; }
+.chordify-import-success { margin: 0 0 18px; padding: 12px 14px; color: #c9f5ac; border: 1px solid #57952f; border-radius: 8px; background: #172411; font-size: .8rem; }
 .chordify-songs { overflow: hidden; border: 1px solid #2b3038; border-radius: 11px; background: #121419; }
 .chordify-song { min-width: 0; display: flex; align-items: center; gap: 13px; padding: 12px 13px; border-bottom: 1px solid #282c34; }
 .chordify-song:last-child { border-bottom: 0; }

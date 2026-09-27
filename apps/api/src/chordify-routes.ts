@@ -4,14 +4,30 @@ import { database } from "./database.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const playlistInput = z.object({ name: z.string().trim().min(1).max(120) });
+const chordifyUrl = z.string().trim().url().refine((value) => {
+  const url = new URL(value);
+  return url.protocol === "https:" && (url.hostname === "chordify.net" || url.hostname.endsWith(".chordify.net"));
+}, "Enter a valid Chordify song URL.").transform((value) => {
+  const url = new URL(value);
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+});
 const songInput = z.object({
   title: z.string().trim().min(1).max(240),
-  url: z.string().trim().url().refine((value) => {
-    const url = new URL(value);
-    return url.protocol === "https:" && (url.hostname === "chordify.net" || url.hostname.endsWith(".chordify.net"));
-  }, "Enter a valid Chordify song URL."),
+  url: chordifyUrl,
 });
 const songIdsInput = z.object({ songIds: z.array(z.number().int().positive()).max(2000) });
+const moveSongsInput = z.object({
+  songIds: z.array(z.number().int().positive()).min(1).max(2000),
+  targetPlaylistId: z.number().int().positive(),
+});
+const importInput = z.object({
+  songs: z.array(z.object({
+    title: z.string().trim().min(1).max(240),
+    url: chordifyUrl,
+  })).min(1).max(5000),
+});
 
 interface PlaylistRow {
   id: number;
@@ -120,6 +136,38 @@ export async function registerChordifyRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post("/api/chordify/playlists/:id/import", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { songs } = importInput.parse(request.body);
+    if (!getPlaylist(id)) return reply.code(404).send({ message: "Chordify playlist not found." });
+
+    const uniqueSongs = [...new Map(songs.map((song) => [song.url, song])).values()];
+    const upsertSong = database.prepare(`
+      INSERT INTO chordify_songs(title, url) VALUES (?, ?)
+      ON CONFLICT(url) DO UPDATE SET title = excluded.title, updated_at = CURRENT_TIMESTAMP
+    `);
+    const findSong = database.prepare("SELECT id FROM chordify_songs WHERE url = ?");
+    const appendSong = database.prepare(`
+      INSERT OR IGNORE INTO chordify_playlist_songs(playlist_id, song_id, position)
+      VALUES (?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM chordify_playlist_songs WHERE playlist_id = ?))
+    `);
+    let added = 0;
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const song of uniqueSongs) {
+        upsertSong.run(song.title, song.url);
+        const row = findSong.get(song.url) as { id: number };
+        added += Number(appendSong.run(id, row.id, id).changes);
+      }
+      database.prepare("UPDATE chordify_playlists SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return { playlist: getPlaylist(id), added, skipped: uniqueSongs.length - added, received: songs.length };
+  });
+
   app.put("/api/chordify/playlists/:id/songs", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const { songIds } = songIdsInput.parse(request.body);
@@ -140,6 +188,40 @@ export async function registerChordifyRoutes(app: FastifyInstance) {
       throw error;
     }
     return getPlaylist(id);
+  });
+
+  app.post("/api/chordify/playlists/:id/move-songs", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { songIds, targetPlaylistId } = moveSongsInput.parse(request.body);
+    if (id === targetPlaylistId) return reply.code(400).send({ message: "Choose a different destination playlist." });
+    if (!getPlaylist(id)) return reply.code(404).send({ message: "Source Chordify playlist not found." });
+    if (!getPlaylist(targetPlaylistId)) return reply.code(404).send({ message: "Destination Chordify playlist not found." });
+
+    const uniqueIds = [...new Set(songIds)];
+    const placeholders = uniqueIds.map(() => "?").join(",");
+    const existing = database.prepare(`
+      SELECT song_id FROM chordify_playlist_songs
+      WHERE playlist_id = ? AND song_id IN (${placeholders})
+    `).all(id, ...uniqueIds) as Array<{ song_id: number }>;
+    if (existing.length !== uniqueIds.length) {
+      return reply.code(400).send({ message: "One or more songs are not in the source playlist." });
+    }
+
+    const append = database.prepare(`
+      INSERT OR IGNORE INTO chordify_playlist_songs(playlist_id, song_id, position)
+      VALUES (?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM chordify_playlist_songs WHERE playlist_id = ?))
+    `);
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      for (const songId of uniqueIds) append.run(targetPlaylistId, songId, targetPlaylistId);
+      database.prepare(`DELETE FROM chordify_playlist_songs WHERE playlist_id = ? AND song_id IN (${placeholders})`).run(id, ...uniqueIds);
+      database.prepare("UPDATE chordify_playlists SET updated_at = CURRENT_TIMESTAMP WHERE id IN (?, ?)").run(id, targetPlaylistId);
+      database.exec("COMMIT");
+    } catch (error) {
+      database.exec("ROLLBACK");
+      throw error;
+    }
+    return { source: getPlaylist(id), destination: getPlaylist(targetPlaylistId), moved: uniqueIds.length };
   });
 
   app.delete("/api/chordify/playlists/:id/songs/:songId", async (request, reply) => {

@@ -15,7 +15,7 @@ pnpm install
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4310`. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. The local source files are read, not moved or modified.
+Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by default. Set `VAULTLY_API_PORT` before running `pnpm dev` to use another port; the API and Vite proxy will both use it. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. The local source files are read, not moved or modified.
 
 ## Current scope
 
@@ -37,6 +37,6 @@ Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4310`. SQLite d
 - Select media cards across pages and bulk add or remove tags, categories, series membership, cast, and artists without replacing unrelated metadata.
 - Assign searchable multi-person cast and artist credits to any media type, and manage names from the People section.
 - Edit an item title without losing it during a rescan.
-- Keep a separate, local Chordify song library: create named playlists, add Chordify song links, reorder or remove songs, and open a song on Chordify when ready to play. Chordify playlists do not use Vaultly tags, categories, series, or media folders.
+- Keep a separate, local Chordify song library: create named playlists, add individual song links or import a Chordify playlist JSON dump, reorder, move, or remove songs, and open a song on Chordify when ready to play. Chordify playlists do not use Vaultly tags, categories, series, or media folders.
 
 CBZ/ZIP archives are indexed but not yet readable in-browser. Video formats unsupported by the browser need a future compatibility transcoder. Live folder watching and a dedicated high-volume search index are also future work. Node's built-in SQLite API is currently experimental and may change in future Node releases; use the stated Node version for now.

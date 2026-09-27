@@ -125,4 +125,6 @@ app.setErrorHandler((error, _request, reply) => {
   return reply.code(500).send({ message: "Something went wrong while updating the library." });
 });
 
-await app.listen({ host: "127.0.0.1", port: 4310 });
+const apiPort = Number.parseInt(process.env.VAULTLY_API_PORT ?? "4400", 10);
+
+await app.listen({ host: "127.0.0.1", port: apiPort });
