@@ -1,0 +1,70 @@
+{
+  "name": "@vaultly/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.cjs",
+  "scripts": {
+    "build:main": "node build.mjs",
+    "build": "pnpm build:main",
+    "dev": "pnpm build:main && concurrently -k -n web,electron -c magenta,cyan \"pnpm --filter @vaultly/web dev\" \"wait-on http://127.0.0.1:5173 && cross-env VAULTLY_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main.cjs\"",
+    "dist": "pnpm --filter @vaultly/web build && pnpm build && electron-builder",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@napi-rs/canvas": "^1.0.9"
+  },
+  "optionalDependencies": {
+    "@ffmpeg-installer/darwin-arm64": "4.1.5",
+    "@ffmpeg-installer/darwin-x64": "4.1.0",
+    "@ffmpeg-installer/linux-arm": "4.1.3",
+    "@ffmpeg-installer/linux-arm64": "4.1.4",
+    "@ffmpeg-installer/linux-ia32": "4.1.0",
+    "@ffmpeg-installer/linux-x64": "4.1.0",
+    "@ffmpeg-installer/win32-ia32": "4.1.0",
+    "@ffmpeg-installer/win32-x64": "4.1.0",
+    "@napi-rs/canvas-darwin-arm64": "1.0.9",
+    "@napi-rs/canvas-darwin-x64": "1.0.9",
+    "@napi-rs/canvas-linux-arm-gnueabihf": "1.0.9",
+    "@napi-rs/canvas-linux-arm64-gnu": "1.0.9",
+    "@napi-rs/canvas-linux-arm64-musl": "1.0.9",
+    "@napi-rs/canvas-linux-x64-gnu": "1.0.9",
+    "@napi-rs/canvas-linux-x64-musl": "1.0.9",
+    "@napi-rs/canvas-win32-arm64-msvc": "1.0.9",
+    "@napi-rs/canvas-win32-x64-msvc": "1.0.9"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.25.9",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4",
+    "wait-on": "^8.0.4"
+  },
+  "build": {
+    "appId": "com.vaultly.app",
+    "productName": "Vaultly",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "../web/dist", "to": "web" }
+    ],
+    "asarUnpack": [
+      "node_modules/@napi-rs/canvas/**",
+      "node_modules/@ffmpeg-installer/**"
+    ],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg", "category": "public.app-category.entertainment" },
+    "linux": { "target": ["AppImage", "deb"], "category": "AudioVideo" }
+  }
+}

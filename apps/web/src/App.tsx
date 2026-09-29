@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  ArrowRight,
   BookOpen,
   Check,
   ChevronRight,
@@ -7,9 +8,9 @@ import {
   Folder,
   FolderOpen,
   Grid2X2,
-  Guitar,
   HardDrive,
   Heart,
+  Home,
   Image,
   Library,
   Layers3,
@@ -28,7 +29,6 @@ import {
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CategoriesView } from "./CategoriesView";
-import { ChordifyView } from "./ChordifyView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
 import { PeopleView } from "./PeopleView";
@@ -54,7 +54,7 @@ interface LibrarySource {
   path_error: string | null;
 }
 
-type Section = "all" | MediaType | "chordify" | "categories" | "tags" | "people" | "sources" | "settings";
+type Section = "home" | "all" | MediaType | "categories" | "tags" | "people" | "sources" | "settings";
 export type LibraryView = "browse" | "categories" | "favorites" | "series" | "circles";
 
 function LibraryNav({ active, view, icon, label, count, onBrowse, onView }: { active: boolean; view: LibraryView; icon: ReactNode; label: string; count?: string; onBrowse: () => void; onView: (view: LibraryView) => void }) {
@@ -211,6 +211,25 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
     }
   };
 
+  const relocate = async () => {
+    setWorking(true);
+    setMenuOpen(false);
+    setActionError("");
+    try {
+      const picked = await api<{ path: string | null }>("/api/system/pick-directory", { method: "POST" });
+      if (!picked.path) return;
+      await api(`/api/sources/${source.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ rootPath: picked.path, name: source.name }),
+      });
+      onChanged();
+    } catch (requestError) {
+      setActionError(requestError instanceof Error ? requestError.message : "Could not relocate this source.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
   return (
     <article className="source-card">
       <div className="source-card-top">
@@ -231,6 +250,7 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
           </button>
           {menuOpen && (
             <div className="source-menu">
+              <button type="button" onClick={() => void relocate()}><FolderOpen size={16} /> Relocate source</button>
               <button type="button" onClick={rescan} disabled={!source.path_available}><RefreshCw size={16} /> Scan again</button>
               <button className="danger" type="button" onClick={remove} disabled={source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
             </div>
@@ -255,8 +275,63 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
   );
 }
 
+function HomeView({ sources, categories, onOpenLibrary, onOpenCategories, onAddSource }: {
+  sources: LibrarySource[];
+  categories: Category[];
+  onOpenLibrary: (type: MediaType) => void;
+  onOpenCategories: () => void;
+  onAddSource: () => void;
+}) {
+  const connectedSources = sources.filter((source) => source.path_available);
+  const totals = connectedSources.reduce((result, source) => ({
+    all: result.all + source.item_count,
+    comic: result.comic + source.comic_count,
+    video: result.video + source.video_count,
+    story: result.story + source.story_count,
+  }), { all: 0, comic: 0, video: 0, story: 0 });
+  const libraries = [
+    { type: "comic" as const, label: "Comics", description: "Issues, image folders, and archives", count: totals.comic, icon: <Image size={25} /> },
+    { type: "video" as const, label: "Videos", description: "Movies, episodes, and local clips", count: totals.video, icon: <Clapperboard size={25} /> },
+    { type: "story" as const, label: "Stories", description: "PDF books and documents", count: totals.story, icon: <BookOpen size={25} /> },
+  ];
+  const availableCategories = categories.filter((category) => category.item_count > 0);
+  const visibleCategories = availableCategories.slice(0, 8);
+
+  return <>
+    <div className="page-heading home-heading">
+      <div><p className="eyebrow">Your library</p><h1>Welcome home</h1><p>Pick up where you left off, or jump into a media library.</p></div>
+      {!sources.length && <button className="primary-button" type="button" onClick={onAddSource}><Plus size={18} /> Add source</button>}
+    </div>
+
+    <section className="home-stats" aria-label="Library statistics">
+      <div><span>Available media</span><strong>{formatCount(totals.all)}</strong></div>
+      <div><span>Categories</span><strong>{formatCount(availableCategories.length)}</strong></div>
+      <div><span>Connected sources</span><strong>{connectedSources.length}<small> / {sources.length}</small></strong></div>
+    </section>
+
+    <section className="home-section">
+      <div className="home-section-heading"><div><p className="eyebrow">Browse</p><h2>Libraries</h2></div></div>
+      <div className="home-library-grid">
+        {libraries.map((library) => <button key={library.type} className={`home-library-card home-library-${library.type}`} type="button" onClick={() => onOpenLibrary(library.type)}>
+          <span className="home-library-icon">{library.icon}</span>
+          <span className="home-library-copy"><strong>{library.label}</strong><small>{library.description}</small></span>
+          <span className="home-library-count">{formatCount(library.count)}</span>
+          <ArrowRight size={19} />
+        </button>)}
+      </div>
+    </section>
+
+    <section className="home-section">
+      <div className="home-section-heading"><div><p className="eyebrow">Organize</p><h2>Categories</h2></div><button type="button" onClick={onOpenCategories}>View all <ArrowRight size={16} /></button></div>
+      {visibleCategories.length ? <div className="home-category-list">
+        {visibleCategories.map((category) => <button type="button" key={category.id} onClick={onOpenCategories}><Folder size={18} /><span>{category.name}</span><strong>{formatCount(category.item_count)}</strong><ChevronRight size={17} /></button>)}
+      </div> : <div className="home-empty-categories"><Folder size={24} /><span>Categories with available media will appear here.</span></div>}
+    </section>
+  </>;
+}
+
 export function App() {
-  const [section, setSection] = useState<Section>("all");
+  const [section, setSection] = useState<Section>("home");
   const [libraryView, setLibraryView] = useState<LibraryView>("browse");
   const [search, setSearch] = useState("");
   const [sources, setSources] = useState<LibrarySource[]>([]);
@@ -328,6 +403,19 @@ export function App() {
   useEffect(() => { void loadPeople(); }, [loadPeople]);
 
   const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
+  const availableSourceKey = useMemo(() => sources.filter((source) => source.path_available).map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
+  const previousAvailableSourceKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (previousAvailableSourceKey.current === null) {
+      previousAvailableSourceKey.current = availableSourceKey;
+      return;
+    }
+    if (previousAvailableSourceKey.current !== availableSourceKey) {
+      previousAvailableSourceKey.current = availableSourceKey;
+      setRefreshKey((value) => value + 1);
+      void loadCategories(); void loadTags(); void loadPeople();
+    }
+  }, [availableSourceKey, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
     if (wasScanning.current && !isScanning) {
       setRefreshKey((value) => value + 1);
@@ -336,12 +424,11 @@ export function App() {
     wasScanning.current = isScanning;
   }, [isScanning, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
-    if (!isScanning) return;
-    const timer = window.setInterval(() => void loadSources(true), 1200);
+    const timer = window.setInterval(() => void loadSources(true), isScanning ? 1200 : 5000);
     return () => window.clearInterval(timer);
   }, [isScanning, loadSources]);
 
-  const totalItems = sources.reduce((total, source) => total + source.item_count, 0);
+  const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
   const selectSection = (nextSection: Section) => { setSection(nextSection); setLibraryView("browse"); setSearch(""); setSelectedSeriesId(null); };
   const selectLibraryView = (view: LibraryView) => { setLibraryView(view); setSearch(""); setSelectedSeriesId(null); };
   const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
@@ -383,12 +470,10 @@ export function App() {
         <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
         <nav aria-label="Main navigation">
           <p>Library</p>
-          <LibraryNav active={section === "all"} view={libraryView} icon={<Grid2X2 size={19} />} label="All media" count={formatCount(totalItems)} onBrowse={() => selectSection("all")} onView={selectLibraryView} />
+          <button className={section === "home" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("home")}><Home size={19} /> Home<span>{formatCount(totalItems)}</span></button>
           <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
           <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
           <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="Stories" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
-          <p>Services</p>
-          <button className={section === "chordify" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("chordify")}><Guitar size={19} /> Chordify</button>
           <p>Manage</p>
           <button className={section === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("categories")}><Folder size={19} /> Categories</button>
           <button className={section === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("tags")}><TagIcon size={19} /> Tags</button>
@@ -408,7 +493,9 @@ export function App() {
         </header>
 
         <div className="content">
-          {section === "sources" ? <>
+          {section === "home" ? (
+            <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => { setSection("all"); setLibraryView("categories"); setSearch(""); }} onAddSource={() => { setSection("sources"); setShowAddSource(true); }} />
+          ) : section === "sources" ? <>
           <div className="page-heading">
             <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames.</p></div>
             <div className="page-heading-actions"><button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || isScanning || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button><button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
@@ -436,9 +523,7 @@ export function App() {
               <span>Nothing is uploaded or moved.</span>
             </section>
           )}
-          </> : section === "chordify" ? (
-            <ChordifyView />
-          ) : section === "settings" ? (
+          </> : section === "settings" ? (
             <SettingsView />
           ) : section === "categories" ? (
             <CategoriesView categories={categories} onChanged={() => { void loadCategories(); setRefreshKey((value) => value + 1); }} />
@@ -461,7 +546,7 @@ export function App() {
               onCategoryCreated={createCategory}
               onPersonCreated={createPerson}
               onChanged={refreshMedia}
-              sources={sources.map((source) => ({ id: source.id, name: source.path_available ? source.name : `${source.name} (unavailable)` }))}
+              sources={sources.filter((source) => source.path_available).map((source) => ({ id: source.id, name: source.name }))}
               onOpen={(id) => openItem(id)}
               onQueueVideo={queueVideo}
               queuedVideoIds={temporaryPlaylist.map((item) => item.id)}

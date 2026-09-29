@@ -4,7 +4,6 @@ A local-first media library for comics, videos, and PDF stories found in one or 
 
 ## Requirements
 
-- Windows for the native Browse dialog (manual path entry also works)
 - Node.js 22.13 or newer
 - pnpm 11
 
@@ -16,6 +15,23 @@ pnpm dev
 ```
 
 Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by default. Set `VAULTLY_API_PORT` before running `pnpm dev` to use another port; the API and Vite proxy will both use it. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. The local source files are read, not moved or modified.
+
+## Desktop app
+
+Vaultly also runs as a native desktop app on Windows, macOS, and Linux. The Electron shell starts the local API on loopback, stores its database and thumbnail cache in the operating system's application-data directory, and uses native folder and file-reveal dialogs.
+
+```powershell
+pnpm desktop:dev
+```
+
+Build the app, or create an installer for the current operating system:
+
+```powershell
+pnpm desktop:build
+pnpm desktop:dist
+```
+
+Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian package on Linux. Build each installer on its target operating system; macOS distribution also requires Apple signing/notarization credentials.
 
 ## Current scope
 
@@ -37,6 +53,5 @@ Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by defaul
 - Select media cards across pages and bulk add or remove tags, categories, series membership, cast, and artists without replacing unrelated metadata.
 - Assign searchable multi-person cast and artist credits to any media type, and manage names from the People section.
 - Edit an item title without losing it during a rescan.
-- Keep a separate, local Chordify song library: create named playlists, add individual song links or import a Chordify playlist JSON dump, reorder, move, or remove songs, and open a song on Chordify when ready to play. Chordify playlists do not use Vaultly tags, categories, series, or media folders.
 
 CBZ/ZIP archives are indexed but not yet readable in-browser. Video formats unsupported by the browser need a future compatibility transcoder. Live folder watching and a dedicated high-volume search index are also future work. Node's built-in SQLite API is currently experimental and may change in future Node releases; use the stated Node version for now.

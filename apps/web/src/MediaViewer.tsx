@@ -2,8 +2,9 @@ import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListV
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
 import { VideoPlayer } from "./VideoPlayer";
-import { api, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
+import { api, formatDuration, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type SimilarVideo, type Tag } from "./media";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
+import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
 type ComicFit = "screen" | "width" | "custom";
@@ -14,8 +15,7 @@ const storedComicFit = (): ComicFit => {
 };
 
 const storedComicZoom = () => {
-  const value = Number(window.localStorage.getItem("vaultly.comic.zoom"));
-  return Number.isFinite(value) ? Math.max(25, Math.min(400, value)) : 100;
+  return readNumberPreference("vaultly.comic.zoom", 100, 25, 400);
 };
 
 interface MediaViewerProps {
@@ -53,18 +53,24 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
   const [saving, setSaving] = useState(false);
   const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [seriesIds, setSeriesIds] = useState<number[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => window.localStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
+  const [similarVideos, setSimilarVideos] = useState<SimilarVideo[]>([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
   const lastFullscreenExit = useRef(-Infinity);
   const playlistIndex = playlist.findIndex((entry) => entry.id === itemId);
-  const navigationItems = playlistIndex >= 0 ? playlist : seriesContext?.items;
+  const similarNavigation = item?.media_type === "video" ? [{ id: item.id, title: item.title }, ...similarVideos] : undefined;
+  const navigationItems = playlistIndex >= 0 ? playlist : seriesContext?.items ?? similarNavigation;
   const seriesIndex = navigationItems?.findIndex((entry) => entry.id === itemId) ?? -1;
   const previousItem = seriesIndex > 0 ? navigationItems?.[seriesIndex - 1] : undefined;
   const nextItem = navigationItems && seriesIndex >= 0 ? navigationItems[seriesIndex + 1] : undefined;
   const openPreviousItem = () => { if (previousItem) onNavigateItem(previousItem.id); };
   const openNextItem = () => { if (nextItem) onNavigateItem(nextItem.id); };
   const continuousReading = readBooleanPreference("vaultly.reader.continuous", true);
+  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic");
 
   useEffect(() => { window.localStorage.setItem("vaultly.comic.fit", fit); }, [fit]);
   useEffect(() => { window.localStorage.setItem("vaultly.comic.zoom", String(comicZoom)); }, [comicZoom]);
+  useEffect(() => { window.localStorage.setItem("vaultly.video.sidebarTab", sidebarTab); }, [sidebarTab]);
 
   useEffect(() => {
     if (floating) return;
@@ -99,10 +105,19 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
     setError("");
     setSeriesOptions([]);
     setSeriesIds([]);
+    setSimilarVideos([]);
+    setSimilarLoading(false);
     api<MediaDetail>(`/api/items/${itemId}`)
       .then(async (detail) => {
         if (!active) return;
         setItem(detail);
+        if (detail.media_type === "video") {
+          setSimilarLoading(true);
+          api<SimilarVideo[]>(`/api/items/${itemId}/similar`)
+            .then((videos) => { if (active) setSimilarVideos(videos); })
+            .catch(() => { if (active) setSimilarVideos([]); })
+            .finally(() => { if (active) setSimilarLoading(false); });
+        }
         if (detail.media_type === "comic") {
           const pageResult = await api<{ pages: string[]; archive: boolean }>(`/api/items/${itemId}/pages`);
           if (active) { setPages(pageResult.pages); setArchive(pageResult.archive); }
@@ -188,8 +203,6 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
       if (item?.media_type === "comic") {
         if (matchesShortcut(event, "reader.nextPage")) { event.preventDefault(); nextComicPage(); }
         if (matchesShortcut(event, "reader.previousPage")) { event.preventDefault(); previousComicPage(); }
-        if (matchesShortcut(event, "reader.scrollUp")) { event.preventDefault(); comicScrollRef.current?.scrollBy({ top: -readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800), behavior: "smooth" }); }
-        if (matchesShortcut(event, "reader.scrollDown")) { event.preventDefault(); comicScrollRef.current?.scrollBy({ top: readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800), behavior: "smooth" }); }
         if (matchesShortcut(event, "comic.zoomIn") && !activatingControl) { event.preventDefault(); changeComicZoom(25); }
         if (matchesShortcut(event, "comic.zoomOut") && !activatingControl) { event.preventDefault(); changeComicZoom(-25); }
         if (matchesShortcut(event, "comic.fitWidth") && !activatingControl) { event.preventDefault(); changeComicFit("width"); }
@@ -218,6 +231,26 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
       onChanged();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not rename item.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const renameFile = async () => {
+    if (!item) return;
+    const fileName = window.prompt(item.file_extension ? "File name (keep the extension)" : "Folder name", item.filename)?.trim();
+    if (!fileName || fileName === item.filename) return;
+    setSaving(true);
+    setError("");
+    try {
+      const renamed = await api<Pick<MediaDetail, "title" | "filename" | "file_extension" | "relative_path">>(`/api/items/${item.id}/rename`, {
+        method: "POST",
+        body: JSON.stringify({ fileName }),
+      });
+      setItem((current) => current ? { ...current, ...renamed } : current);
+      onChanged();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not rename the file.");
     } finally {
       setSaving(false);
     }
@@ -364,31 +397,49 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
         <aside className="viewer-details">
           {error && <p className="form-error" role="alert">{error}</p>}
           {item && <>
-            {item.media_type === "video" && playlist.length > 0 && <section className="temporary-playlist">
-              <div className="temporary-playlist-heading"><span><ListVideo size={16} /> Temporary playlist</span><button type="button" onClick={onClearPlaylist}>Clear</button></div>
-              <div>{playlist.map((entry, index) => <div className={entry.id === itemId ? "is-playing" : ""} key={entry.id}><button type="button" onClick={() => onNavigateItem(entry.id)}><span>{index + 1}</span><strong>{entry.title}</strong></button><button type="button" onClick={() => onRemoveFromPlaylist(entry.id)} aria-label={`Remove ${entry.title} from playlist`}><Trash2 size={14} /></button></div>)}</div>
-            </section>}
-            <div className="viewer-detail-row"><span>Type</span><strong>{item.media_type}</strong></div>
-            <div className="viewer-detail-row"><span>{item.file_extension ? "File name" : "Folder name"}</span><strong title={item.filename}>{item.filename}</strong></div>
-            <div className="viewer-detail-row"><span>Path</span><strong title={item.relative_path}>{item.relative_path}</strong></div>
-            {item.media_type === "video" && <p className="detail-hint">Mouse wheel changes volume by 5%. Playback shortcuts can be assigned in Settings.</p>}
-            {(item.media_type === "story" || item.media_type === "comic") && <p className="detail-hint">Page, scroll, zoom, and fit shortcuts can be assigned in Settings.</p>}
-            {seriesContext && <p className="detail-hint">Alt + ←/→ moves to the previous or next file in this set.</p>}
-            <button className="secondary-button" type="button" onClick={rename} disabled={saving}><Pencil size={16} /> Edit title</button>
-            <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
-            {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
-            <h3>Categories</h3>
-            <TagCombobox label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
-            <h3>Tags</h3>
-            <TagCombobox label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
-            <h3>Cast</h3>
-            <TagCombobox label="Cast" tags={people} selectedIds={item.cast.map((person) => person.id)} onChange={(ids) => void updatePeople("cast", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add people" />
-            <h3>Artists</h3>
-            <TagCombobox label="Artists" tags={people} selectedIds={item.artists.map((person) => person.id)} onChange={(ids) => void updatePeople("artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add artists" />
-            <h3>Series & sets</h3>
-            <TagCombobox label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
-            {seriesIds.length > 0 && <div className="viewer-series-links">{seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) =>
-              <button key={entry.id} type="button" onClick={() => onOpenSeries(entry.id)}>View {entry.name}</button>)}</div>}
+            {item.media_type === "video" && <div className="viewer-detail-tabs" role="tablist" aria-label="Video sidebar">
+              <button type="button" role="tab" aria-selected={sidebarTab === "playlist"} className={sidebarTab === "playlist" ? "active" : ""} onClick={() => setSidebarTab("playlist")}><ListVideo size={15} /> Up next</button>
+              <button type="button" role="tab" aria-selected={sidebarTab === "info"} className={sidebarTab === "info" ? "active" : ""} onClick={() => setSidebarTab("info")}>Info</button>
+            </div>}
+            {item.media_type === "video" && sidebarTab === "playlist" && <div className="viewer-playlist-panel" role="tabpanel">
+              {playlist.length > 0 && <section className="temporary-playlist">
+                <div className="temporary-playlist-heading"><span><ListVideo size={16} /> Temporary playlist</span><button type="button" onClick={onClearPlaylist}>Clear</button></div>
+                <div>{playlist.map((entry, index) => <div className={entry.id === itemId ? "is-playing" : ""} key={entry.id}><button type="button" onClick={() => onNavigateItem(entry.id)}><span>{index + 1}</span><strong>{entry.title}</strong></button><button type="button" onClick={() => onRemoveFromPlaylist(entry.id)} aria-label={`Remove ${entry.title} from playlist`}><Trash2 size={14} /></button></div>)}</div>
+              </section>}
+              <section className="similar-playlist">
+                <div className="similar-playlist-heading"><span>Similar videos</span><small>{similarVideos.length || ""}</small></div>
+                {similarLoading && <div className="viewer-playlist-state"><LoaderCircle className="spin" size={16} /> Finding similar videos…</div>}
+                {!similarLoading && similarVideos.length === 0 && <p className="viewer-playlist-state">No other videos are available yet.</p>}
+                <div className="similar-playlist-list">{similarVideos.map((video) => <button type="button" key={video.id} onClick={() => onNavigateItem(video.id)} title={video.filename}>
+                  <span className="similar-video-art"><img src={`/api/items/${video.id}/thumbnail`} alt="" loading="lazy" /></span>
+                  <span className="similar-video-copy"><strong>{video.title}</strong><small>{video.source_name} · {formatDuration(video.duration_seconds)}</small></span>
+                </button>)}</div>
+              </section>
+            </div>}
+            {(item.media_type !== "video" || sidebarTab === "info") && <div className="viewer-info-panel" role={item.media_type === "video" ? "tabpanel" : undefined}>
+              <div className="viewer-detail-row"><span>Type</span><strong>{item.media_type}</strong></div>
+              <div className="viewer-detail-row"><span>{item.file_extension ? "File name" : "Folder name"}</span><strong title={item.filename}>{item.filename}</strong></div>
+              <div className="viewer-detail-row"><span>Path</span><strong title={item.relative_path}>{item.relative_path}</strong></div>
+              {item.media_type === "video" && <p className="detail-hint">Arrow keys seek 5 seconds by default. Shift + Arrow seeks 1 minute. Mouse wheel changes volume by 5%; all shortcuts and seek durations can be changed in Settings.</p>}
+              {(item.media_type === "story" || item.media_type === "comic") && <p className="detail-hint">Page, scroll, zoom, and fit shortcuts can be assigned in Settings.</p>}
+              {seriesContext && <p className="detail-hint">Alt + ←/→ moves to the previous or next file in this set.</p>}
+              <button className="secondary-button" type="button" onClick={rename} disabled={saving}><Pencil size={16} /> Edit title</button>
+              <button className="secondary-button" type="button" onClick={() => void renameFile()} disabled={saving}><Pencil size={16} /> Rename {item.file_extension ? "file" : "folder"}</button>
+              <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
+              {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
+              <h3>Categories</h3>
+              <TagCombobox label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
+              <h3>Tags</h3>
+              <TagCombobox label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
+              <h3>Cast</h3>
+              <TagCombobox label="Cast" tags={people} selectedIds={item.cast.map((person) => person.id)} onChange={(ids) => void updatePeople("cast", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add people" />
+              <h3>Artists</h3>
+              <TagCombobox label="Artists" tags={people} selectedIds={item.artists.map((person) => person.id)} onChange={(ids) => void updatePeople("artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add artists" />
+              <h3>Series & sets</h3>
+              <TagCombobox label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
+              {seriesIds.length > 0 && <div className="viewer-series-links">{seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) =>
+                <button key={entry.id} type="button" onClick={() => onOpenSeries(entry.id)}>View {entry.name}</button>)}</div>}
+            </div>}
           </>}
         </aside>
       </section>

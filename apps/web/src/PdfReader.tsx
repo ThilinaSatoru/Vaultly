@@ -1,8 +1,9 @@
 import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
+import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -14,8 +15,7 @@ const storedFitMode = (): FitMode => {
 };
 
 const storedZoom = () => {
-  const value = Number(window.localStorage.getItem("vaultly.pdf.zoom"));
-  return Number.isFinite(value) ? Math.max(25, Math.min(400, value)) : 100;
+  return readNumberPreference("vaultly.pdf.zoom", 100, 25, 400);
 };
 
 export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: number; onPreviousItem?: () => void; onNextItem?: () => void }) {
@@ -30,6 +30,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  useContinuousReaderScroll(scrollRef, Boolean(pdfDocument));
 
   useEffect(() => { window.localStorage.setItem("vaultly.pdf.fit", fitMode); }, [fitMode]);
   useEffect(() => { window.localStorage.setItem("vaultly.pdf.zoom", String(zoomPercent)); }, [zoomPercent]);
@@ -150,14 +151,6 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
         event.preventDefault();
         if (pageNumber > 1) setPageNumber(pageNumber - 1);
         else if (onPreviousItem && readBooleanPreference("vaultly.reader.continuous", true)) onPreviousItem();
-      }
-      if (matchesShortcut(event, "reader.scrollUp")) {
-        event.preventDefault();
-        scrollRef.current?.scrollBy({ top: -readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800), behavior: "smooth" });
-      }
-      if (matchesShortcut(event, "reader.scrollDown")) {
-        event.preventDefault();
-        scrollRef.current?.scrollBy({ top: readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800), behavior: "smooth" });
       }
       if (matchesShortcut(event, "reader.zoomIn") && !activatingControl) {
         event.preventDefault();

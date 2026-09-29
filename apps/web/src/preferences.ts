@@ -61,7 +61,9 @@ export function readBooleanPreference(key: string, fallback: boolean): boolean {
 }
 
 export function readNumberPreference(key: string, fallback: number, min: number, max: number): number {
-  const value = Number(window.localStorage.getItem(key));
+  const stored = window.localStorage.getItem(key);
+  if (stored === null || stored.trim() === "") return fallback;
+  const value = Number(stored);
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
 

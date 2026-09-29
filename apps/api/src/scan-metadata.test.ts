@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { database } from "./database.js";
@@ -89,6 +89,38 @@ test("scan creates and extends an ordered collection from matching sequel prefix
   } finally {
     if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
     if (seriesId) database.prepare("DELETE FROM series WHERE id = ?").run(seriesId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("scan preserves an item's identity and metadata after an external rename", async () => {
+  const token = randomUUID().slice(0, 10);
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-rename-"));
+  let sourceId = 0;
+  let tagId = 0;
+  try {
+    const original = `Original ${token}.pdf`;
+    const renamed = `Renamed ${token}.pdf`;
+    await writeFile(path.join(root, original), "stable content for rename reconciliation");
+    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)")
+      .run(token, root, process.platform === "win32" ? root.toLowerCase() : root).lastInsertRowid);
+    await scanSource(sourceId, root);
+    const before = database.prepare("SELECT id FROM media_items WHERE source_id = ? AND filename = ?")
+      .get(sourceId, original) as { id: number };
+    tagId = Number(database.prepare("INSERT INTO tags(name) VALUES (?)").run(`Rename ${token}`).lastInsertRowid);
+    database.prepare("INSERT INTO item_tags(item_id, tag_id) VALUES (?, ?)").run(before.id, tagId);
+    database.prepare("UPDATE media_items SET favorite = 1, title = 'My preserved title' WHERE id = ?").run(before.id);
+
+    await rename(path.join(root, original), path.join(root, renamed));
+    await scanSource(sourceId, root);
+
+    const after = database.prepare("SELECT id, filename, title, favorite, available FROM media_items WHERE id = ?")
+      .get(before.id);
+    expect(after).toEqual({ id: before.id, filename: renamed, title: "My preserved title", favorite: 1, available: 1 });
+    expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").all(before.id)).toEqual([{ tag_id: tagId }]);
+  } finally {
+    if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
+    if (tagId) database.prepare("DELETE FROM tags WHERE id = ?").run(tagId);
     await rm(root, { recursive: true, force: true });
   }
 });

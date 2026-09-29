@@ -3,7 +3,9 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const runtimeDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../runtime");
+export const runtimeDirectory = process.env.VAULTLY_RUNTIME_DIR
+  ? path.resolve(process.env.VAULTLY_RUNTIME_DIR)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../runtime");
 mkdirSync(runtimeDirectory, { recursive: true });
 
 export const database = new DatabaseSync(path.join(runtimeDirectory, "vaultly.db"));
@@ -20,6 +22,7 @@ database.exec(`
     normalized_path TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'idle'
       CHECK (status IN ('idle', 'scanning', 'ready', 'error')),
+    connected INTEGER NOT NULL DEFAULT 1,
     last_error TEXT,
     last_scanned_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -36,6 +39,7 @@ database.exec(`
     modified_at_ms INTEGER NOT NULL DEFAULT 0,
     file_count INTEGER NOT NULL DEFAULT 1,
     favorite INTEGER NOT NULL DEFAULT 0,
+    indexed INTEGER NOT NULL DEFAULT 1,
     available INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -151,35 +155,10 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_circle_series_order ON circle_series(circle_id, position);
   CREATE INDEX IF NOT EXISTS idx_circle_series_series ON circle_series(series_id, circle_id);
 
-  CREATE TABLE IF NOT EXISTS chordify_playlists (
-    id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS chordify_songs (
-    id INTEGER PRIMARY KEY,
-    title TEXT NOT NULL,
-    url TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS chordify_playlist_songs (
-    playlist_id INTEGER NOT NULL REFERENCES chordify_playlists(id) ON DELETE CASCADE,
-    song_id INTEGER NOT NULL REFERENCES chordify_songs(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL,
-    added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (playlist_id, song_id)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_chordify_playlist_songs_order
-    ON chordify_playlist_songs(playlist_id, position);
-  CREATE INDEX IF NOT EXISTS idx_chordify_playlist_songs_song
-    ON chordify_playlist_songs(song_id);
-
 `);
+
+const sourceColumns = (database.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>).map((column) => column.name);
+if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD COLUMN connected INTEGER NOT NULL DEFAULT 1");
 
 // Filename and format are stored separately from the relative path so a filename
 // filter never matches an unrelated parent directory.
@@ -188,10 +167,15 @@ const needsFilename = !mediaColumns.includes("filename");
 const needsExtension = !mediaColumns.includes("file_extension");
 const needsFavorite = !mediaColumns.includes("favorite");
 const needsDuration = !mediaColumns.includes("duration_seconds");
+const needsIndexed = !mediaColumns.includes("indexed");
 if (needsFilename) database.exec("ALTER TABLE media_items ADD COLUMN filename TEXT NOT NULL DEFAULT ''");
 if (needsExtension) database.exec("ALTER TABLE media_items ADD COLUMN file_extension TEXT NOT NULL DEFAULT ''");
 if (needsFavorite) database.exec("ALTER TABLE media_items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
 if (needsDuration) database.exec("ALTER TABLE media_items ADD COLUMN duration_seconds REAL");
+if (needsIndexed) {
+  database.exec("ALTER TABLE media_items ADD COLUMN indexed INTEGER NOT NULL DEFAULT 1");
+  database.exec("UPDATE media_items SET indexed = available");
+}
 if (needsFilename || needsExtension) {
   const knownExtensions = new Set(["mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "mpeg", "mpg", "pdf", "cbz", "zip"]);
   const rows = database.prepare(`
@@ -245,6 +229,7 @@ export interface SourceRow {
   root_path: string;
   normalized_path: string;
   status: SourceStatus;
+  connected: number;
   last_error: string | null;
   last_scanned_at: string | null;
   created_at: string;

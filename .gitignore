@@ -1,7 +1,7 @@
 node_modules/
 dist/
+release/
 .sites-runtime/
 runtime/
 *.log
 .DS_Store
-

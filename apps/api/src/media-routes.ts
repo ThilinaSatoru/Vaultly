@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { opendir, realpath, stat } from "node:fs/promises";
+import { opendir, realpath, rename as renamePath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { database } from "./database.js";
@@ -82,6 +82,22 @@ async function resolveItemPath(item: MediaPathRow): Promise<string> {
   const file = await realpath(path.resolve(root, item.relative_path));
   if (!withinRoot(root, file)) throw new Error("Media path escapes its library source.");
   return file;
+}
+
+function titleFromFileName(fileName: string): string {
+  return path.basename(fileName, path.extname(fileName)).replace(/[._]+/g, " ").trim();
+}
+
+function invalidFileNameMessage(fileName: string): string | null {
+  if (fileName === "." || fileName === ".." || /[\\/\0]/.test(fileName)) {
+    return "Enter a file or folder name, not a path.";
+  }
+  if (process.platform === "win32") {
+    if (/[<>:"|?*]/.test(fileName) || /[ .]$/.test(fileName)) return "That name contains characters Windows does not allow.";
+    const stem = path.basename(fileName, path.extname(fileName)).toUpperCase();
+    if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) return "That name is reserved by Windows.";
+  }
+  return null;
 }
 
 async function comicPages(item: MediaPathRow): Promise<string[]> {
@@ -201,7 +217,10 @@ function creditsByItem(itemIds: number[]) {
   return result;
 }
 
-export async function registerMediaRoutes(app: FastifyInstance) {
+export async function registerMediaRoutes(
+  app: FastifyInstance,
+  options: { revealPath?: (itemPath: string) => Promise<void> } = {},
+) {
   app.get("/api/items/formats", async (request) => {
     const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
     return database.prepare(`
@@ -312,6 +331,31 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     return { items, total: total.count, page: input.page, pageSize: 48 };
   });
 
+  app.get("/api/items/:id/similar", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const target = database.prepare("SELECT id FROM media_items WHERE id = ? AND media_type = 'video' AND available = 1").get(id);
+    if (!target) return reply.code(404).send({ message: "Video not found." });
+    return database.prepare(`
+      SELECT m.id, m.title, m.filename, m.duration_seconds, m.modified_at_ms, s.name AS source_name,
+        (CASE WHEN m.source_id = target.source_id THEN 1 ELSE 0 END
+          + 12 * (SELECT COUNT(*) FROM series_items candidate
+            WHERE candidate.item_id = m.id AND candidate.series_id IN (SELECT series_id FROM series_items WHERE item_id = target.id))
+          + 5 * (SELECT COUNT(*) FROM item_categories candidate
+            WHERE candidate.item_id = m.id AND candidate.category_id IN (SELECT category_id FROM item_categories WHERE item_id = target.id))
+          + 4 * (SELECT COUNT(*) FROM item_tags candidate
+            WHERE candidate.item_id = m.id AND candidate.tag_id IN (SELECT tag_id FROM item_tags WHERE item_id = target.id))
+          + 3 * (SELECT COUNT(*) FROM item_people candidate
+            WHERE candidate.item_id = m.id AND (candidate.person_id, candidate.role) IN
+              (SELECT person_id, role FROM item_people WHERE item_id = target.id))) AS similarity_score
+      FROM media_items m
+      JOIN sources s ON s.id = m.source_id
+      JOIN media_items target ON target.id = ?
+      WHERE m.available = 1 AND m.media_type = 'video' AND m.id <> target.id
+      ORDER BY similarity_score DESC, m.modified_at_ms DESC, m.title COLLATE NOCASE
+      LIMIT 24
+    `).all(id);
+  });
+
   app.get("/api/items/:id", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const item = database.prepare(`${itemSelect} WHERE m.id = ? AND m.available = 1`).get(id);
@@ -331,6 +375,66 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     const result = database.prepare("UPDATE media_items SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(title, id);
     if (!result.changes) return reply.code(404).send({ message: "Media item not found." });
     return { id, title };
+  });
+
+  app.post("/api/items/:id/rename", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { fileName } = z.object({ fileName: z.string().trim().min(1).max(255) }).parse(request.body);
+    const invalidMessage = invalidFileNameMessage(fileName);
+    if (invalidMessage) return reply.code(400).send({ message: invalidMessage });
+
+    const item = mediaRow(id);
+    if (!item) return reply.code(404).send({ message: "Media item not found." });
+    if (item.relative_path === ".") {
+      return reply.code(400).send({ message: "The library root folder cannot be renamed here. Rename the source instead." });
+    }
+
+    const root = await realpath(item.root_path);
+    const currentPath = await resolveItemPath(item);
+    const currentStat = await stat(currentPath);
+    const currentName = path.basename(currentPath);
+    if (fileName === currentName) {
+      return { id, title: item.title, filename: currentName, file_extension: path.extname(currentName).slice(1).toLowerCase(), relative_path: item.relative_path };
+    }
+
+    const currentExtension = path.extname(currentName).toLowerCase();
+    const nextExtension = path.extname(fileName).toLowerCase();
+    if (!currentStat.isDirectory() && nextExtension !== currentExtension) {
+      return reply.code(400).send({ message: `Keep the existing ${currentExtension || "file"} extension when renaming this item.` });
+    }
+
+    const nextPath = path.join(path.dirname(currentPath), fileName);
+    if (!withinRoot(root, nextPath)) return reply.code(400).send({ message: "The renamed item must stay inside its library source." });
+    const sameWindowsPath = process.platform === "win32" && currentPath.toLocaleLowerCase() === nextPath.toLocaleLowerCase();
+    if (!sameWindowsPath) {
+      try {
+        await stat(nextPath);
+        return reply.code(409).send({ message: "A file or folder with that name already exists." });
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+      }
+    }
+
+    const relativePath = path.relative(root, nextPath);
+    const oldDefaultTitle = currentStat.isDirectory() ? currentName : titleFromFileName(currentName);
+    const nextDefaultTitle = currentStat.isDirectory() ? fileName : titleFromFileName(fileName);
+    const nextTitle = item.title === oldDefaultTitle ? nextDefaultTitle : item.title;
+
+    await renamePath(currentPath, nextPath);
+    try {
+      database.prepare(`
+        UPDATE media_items SET title = ?, filename = ?, file_extension = ?, relative_path = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND available = 1
+      `).run(nextTitle, fileName, currentStat.isDirectory() ? "" : nextExtension.slice(1), relativePath, id);
+    } catch (error) {
+      await renamePath(nextPath, currentPath).catch(() => undefined);
+      if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+        return reply.code(409).send({ message: "That renamed path is already indexed." });
+      }
+      throw error;
+    }
+
+    return { id, title: nextTitle, filename: fileName, file_extension: currentStat.isDirectory() ? "" : nextExtension.slice(1), relative_path: relativePath };
   });
 
   app.put("/api/items/:id/favorite", async (request, reply) => {
@@ -354,8 +458,12 @@ export async function registerMediaRoutes(app: FastifyInstance) {
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
     if (!item) return reply.code(404).send({ message: "Media item not found." });
-    if (process.platform !== "win32") return reply.code(501).send({ message: "Opening the containing folder is currently available on Windows only." });
     const itemPath = await resolveItemPath(item);
+    if (options.revealPath) {
+      await options.revealPath(itemPath);
+      return reply.code(204).send();
+    }
+    if (process.platform !== "win32") return reply.code(501).send({ message: "Opening the containing folder is available in the desktop app on this platform." });
     const itemStat = await stat(itemPath);
     const explorer = spawn("explorer.exe", itemStat.isDirectory() ? [itemPath] : ["/select,", itemPath], {
       detached: true, stdio: "ignore", windowsHide: true,

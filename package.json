@@ -5,6 +5,9 @@
   "packageManager": "pnpm@11.19.0",
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"pnpm --filter @vaultly/api dev\" \"pnpm --filter @vaultly/web dev\"",
+    "desktop:dev": "pnpm --filter @vaultly/desktop dev",
+    "desktop:build": "pnpm --filter @vaultly/web build && pnpm --filter @vaultly/desktop build",
+    "desktop:dist": "pnpm --filter @vaultly/desktop dist",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test"

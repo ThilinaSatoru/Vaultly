@@ -1,4 +1,5 @@
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
@@ -11,16 +12,25 @@ import { registerSeriesRoutes } from "./series-routes.js";
 import { registerPeopleRoutes } from "./people-routes.js";
 import { registerBulkRoutes } from "./bulk-routes.js";
 import { registerCircleRoutes } from "./circle-routes.js";
-import { registerChordifyRoutes } from "./chordify-routes.js";
+import { registerBackupRoutes } from "./backup-routes.js";
 
+export interface VaultlyServerOptions {
+  host?: string;
+  port?: number;
+  staticRoot?: string;
+  pickDirectory?: () => Promise<string | null>;
+  revealPath?: (itemPath: string) => Promise<void>;
+}
+
+export async function buildVaultlyServer(options: VaultlyServerOptions = {}) {
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
-await app.register(registerMediaRoutes);
+await app.register(registerMediaRoutes, { revealPath: options.revealPath });
 await app.register(registerSeriesRoutes);
 await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);
 await app.register(registerCircleRoutes);
-await app.register(registerChordifyRoutes);
+await app.register(registerBackupRoutes);
 
 const sourceInput = z.object({
   name: z.string().trim().min(1).max(80).optional(),
@@ -44,8 +54,8 @@ const sourceSummaryQuery = `
 app.get("/api/health", async () => ({ ok: true }));
 
 app.get("/api/sources", async () => {
-  const sources = database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all() as Array<SourceRow & Record<string, unknown>>;
-  return Promise.all(sources.map(async (source) => {
+  const sources = database.prepare("SELECT * FROM sources ORDER BY created_at DESC").all() as unknown as SourceRow[];
+  const checked = await Promise.all(sources.map(async (source) => {
     try {
       const sourceStat = await stat(source.root_path);
       return { ...source, path_available: sourceStat.isDirectory(), path_error: sourceStat.isDirectory() ? null : "The source path is not a directory." };
@@ -53,11 +63,23 @@ app.get("/api/sources", async () => {
       return { ...source, path_available: false, path_error: "The source path or drive is unavailable." };
     }
   }));
+  const updateConnection = database.prepare("UPDATE sources SET connected = ? WHERE id = ? AND connected <> ?");
+  for (const source of checked) {
+    const connected = source.path_available ? 1 : 0;
+    const changed = updateConnection.run(connected, source.id, connected).changes;
+    if (changed) {
+      database.prepare("UPDATE media_items SET available = CASE WHEN ? = 1 THEN indexed ELSE 0 END WHERE source_id = ?")
+        .run(connected, source.id);
+    }
+  }
+  const availability = new Map(checked.map((source) => [source.id, { path_available: source.path_available, path_error: source.path_error }]));
+  const summaries = database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all() as Array<SourceRow & Record<string, unknown>>;
+  return summaries.map((source) => ({ ...source, ...availability.get(source.id) }));
 });
 
 app.post("/api/system/pick-directory", async (_request, reply) => {
   try {
-    return { path: await pickDirectory() };
+    return { path: await (options.pickDirectory ?? pickDirectory)() };
   } catch (error) {
     return reply.code(501).send({
       message: error instanceof Error ? error.message : "The folder picker is unavailable.",
@@ -107,6 +129,30 @@ app.post("/api/sources/:id/scan", async (request, reply) => {
   return reply.code(202).send({ status: "scanning" });
 });
 
+app.patch("/api/sources/:id", async (request, reply) => {
+  const { id } = sourceIdInput.parse(request.params);
+  const input = sourceInput.parse(request.body);
+  const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+  if (!source) return reply.code(404).send({ message: "Library source not found." });
+  const resolvedPath = await realpath(path.resolve(input.rootPath));
+  const rootStat = await stat(resolvedPath);
+  if (!rootStat.isDirectory()) return reply.code(400).send({ message: "Choose a directory, not a file." });
+  const normalizedPath = process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
+  const name = input.name || source.name;
+  try {
+    database.prepare(`UPDATE sources SET name = ?, root_path = ?, normalized_path = ?, connected = 1,
+      status = 'idle', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .run(name, resolvedPath, normalizedPath, id);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
+      return reply.code(409).send({ message: "That folder is already used by another source." });
+    }
+    throw error;
+  }
+  void scanSource(id, resolvedPath);
+  return reply.code(202).send({ id, name, root_path: resolvedPath, status: "scanning" });
+});
+
 app.delete("/api/sources/:id", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
   const result = database.prepare("DELETE FROM sources WHERE id = ?").run(id);
@@ -125,6 +171,19 @@ app.setErrorHandler((error, _request, reply) => {
   return reply.code(500).send({ message: "Something went wrong while updating the library." });
 });
 
-const apiPort = Number.parseInt(process.env.VAULTLY_API_PORT ?? "4400", 10);
+if (options.staticRoot) {
+  await app.register(fastifyStatic, { root: path.resolve(options.staticRoot) });
+  app.setNotFoundHandler((request, reply) => {
+    if (request.method === "GET" && !request.url.startsWith("/api/")) return reply.sendFile("index.html");
+    return reply.code(404).send({ message: "Not found." });
+  });
+}
 
-await app.listen({ host: "127.0.0.1", port: apiPort });
+return app;
+}
+
+export async function startVaultlyServer(options: VaultlyServerOptions = {}) {
+  const app = await buildVaultlyServer(options);
+  const address = await app.listen({ host: options.host ?? "127.0.0.1", port: options.port ?? 4400 });
+  return { app, address };
+}

@@ -11,13 +11,22 @@ interface VideoPlayerProps {
 }
 
 const readStoredVolume = () => {
-  const value = Number(window.localStorage.getItem("vaultly.video.volume"));
-  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 1;
+  return readNumberPreference("vaultly.video.volume", 1, 0, 1);
 };
 
 const readStoredMuted = () => window.localStorage.getItem("vaultly.video.muted") === "true";
-const readSeekSeconds = () => readNumberPreference("vaultly.video.seekAmount", 5, .25, 999)
-  * (window.localStorage.getItem("vaultly.video.seekUnit") === "minutes" ? 60 : 1);
+const readSeekSeconds = (large = false) => {
+  const storedUnit = window.localStorage.getItem(large ? "vaultly.video.seekLargeUnit" : "vaultly.video.seekUnit");
+  const unit = storedUnit === "minutes" || storedUnit === "seconds"
+    ? storedUnit
+    : large ? "minutes" : "seconds";
+  return readNumberPreference(
+    large ? "vaultly.video.seekLargeAmount" : "vaultly.video.seekAmount",
+    large ? 1 : 5,
+    .25,
+    999,
+  ) * (unit === "minutes" ? 60 : 1);
+};
 const seekLabel = (seconds: number) => seconds >= 60 && seconds % 60 === 0 ? `${seconds / 60}m` : `${seconds}s`;
 
 function formatTime(seconds: number) {
@@ -35,6 +44,7 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
+  const seekPeekTimer = useRef<number | null>(null);
   const volumeTimer = useRef<number | null>(null);
   const lastWheelChange = useRef(0);
 
@@ -112,6 +122,7 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
     scheduleHide(playing);
     return () => {
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
+      if (seekPeekTimer.current) window.clearTimeout(seekPeekTimer.current);
       if (volumeTimer.current) window.clearTimeout(volumeTimer.current);
     };
   }, [playing]);
@@ -128,6 +139,10 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
     const target = Math.min(Math.max(0, video.currentTime + delta), (duration || video.duration || Infinity));
     video.currentTime = target;
     setCurrent(target);
+    setShowControls(true);
+    if (hideTimer.current) window.clearTimeout(hideTimer.current);
+    if (seekPeekTimer.current) window.clearTimeout(seekPeekTimer.current);
+    if (playing) seekPeekTimer.current = window.setTimeout(() => setShowControls(false), 1000);
   };
 
   const changeVolume = (delta: number) => {
@@ -187,10 +202,10 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
         event.preventDefault(); if (!event.repeat) toggleFullscreen(); return;
       }
       if (matchesShortcut(event, "video.seekForwardLarge")) {
-        event.preventDefault(); seekBy(readSeekSeconds() * 2); return;
+        event.preventDefault(); seekBy(readSeekSeconds(true)); return;
       }
       if (matchesShortcut(event, "video.seekBackLarge")) {
-        event.preventDefault(); seekBy(-readSeekSeconds() * 2); return;
+        event.preventDefault(); seekBy(-readSeekSeconds(true)); return;
       }
       if (matchesShortcut(event, "video.seekForward")) {
         event.preventDefault(); seekBy(readSeekSeconds()); return;
@@ -209,7 +224,7 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration]);
+  }, [duration, playing]);
 
   const displayedCurrent = seeking ? (seekPreview ?? current) : current;
   const progressPct = duration > 0 ? Math.min(100, (displayedCurrent / duration) * 100) : 0;
@@ -277,8 +292,8 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
           <button type="button" className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
             {playing ? <Pause size={20} /> : <Play size={20} />}
           </button>
-          <button type="button" className="icon-button" onClick={() => seekBy(-seekSeconds * 2)} aria-label={`Back ${seekSeconds * 2} seconds`}>-{seekLabel(seekSeconds * 2)}</button>
-          <button type="button" className="icon-button" onClick={() => seekBy(seekSeconds * 2)} aria-label={`Forward ${seekSeconds * 2} seconds`}>+{seekLabel(seekSeconds * 2)}</button>
+          <button type="button" className="icon-button" onClick={() => seekBy(-seekSeconds)} aria-label={`Back ${seekSeconds} seconds`}>-{seekLabel(seekSeconds)}</button>
+          <button type="button" className="icon-button" onClick={() => seekBy(seekSeconds)} aria-label={`Forward ${seekSeconds} seconds`}>+{seekLabel(seekSeconds)}</button>
           <span className="video-time">{formatTime(displayedCurrent)} / {formatTime(duration)}</span>
           <div className="video-volume">
             <button type="button" className="icon-button" onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"}>

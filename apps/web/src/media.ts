@@ -26,6 +26,16 @@ export interface MediaDetail extends MediaItem {
   category_ids: number[];
 }
 
+export interface SimilarVideo {
+  id: number;
+  title: string;
+  filename: string;
+  duration_seconds: number | null;
+  modified_at_ms: number;
+  source_name: string;
+  similarity_score: number;
+}
+
 export interface Category {
   id: number;
   name: string;

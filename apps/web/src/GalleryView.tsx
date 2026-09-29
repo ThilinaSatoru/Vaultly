@@ -31,6 +31,76 @@ const galleryNames: Record<MediaType, string> = {
   story: "Stories",
 };
 
+const previewClipSeconds = 3;
+const maximumPreviewClips = 6;
+
+function distributedPreviewPoints(duration: number): number[] {
+  const maximumStart = Math.max(0, duration - previewClipSeconds);
+  if (maximumStart === 0) return [0];
+  const count = Math.min(maximumPreviewClips, Math.max(2, Math.floor(duration / previewClipSeconds)));
+  const bandWidth = maximumStart / count;
+  const points = Array.from({ length: count }, (_, index) => (
+    Math.min(maximumStart, index * bandWidth + Math.random() * bandWidth)
+  ));
+  for (let index = points.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [points[index], points[swapIndex]] = [points[swapIndex], points[index]];
+  }
+  return points;
+}
+
+function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDuration: number | null }) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pointsRef = useRef<number[]>([]);
+  const pointIndexRef = useRef(0);
+  const segmentEndRef = useRef(0);
+  const changingSegmentRef = useRef(false);
+
+  const playPoint = (index: number) => {
+    const video = videoRef.current;
+    const points = pointsRef.current;
+    if (!video || points.length === 0) return;
+    pointIndexRef.current = index % points.length;
+    const start = points[pointIndexRef.current];
+    segmentEndRef.current = Math.min(video.duration, start + previewClipSeconds);
+    changingSegmentRef.current = true;
+    video.pause();
+    if (Math.abs(video.currentTime - start) < 0.05) {
+      changingSegmentRef.current = false;
+      void video.play().catch(() => undefined);
+    } else {
+      video.currentTime = start;
+    }
+  };
+
+  const advance = () => {
+    if (changingSegmentRef.current) return;
+    playPoint(pointIndexRef.current + 1);
+  };
+
+  return <video
+    ref={videoRef}
+    src={`/api/items/${itemId}/file`}
+    muted
+    playsInline
+    preload="metadata"
+    onLoadedMetadata={(event) => {
+      const mediaDuration = knownDuration && knownDuration > 0 ? knownDuration : event.currentTarget.duration;
+      if (!Number.isFinite(mediaDuration) || mediaDuration <= 0) return;
+      pointsRef.current = distributedPreviewPoints(mediaDuration);
+      playPoint(0);
+    }}
+    onSeeked={(event) => {
+      changingSegmentRef.current = false;
+      void event.currentTarget.play().catch(() => undefined);
+    }}
+    onTimeUpdate={(event) => {
+      if (event.currentTarget.currentTime >= segmentEndRef.current - 0.04) advance();
+    }}
+    onEnded={advance}
+  />;
+}
+
 function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQueue }: { item: MediaItem; selected: boolean; queued: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void; onQueue: () => void }) {
   const [hovered, setHovered] = useState(false);
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
@@ -95,7 +165,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
         {item.media_type === "comic" && !archive ? (
           <img src={`/api/items/${item.id}/pages/0`} alt="" loading="lazy" />
         ) : item.media_type === "video" && hovered ? (
-          <video src={`/api/items/${item.id}/file`} autoPlay muted playsInline loop preload="metadata" />
+          <VideoHoverPreview itemId={item.id} knownDuration={duration} />
         ) : (item.media_type === "video" || item.media_type === "story") && !thumbnailFailed ? (
           <img
             src={`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&attempt=${thumbnailAttempt}`}

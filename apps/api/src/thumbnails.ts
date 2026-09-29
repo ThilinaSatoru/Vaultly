@@ -4,6 +4,7 @@ import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { Worker } from "node:worker_threads";
+import { pathToFileURL } from "node:url";
 import { runtimeDirectory } from "./database.js";
 
 const execFileAsync = promisify(execFile);
@@ -87,7 +88,10 @@ export function getVideoDuration(inputPath: string): Promise<number | null> {
 }
 
 function renderPdfInWorker(inputPath: string, outputPath: string): Promise<void> {
-  const worker = new Worker(new URL("../pdf-thumbnail-worker.mjs", import.meta.url), {
+  const workerUrl = process.env.VAULTLY_PDF_WORKER_PATH
+    ? pathToFileURL(path.resolve(process.env.VAULTLY_PDF_WORKER_PATH))
+    : new URL("../pdf-thumbnail-worker.mjs", import.meta.url);
+  const worker = new Worker(workerUrl, {
     workerData: { inputPath, outputPath },
     execArgv: [],
   });

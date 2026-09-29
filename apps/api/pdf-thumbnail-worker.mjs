@@ -1,12 +1,15 @@
 import { createCanvas } from "@napi-rs/canvas";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { parentPort, workerData } from "node:worker_threads";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const { inputPath, outputPath } = workerData;
 
 async function renderThumbnail() {
-  const loadingTask = getDocument({ url: inputPath, useSystemFonts: true });
+  // Passing a Windows path makes PDF.js convert it to a file:// URL and fetch it.
+  // Node's fetch does not support that protocol, so load the bytes ourselves.
+  const file = await readFile(inputPath);
+  const loadingTask = getDocument({ data: new Uint8Array(file), useSystemFonts: true });
   try {
     const document = await loadingTask.promise;
     const page = await document.getPage(1);

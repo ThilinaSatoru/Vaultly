@@ -1,5 +1,6 @@
-import { Keyboard, RotateCcw, Settings2, X } from "lucide-react";
-import { useState } from "react";
+import { Download, Keyboard, RotateCcw, Settings2, Upload, X } from "lucide-react";
+import { type ChangeEvent, useRef, useState } from "react";
+import { api } from "./media";
 import { defaultBindings, eventBinding, formatBinding, readBindings, readBooleanPreference, readNumberPreference, type ShortcutAction, writeBindings, writePreference } from "./preferences";
 
 const shortcutGroups: Array<{ title: string; actions: Array<{ action: ShortcutAction; label: string }> }> = [
@@ -30,7 +31,7 @@ export function SettingsView() {
   const [autoPlay, setAutoPlay] = useState(() => readBooleanPreference("vaultly.video.autoplay", true));
   const [autoAdvance, setAutoAdvance] = useState(() => readBooleanPreference("vaultly.video.autoAdvance", true));
   const [continuous, setContinuous] = useState(() => readBooleanPreference("vaultly.reader.continuous", true));
-  const [scrollStep, setScrollStep] = useState(() => readNumberPreference("vaultly.reader.scrollStep", 160, 40, 800));
+  const [scrollStep, setScrollStep] = useState(() => readNumberPreference("vaultly.reader.scrollStep", 320, 80, 1600));
   const [videoVolume, setVideoVolume] = useState(() => Math.round(readNumberPreference("vaultly.video.volume", 1, 0, 1) * 100));
   const [videoMuted, setVideoMuted] = useState(() => readBooleanPreference("vaultly.video.muted", false));
   const [pdfFit, setPdfFit] = useState(() => window.localStorage.getItem("vaultly.pdf.fit") ?? "page");
@@ -39,6 +40,56 @@ export function SettingsView() {
   const [comicZoom, setComicZoom] = useState(() => readNumberPreference("vaultly.comic.zoom", 100, 25, 400));
   const [seekAmount, setSeekAmount] = useState(() => readNumberPreference("vaultly.video.seekAmount", 5, .25, 999));
   const [seekUnit, setSeekUnit] = useState(() => window.localStorage.getItem("vaultly.video.seekUnit") === "minutes" ? "minutes" : "seconds");
+  const [largeSeekAmount, setLargeSeekAmount] = useState(() => readNumberPreference("vaultly.video.seekLargeAmount", 1, .25, 999));
+  const [largeSeekUnit, setLargeSeekUnit] = useState(() => window.localStorage.getItem("vaultly.video.seekLargeUnit") === "seconds" ? "seconds" : "minutes");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState("");
+  const restoreInput = useRef<HTMLInputElement>(null);
+
+  const preferences = () => Object.fromEntries(Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
+    .filter((key): key is string => Boolean(key?.startsWith("vaultly.")))
+    .map((key) => [key, window.localStorage.getItem(key) ?? ""]));
+
+  const createBackup = async () => {
+    setBackupBusy(true); setBackupMessage("");
+    try {
+      const backup = await api<Record<string, unknown>>("/api/backup");
+      const payload = { ...backup, preferences: preferences() };
+      const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `vaultly-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setBackupMessage("Backup created successfully.");
+    } catch (requestError) {
+      setBackupMessage(requestError instanceof Error ? requestError.message : "Could not create the backup.");
+    } finally { setBackupBusy(false); }
+  };
+
+  const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !window.confirm("Restore this backup? Current Vaultly metadata and preferences will be replaced.")) return;
+    setBackupBusy(true); setBackupMessage("");
+    try {
+      const payload = JSON.parse(await file.text()) as { preferences?: Record<string, unknown> } & Record<string, unknown>;
+      await api("/api/backup/restore", { method: "POST", body: JSON.stringify(payload) });
+      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
+        const key = window.localStorage.key(index);
+        if (key?.startsWith("vaultly.")) window.localStorage.removeItem(key);
+      }
+      if (payload.preferences && typeof payload.preferences === "object") {
+        for (const [key, value] of Object.entries(payload.preferences)) {
+          if (key.startsWith("vaultly.") && typeof value === "string") window.localStorage.setItem(key, value);
+        }
+      }
+      window.location.reload();
+    } catch (requestError) {
+      setBackupMessage(requestError instanceof Error ? requestError.message : "Could not restore the backup.");
+    } finally { setBackupBusy(false); }
+  };
 
   const updateBindings = (next: Record<ShortcutAction, string[]>) => { setBindings(next); writeBindings(next); };
   const capture = (action: ShortcutAction, event: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -55,12 +106,18 @@ export function SettingsView() {
 
   return <section className="settings-view">
     <div className="page-heading"><div><p className="eyebrow">Vaultly preferences</p><h1>Settings & controls</h1><p>Preferences stay on this computer and remain active until you change them.</p></div></div>
+    <section className="settings-panel"><div className="settings-panel-heading"><Download size={20} /><div><h2>Backup and migration</h2><p>Save the complete index, metadata, collections, source definitions, and preferences to one portable file.</p></div></div>
+      <div className="backup-actions"><button className="primary-button" type="button" disabled={backupBusy} onClick={() => void createBackup()}><Download size={17} /> Create backup</button><button className="secondary-button" type="button" disabled={backupBusy} onClick={() => restoreInput.current?.click()}><Upload size={17} /> Restore backup</button><input ref={restoreInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void restoreBackup(event)} /></div>
+      <p className="backup-note">After moving to another computer, restore the backup and use <strong>Sources → Relocate source</strong> for any drive or folder paths that changed. Rescanning preserves matched metadata.</p>
+      {backupMessage && <p className="backup-message" role="status">{backupMessage}</p>}
+    </section>
     <section className="settings-panel"><div className="settings-panel-heading"><Settings2 size={20} /><div><h2>Playback and reading</h2><p>Configure automatic behavior and keyboard scrolling.</p></div></div>
       <label className="setting-toggle"><input type="checkbox" checked={autoPlay} onChange={(event) => { setAutoPlay(event.target.checked); writePreference("vaultly.video.autoplay", event.target.checked); }} /><span><strong>Autoplay videos</strong><small>Start playback when a video viewer opens.</small></span></label>
       <label className="setting-toggle"><input type="checkbox" checked={autoAdvance} onChange={(event) => { setAutoAdvance(event.target.checked); writePreference("vaultly.video.autoAdvance", event.target.checked); }} /><span><strong>Open next collection item automatically</strong><small>At the end of a video, continue to the next file in its collection.</small></span></label>
-      <label className="setting-select"><span><strong>Video seek duration</strong><small>Normal seek uses this duration; large seek uses twice this value.</small></span><input type="number" min={0.25} max={999} step={0.25} value={seekAmount} onChange={(event) => { const value = Math.max(.25, Math.min(999, Number(event.target.value) || .25)); setSeekAmount(value); writePreference("vaultly.video.seekAmount", value); }} aria-label="Seek duration" /><select value={seekUnit} onChange={(event) => { setSeekUnit(event.target.value); writePreference("vaultly.video.seekUnit", event.target.value); }} aria-label="Seek duration unit"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></select></label>
+      <label className="setting-select"><span><strong>Arrow-key seek</strong><small>Used by Left Arrow and Right Arrow.</small></span><input type="number" min={0.25} max={999} step={0.25} value={seekAmount} onChange={(event) => { const value = Math.max(.25, Math.min(999, Number(event.target.value) || .25)); setSeekAmount(value); writePreference("vaultly.video.seekAmount", value); }} aria-label="Arrow-key seek duration" /><select value={seekUnit} onChange={(event) => { setSeekUnit(event.target.value); writePreference("vaultly.video.seekUnit", event.target.value); }} aria-label="Arrow-key seek unit"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></select></label>
+      <label className="setting-select"><span><strong>Shift + Arrow-key seek</strong><small>Used for the larger forward or backward jump.</small></span><input type="number" min={0.25} max={999} step={0.25} value={largeSeekAmount} onChange={(event) => { const value = Math.max(.25, Math.min(999, Number(event.target.value) || .25)); setLargeSeekAmount(value); writePreference("vaultly.video.seekLargeAmount", value); }} aria-label="Large seek duration" /><select value={largeSeekUnit} onChange={(event) => { setLargeSeekUnit(event.target.value); writePreference("vaultly.video.seekLargeUnit", event.target.value); }} aria-label="Large seek unit"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></select></label>
       <label className="setting-toggle"><input type="checkbox" checked={continuous} onChange={(event) => { setContinuous(event.target.checked); writePreference("vaultly.reader.continuous", event.target.checked); }} /><span><strong>Continuous collection reading</strong><small>Moving beyond the first or last page opens the adjacent collection file.</small></span></label>
-      <label className="setting-number"><span><strong>Arrow-key scroll distance</strong><small>Pixels per Up/Down press in PDF and comic readers.</small></span><input type="number" min={40} max={800} step={20} value={scrollStep} onChange={(event) => { const value = Math.max(40, Math.min(800, Number(event.target.value) || 40)); setScrollStep(value); writePreference("vaultly.reader.scrollStep", value); }} /></label>
+      <label className="setting-number"><span><strong>Arrow-key scroll distance</strong><small>Smooth-scroll pixels per Up/Down press in PDF and comic readers.</small></span><input type="number" min={80} max={1600} step={40} value={scrollStep} onChange={(event) => { const value = Math.max(80, Math.min(1600, Number(event.target.value) || 80)); setScrollStep(value); writePreference("vaultly.reader.scrollStep", value); }} /></label>
     </section>
     <section className="settings-panel"><div className="settings-panel-heading"><Settings2 size={20} /><div><h2>Viewer defaults</h2><p>These values also update whenever you change them inside a viewer.</p></div></div>
       <label className="setting-range"><span><strong>Video volume</strong><small>{videoVolume}%</small></span><input type="range" min={0} max={100} step={1} value={videoVolume} onChange={(event) => { const value = Number(event.target.value); setVideoVolume(value); writePreference("vaultly.video.volume", value / 100); }} /></label>

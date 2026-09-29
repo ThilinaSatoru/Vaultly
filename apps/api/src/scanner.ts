@@ -22,8 +22,18 @@ interface ScannedItem {
   fileCount: number;
 }
 
+interface ExistingItem extends ScannedItem {
+  id: number;
+  indexed: number;
+}
+
 const titleFromFilename = (filename: string) =>
   path.basename(filename, path.extname(filename)).replace(/[._]+/g, " ").trim();
+
+const strictIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "modifiedAtMs" | "fileCount">) =>
+  `${item.mediaType}|${item.sizeBytes}|${item.modifiedAtMs}|${item.fileCount}`;
+const looseIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "fileCount">) =>
+  `${item.mediaType}|${item.sizeBytes}|${item.fileCount}`;
 
 export function inferCollectionPattern(filename: string): { title: string; order: number } | null {
   const stem = path.basename(filename, path.extname(filename));
@@ -136,12 +146,16 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
     ).run(sourceId);
 
     try {
-      const previousItemIds = (database.prepare("SELECT id FROM media_items WHERE source_id = ?").all(sourceId) as Array<{ id: number }>).map((row) => row.id);
+      const previousItems = (database.prepare(`SELECT id, media_type AS mediaType, title, filename,
+        file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
+        modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed
+        FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[]);
+      const previousItemIds = previousItems.map((row) => row.id);
       const items = await collectItems(rootPath);
       const indexedItems: Array<{ id: number; item: ScannedItem }> = [];
       database.exec("BEGIN IMMEDIATE");
       try {
-        database.prepare("UPDATE media_items SET available = 0 WHERE source_id = ?").run(sourceId);
+        database.prepare("UPDATE media_items SET indexed = 0, available = 0 WHERE source_id = ?").run(sourceId);
         const categories = database.prepare("SELECT id, name FROM categories").all() as Array<{ id: number; name: string }>;
         const tags = database.prepare("SELECT id, name FROM tags").all() as Array<{ id: number; name: string }>;
         const people = database.prepare(`
@@ -156,11 +170,26 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
         const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) VALUES (?, ?)");
         const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) VALUES (?, ?)");
         const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");
+        const existingPaths = new Set(previousItems.map((item) => `${item.mediaType}|${item.relativePath.toLocaleLowerCase()}`));
+        const availablePrevious = previousItems.filter((item) => item.indexed === 1);
+        const strictMatches = new Map<string, ExistingItem[]>();
+        const looseMatches = new Map<string, ExistingItem[]>();
+        for (const existing of availablePrevious) {
+          strictMatches.set(strictIdentity(existing), [...(strictMatches.get(strictIdentity(existing)) ?? []), existing]);
+          looseMatches.set(looseIdentity(existing), [...(looseMatches.get(looseIdentity(existing)) ?? []), existing]);
+        }
+        const looseIncomingCounts = new Map<string, number>();
+        for (const item of items) looseIncomingCounts.set(looseIdentity(item), (looseIncomingCounts.get(looseIdentity(item)) ?? 0) + 1);
+        const reconciledIds = new Set<number>();
+        const reconcileMoved = database.prepare(`UPDATE media_items SET title = ?, filename = ?, file_extension = ?,
+          relative_path = ?, size_bytes = ?, modified_at_ms = ?, file_count = ?, indexed = 1, available = 1,
+          duration_seconds = CASE WHEN size_bytes != ? OR modified_at_ms != ? THEN NULL ELSE duration_seconds END,
+          updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
         const upsert = database.prepare(`
           INSERT INTO media_items (
             source_id, media_type, title, filename, file_extension, relative_path,
-            size_bytes, modified_at_ms, file_count, available
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            size_bytes, modified_at_ms, file_count, indexed, available
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
           ON CONFLICT(source_id, media_type, relative_path) DO UPDATE SET
             filename = excluded.filename,
             file_extension = excluded.file_extension,
@@ -171,22 +200,33 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
             size_bytes = excluded.size_bytes,
             modified_at_ms = excluded.modified_at_ms,
             file_count = excluded.file_count,
+            indexed = 1,
             available = 1,
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `);
         for (const item of items) {
-          const row = upsert.get(
-            sourceId,
-            item.mediaType,
-            item.title,
-            item.filename,
-            item.fileExtension,
-            item.relativePath,
-            item.sizeBytes,
-            item.modifiedAtMs,
-            item.fileCount,
-          ) as { id: number };
+          const pathKey = `${item.mediaType}|${item.relativePath.toLocaleLowerCase()}`;
+          let row: { id: number };
+          if (!existingPaths.has(pathKey)) {
+            const strict = (strictMatches.get(strictIdentity(item)) ?? []).filter((entry) => !reconciledIds.has(entry.id));
+            const loose = (looseMatches.get(looseIdentity(item)) ?? []).filter((entry) => !reconciledIds.has(entry.id));
+            const match = strict.length === 1 ? strict[0]
+              : strict.length === 0 && loose.length === 1 && looseIncomingCounts.get(looseIdentity(item)) === 1 ? loose[0] : undefined;
+            if (match) {
+              const nextTitle = match.title === titleFromFilename(match.filename) ? item.title : match.title;
+              reconcileMoved.run(nextTitle, item.filename, item.fileExtension, item.relativePath, item.sizeBytes,
+                item.modifiedAtMs, item.fileCount, item.sizeBytes, item.modifiedAtMs, match.id);
+              reconciledIds.add(match.id);
+              row = { id: match.id };
+            } else {
+              row = upsert.get(sourceId, item.mediaType, item.title, item.filename, item.fileExtension,
+                item.relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount) as { id: number };
+            }
+          } else {
+            row = upsert.get(sourceId, item.mediaType, item.title, item.filename, item.fileExtension,
+              item.relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount) as { id: number };
+          }
           indexedItems.push({ id: row.id, item });
           for (const category of categoryMatcher.match(item.filename, item.fileExtension)) {
             addCategory.run(row.id, category.id);
@@ -246,7 +286,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
       }
       database.prepare(`
         UPDATE sources
-        SET status = 'ready', last_error = NULL, last_scanned_at = CURRENT_TIMESTAMP,
+        SET status = 'ready', connected = 1, last_error = NULL, last_scanned_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(sourceId);
