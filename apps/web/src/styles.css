@@ -584,3 +584,5 @@ main { grid-column: 2; min-width: 0; }
 .attribute-media-backdrop { z-index: 1300; }
 .attribute-media-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .attribute-media-choice { justify-content: flex-start; min-height: 52px; }
+.attribute-editor-backdrop { z-index: 1400; }
+.attribute-editor-dialog input:focus, .attribute-editor-dialog textarea:focus { border-color: var(--acid); box-shadow: 0 0 0 2px #a6ff5726; }

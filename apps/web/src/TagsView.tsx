@@ -1,5 +1,6 @@
 import { AttributePatterns } from "./AttributePatterns";
 import { AttributeBadge } from "./AttributeBadge";
+import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { Pencil, Plus, Tag as TagIcon, Trash2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { api, formatCount, type Tag } from "./media";
@@ -8,6 +9,7 @@ export function TagsView({ tags, onChanged }: { tags: Tag[]; onChanged: () => vo
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const [renaming, setRenaming] = useState<Tag | null>(null);
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -22,18 +24,6 @@ export function TagsView({ tags, onChanged }: { tags: Tag[]; onChanged: () => vo
       setError(requestError instanceof Error ? requestError.message : "Could not add tag.");
     } finally {
       setWorking(false);
-    }
-  };
-
-  const rename = async (tag: Tag) => {
-    const nextName = window.prompt("Tag name", tag.name)?.trim();
-    if (!nextName || nextName === tag.name) return;
-    setError("");
-    try {
-      await api(`/api/tags/${tag.id}`, { method: "PATCH", body: JSON.stringify({ name: nextName }) });
-      onChanged();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not rename tag.");
     }
   };
 
@@ -62,11 +52,12 @@ export function TagsView({ tags, onChanged }: { tags: Tag[]; onChanged: () => vo
             <div className="category-symbol"><TagIcon size={20} /></div>
             <div><strong><AttributeBadge kind="tag" {...tag} /></strong><span>{formatCount(tag.item_count ?? 0)} items</span></div>
             <AttributePatterns kind="tags" attribute={tag} onChanged={onChanged} />
-            <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${tag.name}`} onClick={() => rename(tag)}><Pencil size={17} /></button>
+            <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${tag.name}`} onClick={() => setRenaming(tag)}><Pencil size={17} /></button>
             <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${tag.name}`} onClick={() => remove(tag)}><Trash2 size={17} /></button>
           </div>
         ))}
       </div>
+      {renaming && <RenameAttributeDialog kind="tags" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
     </section>
   );
 }

@@ -1,6 +1,7 @@
-import { ListFilter, LoaderCircle, X } from "lucide-react";
+import { ListFilter, LoaderCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "./media";
+import { AttributeEditorDialog } from "./AttributeEditorDialog";
 
 export function AttributePatterns({ kind, attribute, onChanged }: {
   kind: "tags" | "categories" | "people";
@@ -13,6 +14,7 @@ export function AttributePatterns({ kind, attribute, onChanged }: {
   const [saving, setSaving] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const endpoint = `/api/attributes/${kind}/${attribute.id}/patterns`;
   useEffect(() => {
     if (!open) return;
@@ -23,9 +25,14 @@ export function AttributePatterns({ kind, attribute, onChanged }: {
       .catch((error) => { if (!controller.signal.aborted) setError(error instanceof Error ? error.message : "Could not load patterns."); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [open, endpoint]);
+  }, [open, endpoint, loadAttempt]);
+  const openEditor = () => {
+    setText(""); setError(""); setLoaded(false); setLoading(true); setOpen(true);
+  };
   const save = async (event: FormEvent) => {
-    event.preventDefault(); setSaving(true); setError("");
+    event.preventDefault();
+    if (!loaded || loading || saving) return;
+    setSaving(true); setError("");
     try {
       await api(endpoint, { method: "PUT", body: JSON.stringify({ patterns: text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) }) });
       onChanged(); setOpen(false);
@@ -33,21 +40,17 @@ export function AttributePatterns({ kind, attribute, onChanged }: {
     finally { setSaving(false); }
   };
   return <>
-    <button className="secondary-button attribute-pattern-button" type="button" title="Edit matching patterns" aria-label={`Patterns for ${attribute.name}`} onClick={() => setOpen(true)}><ListFilter size={16} /> Patterns</button>
-    {open && <div className="dialog-backdrop" role="presentation" onMouseDown={() => { if (!saving) setOpen(false); }}>
-      <section className="dialog" role="dialog" aria-modal="true" aria-label={`Patterns for ${attribute.name}`} onMouseDown={(event) => event.stopPropagation()}>
-        <button className="icon-button dialog-close" type="button" aria-label="Close patterns" onClick={() => setOpen(false)} disabled={saving}><X size={20} /></button>
-        <h2>Patterns for {attribute.name}</h2>
+    <button className="secondary-button attribute-pattern-button" type="button" title="Edit matching patterns" aria-label={`Patterns for ${attribute.name}`} onClick={openEditor}><ListFilter size={16} /> Patterns</button>
+    {open && <AttributeEditorDialog title={`Patterns for ${attribute.name}`} onClose={() => setOpen(false)} busy={saving} focusReady={loaded && !loading && !saving}>
         <p className="dialog-intro">Add alternative spellings, names, or synonyms, one per line. Any matching phrase in a filename assigns “{attribute.name}”. Its original name also matches.</p>
         <form onSubmit={save}>
           <label htmlFor={`patterns-${kind}-${attribute.id}`}>Alternative words or phrases (optional)</label>
           <textarea id={`patterns-${kind}-${attribute.id}`} className="attribute-pattern-input" rows={7} value={text} onChange={(event) => setText(event.target.value)} placeholder={"One synonym per line"} disabled={!loaded || loading || saving} maxLength={10100} />
           <p className="attribute-help">Matches ignore case, accents, and punctuation and use complete words. Rescan sources to apply changes to indexed files.{kind === "people" && " People keep their existing cast or artist roles."}</p>
           {loading && <p><LoaderCircle className="spin" size={16} /> Loading patterns…</p>}
-          {error && <p className="form-error" role="alert">{error}</p>}
+          {error && <div className="form-error" role="alert"><p>{error}</p>{!loaded && <button className="secondary-button" type="button" onClick={() => { setLoading(true); setError(""); setLoadAttempt((attempt) => attempt + 1); }} disabled={loading}>Retry loading patterns</button>}</div>}
           <div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setOpen(false)} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={!loaded || loading || saving}>{saving ? "Saving…" : "Save patterns"}</button></div>
         </form>
-      </section>
-    </div>}
+    </AttributeEditorDialog>}
   </>;
 }
