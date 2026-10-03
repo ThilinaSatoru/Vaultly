@@ -37,6 +37,41 @@ function setup() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("navigation history", () => {
+  it("starts a fresh trail and releases carried-over fields on Home and menu gallery visits", () => {
+    const { navigation, entries } = setup();
+    navigation.push({ section: "video", "gallery.video.browse.page": 8, viewerGalleryContext: { videos: [1, 2, 3] } }, "Videos");
+    navigation.push({ selectedItemId: 2 }, "File");
+    navigation.reset({ section: "home", libraryView: "browse", search: "" }, "Home");
+    expect(navigation.current.current.breadcrumbs).toEqual([]);
+    expect(navigation.current.current.fields).toEqual({ section: "home", libraryView: "browse", search: "" });
+    expect(navigation.current.current.scroll).toEqual({ x: 0, y: 0 });
+    const count = entries.length;
+    navigation.back();
+    expect(entries).toHaveLength(count);
+    expect(navigation.current.current.label).toBe("Home");
+
+    navigation.reset({ section: "comic", libraryView: "browse" }, "Comics");
+    const galleryId = navigation.current.current.id;
+    navigation.push({ selectedItemId: 4 }, "Comic");
+    expect(navigation.current.current.breadcrumbs).toEqual([{ id: galleryId, label: "Comics" }]);
+    navigation.back();
+    expect(navigation.current.current.id).toBe(galleryId);
+    expect(navigation.current.current.fields.selectedItemId).toBeUndefined();
+    expect(navigation.current.current.breadcrumbs).toEqual([]);
+  });
+
+  it("keeps menu roots bounded over repeated navigation and resets the current gallery too", () => {
+    const { navigation } = setup();
+    for (let visit = 0; visit < 100; visit++) {
+      navigation.reset({ section: "all", libraryView: "browse" }, "All media");
+      navigation.update({ "gallery.all.browse.page": 12, search: "movie" });
+      navigation.push({ selectedItemId: visit + 1 }, "File");
+    }
+    navigation.reset({ section: "all", libraryView: "browse" }, "All media");
+    expect(navigation.current.current.breadcrumbs).toEqual([]);
+    expect(navigation.current.current.fields).toEqual({ section: "all", libraryView: "browse" });
+  });
+
   it("restores the exact gallery page, filters, search and scroll after opening a collection and file", () => {
     const { navigation, history } = setup();
     navigation.push({ section: "video", libraryView: "browse" }, "Videos");

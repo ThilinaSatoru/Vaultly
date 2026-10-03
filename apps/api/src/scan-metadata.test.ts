@@ -63,6 +63,33 @@ test("rescan adds filename metadata without replacing manually assigned tags", a
   }
 });
 
+test("unchanged rescans avoid media writes while removed and returning files update availability", async () => {
+  const token = randomUUID();
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-incremental-"));
+  let sourceId = 0;
+  try {
+    await writeFile(path.join(root, "Stable.pdf"), "stable fixture");
+    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)").run(token, root, root).lastInsertRowid);
+    await scanSource(sourceId, root);
+    const item = database.prepare("SELECT id FROM media_items WHERE source_id = ?").get(sourceId) as { id: number };
+    database.exec(`CREATE TEMP TABLE scan_writes(id INTEGER);
+      CREATE TEMP TRIGGER count_scan_writes AFTER UPDATE ON media_items BEGIN INSERT INTO scan_writes VALUES (new.id); END;`);
+    await scanSource(sourceId, root);
+    expect(database.prepare("SELECT * FROM scan_writes").all()).toEqual([]);
+    await rename(path.join(root, "Stable.pdf"), path.join(root, "Stable.txt"));
+    await scanSource(sourceId, root);
+    expect(database.prepare("SELECT indexed, available FROM media_items WHERE id = ?").get(item.id)).toEqual({ indexed: 0, available: 0 });
+    await rename(path.join(root, "Stable.txt"), path.join(root, "Stable.pdf"));
+    await scanSource(sourceId, root);
+    expect(database.prepare("SELECT indexed, available FROM media_items WHERE id = ?").get(item.id)).toEqual({ indexed: 1, available: 1 });
+    database.exec("INSERT INTO media_search(media_search, rank) VALUES ('integrity-check', 1)");
+  } finally {
+    database.exec("DROP TRIGGER IF EXISTS count_scan_writes; DROP TABLE IF EXISTS scan_writes;");
+    if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("scan creates and extends an ordered collection from matching sequel prefixes", async () => {
   const token = `Scan Set ${randomUUID().slice(0, 8)}`;
   const root = await mkdtemp(path.join(tmpdir(), "vaultly-series-"));
@@ -118,6 +145,13 @@ test("scan preserves an item's identity and metadata after an external rename", 
       .get(before.id);
     expect(after).toEqual({ id: before.id, filename: renamed, title: "My preserved title", favorite: 1, available: 1 });
     expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").all(before.id)).toEqual([{ tag_id: tagId }]);
+    if (process.platform === "win32") {
+      const caseRenamed = renamed.toUpperCase();
+      await rename(path.join(root, renamed), path.join(root, caseRenamed));
+      await scanSource(sourceId, root);
+      expect(database.prepare("SELECT id, filename, title FROM media_items WHERE source_id = ? AND available = 1").all(sourceId))
+        .toEqual([{ id: before.id, filename: caseRenamed, title: "My preserved title" }]);
+    }
   } finally {
     if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
     if (tagId) database.prepare("DELETE FROM tags WHERE id = ?").run(tagId);

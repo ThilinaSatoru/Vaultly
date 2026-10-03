@@ -26,6 +26,7 @@ interface ScannedItem {
 interface ExistingItem extends ScannedItem {
   id: number;
   indexed: number;
+  available: number;
 }
 
 const titleFromFilename = (filename: string) =>
@@ -63,62 +64,48 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
   const items: ScannedItem[] = [];
   const directories = [rootPath];
 
-  while (directories.length > 0) {
-    const currentDirectory = directories.pop()!;
-    const directory = await opendir(currentDirectory);
-    const imageFiles: Array<{ size: number; modifiedAtMs: number }> = [];
-
+  const scanDirectory = async (currentDirectory: string) => {
+    const directory = await opendir(currentDirectory, { bufferSize: 128 });
+    let imageCount = 0;
+    let totalSize = 0;
+    let latestModification = 0;
+    let pending: Array<{ name: string; extension: string; absolutePath: string }> = [];
+    const flush = async () => {
+      const batch = pending;
+      pending = [];
+      // Bounded metadata reads avoid one round-trip per file without launching
+      // thousands of simultaneous requests or retaining every comic page.
+      const results = await Promise.all(batch.map(async (file) => ({ ...file, fileStat: await stat(file.absolutePath) })));
+      for (const { name, extension, absolutePath, fileStat } of results) {
+        if (imageExtensions.has(extension)) {
+          imageCount++;
+          totalSize += fileStat.size;
+          latestModification = Math.max(latestModification, fileStat.mtimeMs);
+        } else {
+          items.push({
+            mediaType: videoExtensions.has(extension) ? "video" : storyExtensions.has(extension) ? "story" : "comic",
+            title: titleFromFilename(name), filename: name, fileExtension: extension.slice(1),
+            relativePath: path.relative(rootPath, absolutePath), sizeBytes: fileStat.size,
+            modifiedAtMs: Math.round(fileStat.mtimeMs), fileCount: 1,
+          });
+        }
+      }
+    };
     for await (const entry of directory) {
       const absolutePath = path.join(currentDirectory, entry.name);
-
       if (entry.isDirectory()) {
         directories.push(absolutePath);
-        continue;
+      } else if (entry.isFile()) {
+        const extension = path.extname(entry.name).toLowerCase();
+        if (!videoExtensions.has(extension) && !storyExtensions.has(extension) && !comicArchiveExtensions.has(extension) && !imageExtensions.has(extension)) continue;
+        pending.push({ name: entry.name, extension, absolutePath });
+        if (pending.length === 8) await flush();
       }
-      if (!entry.isFile()) continue;
-
-      const extension = path.extname(entry.name).toLowerCase();
-      if (
-        !videoExtensions.has(extension) &&
-        !storyExtensions.has(extension) &&
-        !comicArchiveExtensions.has(extension) &&
-        !imageExtensions.has(extension)
-      ) {
-        continue;
-      }
-
-      const fileStat = await stat(absolutePath);
-      if (imageExtensions.has(extension)) {
-        imageFiles.push({ size: fileStat.size, modifiedAtMs: fileStat.mtimeMs });
-        continue;
-      }
-
-      const mediaType = videoExtensions.has(extension)
-        ? "video"
-        : storyExtensions.has(extension)
-          ? "story"
-          : "comic";
-
-      items.push({
-        mediaType,
-        title: titleFromFilename(entry.name),
-        filename: entry.name,
-        fileExtension: extension.slice(1),
-        relativePath: path.relative(rootPath, absolutePath),
-        sizeBytes: fileStat.size,
-        modifiedAtMs: Math.round(fileStat.mtimeMs),
-        fileCount: 1,
-      });
     }
+    await flush();
 
-    if (imageFiles.length > 0) {
+    if (imageCount > 0) {
       const relativeDirectory = path.relative(rootPath, currentDirectory) || ".";
-      let totalSize = 0;
-      let latestModification = 0;
-      for (const file of imageFiles) {
-        totalSize += file.size;
-        latestModification = Math.max(latestModification, file.modifiedAtMs);
-      }
       items.push({
         mediaType: "comic",
         title: currentDirectory === rootPath ? path.basename(rootPath) : path.basename(currentDirectory),
@@ -127,9 +114,15 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
         relativePath: relativeDirectory,
         sizeBytes: totalSize,
         modifiedAtMs: Math.round(latestModification),
-        fileCount: imageFiles.length,
+        fileCount: imageCount,
       });
     }
+  };
+  while (directories.length > 0) {
+    const batch = directories.splice(-4);
+    // Wait for every open directory to finish before surfacing a failure.
+    const results = await Promise.allSettled(batch.map(scanDirectory));
+    for (const result of results) if (result.status === "rejected") throw result.reason;
   }
 
   return items;
@@ -149,14 +142,13 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
     try {
       const previousItems = (database.prepare(`SELECT id, media_type AS mediaType, title, filename,
         file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
-        modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed
+        modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
         FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[]);
       const previousItemIds = previousItems.map((row) => row.id);
       const items = await collectItems(rootPath);
       const indexedItems: Array<{ id: number; item: ScannedItem }> = [];
       database.exec("BEGIN IMMEDIATE");
       try {
-        database.prepare("UPDATE media_items SET indexed = 0, available = 0 WHERE source_id = ?").run(sourceId);
         const categories = database.prepare("SELECT id, name FROM categories").all() as Array<{ id: number; name: string }>;
         const tags = database.prepare("SELECT id, name FROM tags").all() as Array<{ id: number; name: string }>;
         const people = database.prepare(`
@@ -171,13 +163,21 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
         const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) VALUES (?, ?)");
         const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) VALUES (?, ?)");
         const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");
-        const existingPaths = new Set(previousItems.map((item) => `${item.mediaType}|${item.relativePath.toLocaleLowerCase()}`));
-        const availablePrevious = previousItems.filter((item) => item.indexed === 1);
+        const pathKey = (item: ScannedItem) => `${item.mediaType}|${process.platform === "win32" ? item.relativePath.toLowerCase() : item.relativePath}`;
+        const previousByPath = new Map(previousItems.map((item) => [pathKey(item), item]));
+        const incomingPaths = new Set(items.map(pathKey));
+        // Only missing paths are candidates for a move, so identical files that
+        // still exist never donate their identity to a newly discovered file.
+        const availablePrevious = previousItems.filter((item) => item.indexed === 1 && !incomingPaths.has(pathKey(item)));
         const strictMatches = new Map<string, ExistingItem[]>();
         const looseMatches = new Map<string, ExistingItem[]>();
         for (const existing of availablePrevious) {
-          strictMatches.set(strictIdentity(existing), [...(strictMatches.get(strictIdentity(existing)) ?? []), existing]);
-          looseMatches.set(looseIdentity(existing), [...(looseMatches.get(looseIdentity(existing)) ?? []), existing]);
+          const strict = strictMatches.get(strictIdentity(existing)) ?? [];
+          strict.push(existing);
+          strictMatches.set(strictIdentity(existing), strict);
+          const loose = looseMatches.get(looseIdentity(existing)) ?? [];
+          loose.push(existing);
+          looseMatches.set(looseIdentity(existing), loose);
         }
         const looseIncomingCounts = new Map<string, number>();
         for (const item of items) looseIncomingCounts.set(looseIdentity(item), (looseIncomingCounts.get(looseIdentity(item)) ?? 0) + 1);
@@ -207,9 +207,9 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
           RETURNING id
         `);
         for (const item of items) {
-          const pathKey = `${item.mediaType}|${item.relativePath.toLocaleLowerCase()}`;
+          const previous = previousByPath.get(pathKey(item));
           let row: { id: number };
-          if (!existingPaths.has(pathKey)) {
+          if (!previous) {
             const strict = (strictMatches.get(strictIdentity(item)) ?? []).filter((entry) => !reconciledIds.has(entry.id));
             const loose = (looseMatches.get(looseIdentity(item)) ?? []).filter((entry) => !reconciledIds.has(entry.id));
             const match = strict.length === 1 ? strict[0]
@@ -224,10 +224,22 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
               row = upsert.get(sourceId, item.mediaType, item.title, item.filename, item.fileExtension,
                 item.relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount) as { id: number };
             }
+          } else if (previous.indexed === 1 && previous.available === 1 && previous.filename === item.filename
+            && previous.fileExtension === item.fileExtension && previous.relativePath === item.relativePath
+            && previous.sizeBytes === item.sizeBytes && previous.modifiedAtMs === item.modifiedAtMs && previous.fileCount === item.fileCount) {
+            row = { id: previous.id };
+          } else if (previous.relativePath !== item.relativePath) {
+            // A Windows case-only rename resolves to the same path key, but
+            // SQLite's path uniqueness is case-sensitive. Update the same row.
+            const nextTitle = previous.title === titleFromFilename(previous.filename) ? item.title : previous.title;
+            reconcileMoved.run(nextTitle, item.filename, item.fileExtension, item.relativePath, item.sizeBytes,
+              item.modifiedAtMs, item.fileCount, item.sizeBytes, item.modifiedAtMs, previous.id);
+            row = { id: previous.id };
           } else {
             row = upsert.get(sourceId, item.mediaType, item.title, item.filename, item.fileExtension,
               item.relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount) as { id: number };
           }
+          reconciledIds.add(row.id);
           indexedItems.push({ id: row.id, item });
           for (const category of categoryMatcher.match(item.filename, item.fileExtension)) {
             addCategory.run(row.id, category.id);
@@ -240,6 +252,9 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
             if (person.is_artist) addPerson.run(row.id, person.id, "artist");
           }
         }
+
+        const markMissing = database.prepare("UPDATE media_items SET indexed = 0, available = 0 WHERE id = ? AND (indexed <> 0 OR available <> 0)");
+        for (const previous of previousItems) if (!reconciledIds.has(previous.id)) markMissing.run(previous.id);
 
         const collectionGroups = new Map<string, { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> }>();
         for (const indexed of indexedItems) {

@@ -230,6 +230,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const [pathText, setPathText] = useGalleryField("pathText", "");
   const [debouncedFilename, setDebouncedFilename] = useState(filename);
   const [debouncedPath, setDebouncedPath] = useState(pathText);
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [selectedType, setSelectedType] = useGalleryField<MediaType | "">("selectedType", "");
   const [sourceId, setSourceId] = useGalleryField("sourceId", "");
   const [extension, setExtension] = useGalleryField("extension", "");
@@ -254,9 +255,9 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const [error, setError] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { setDebouncedFilename(filename); setDebouncedPath(pathText); }, 180);
+    const timer = window.setTimeout(() => { setDebouncedFilename(filename); setDebouncedPath(pathText); setDebouncedSearch(search); }, 180);
     return () => window.clearTimeout(timer);
-  }, [filename, pathText]);
+  }, [filename, pathText, search]);
 
   useEffect(() => {
     let active = true;
@@ -305,7 +306,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     setSelectedArtistIds((current) => current.filter((id) => people.some((person) => person.id === id)));
   }, [people]);
 
-  const filterKey = JSON.stringify([type, view, browseCategory, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
+  const filterKey = JSON.stringify([type, view, browseCategory, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
   const previousFilterKey = useRef(filterKey);
   useEffect(() => {
     if (previousFilterKey.current !== filterKey) {
@@ -326,7 +327,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     if (view === "favorites") params.set("favorite", "1");
     if (view === "categories" && browseCategory === "uncategorized") params.set("uncategorized", "1");
     if (view === "categories" && typeof browseCategory === "number") params.set("category", String(browseCategory));
-    if (view === "browse" && search.trim()) params.set("q", search.trim());
+    if (view === "browse" && debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
     if (view !== "browse") {
       setLoading(true);
       api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
@@ -361,7 +362,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [view, browseCategory, type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
+  }, [view, browseCategory, type, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
 
   const libraryTitle = type ? galleryNames[type] : "All media";
   const selectedCategoryName = browseCategory === "uncategorized" ? "Uncategorized" : categoryOverview?.categories.find((category) => category.id === browseCategory)?.name;

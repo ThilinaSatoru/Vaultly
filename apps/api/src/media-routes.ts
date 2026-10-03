@@ -6,6 +6,7 @@ import { opendir, realpath, rename as renamePath, stat } from "node:fs/promises"
 import path from "node:path";
 import { z } from "zod";
 import { database } from "./database.js";
+import { substringFilter } from "./search-index.js";
 import { getPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
@@ -151,13 +152,13 @@ async function sendLocalFile(
   return reply.send(createReadStream(filePath));
 }
 
-const itemSelect = `
+const itemSelect = (indexedSearch = false) => `
   SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes, m.favorite, m.duration_seconds,
     m.modified_at_ms, m.file_count, s.name AS source_name,
     COALESCE((SELECT group_concat(c.name, ', ')
       FROM effective_item_categories ic JOIN categories c ON c.id = ic.category_id
       WHERE ic.item_id = m.id), '') AS category_names
-  FROM media_items m JOIN sources s ON s.id = m.source_id
+  FROM media_items m ${indexedSearch ? "NOT INDEXED" : ""} JOIN sources s ON s.id = m.source_id
 `;
 
 interface TagRow { item_id: number; id: number; name: string }
@@ -236,6 +237,7 @@ export async function registerMediaRoutes(
     const input = listInput.parse(request.query);
     const conditions = ["m.available = 1"];
     const values: Array<string | number> = [];
+    let indexedSearch = false;
 
     if (input.type) {
       conditions.push("m.media_type = ?");
@@ -247,12 +249,16 @@ export async function registerMediaRoutes(
       values.push(input.source);
     }
     if (input.filename) {
-      conditions.push("m.filename LIKE ? ESCAPE '\\'");
-      values.push(`%${input.filename.replace(/[\\%_]/g, "\\$&")}%`);
+      const filter = substringFilter(input.filename, ["filename"]);
+      indexedSearch ||= filter.indexed;
+      conditions.push(filter.sql);
+      values.push(...filter.values);
     }
     if (input.path) {
-      conditions.push("m.relative_path LIKE ? ESCAPE '\\'");
-      values.push(`%${input.path.replace(/[\\%_]/g, "\\$&")}%`);
+      const filter = substringFilter(input.path, ["relative_path"]);
+      indexedSearch ||= filter.indexed;
+      conditions.push(filter.sql);
+      values.push(...filter.values);
     }
     if (input.extension) {
       conditions.push("m.file_extension = ?");
@@ -297,9 +303,10 @@ export async function registerMediaRoutes(
     }
     if (input.q) {
       for (const token of input.q.split(/\s+/).filter(Boolean)) {
-        const pattern = `%${token.replace(/[\\%_]/g, "\\$&")}%`;
-        conditions.push("(m.title LIKE ? ESCAPE '\\' OR m.relative_path LIKE ? ESCAPE '\\')");
-        values.push(pattern, pattern);
+        const filter = substringFilter(token, ["title", "relative_path"]);
+        indexedSearch ||= filter.indexed;
+        conditions.push(filter.sql);
+        values.push(...filter.values);
       }
     }
     for (const tagId of new Set(input.tags?.split(",").map(Number) ?? [])) {
@@ -322,11 +329,14 @@ export async function registerMediaRoutes(
           : input.sort === "smallest" ? "m.size_bytes ASC, m.id ASC"
             : input.sort === "filename" ? "m.filename COLLATE NOCASE ASC, m.id ASC"
               : "m.title COLLATE NOCASE ASC, m.id ASC";
+    // Indexed searches must start with candidate rowids. Otherwise SQLite can
+    // choose the title/source index and visit the whole library to satisfy sort.
+    // NOT INDEXED still permits INTEGER PRIMARY KEY lookups for the IN set.
     const total = database.prepare(`
-      SELECT COUNT(*) AS count FROM media_items m WHERE ${where}
+      SELECT COUNT(*) AS count FROM media_items m ${indexedSearch ? "NOT INDEXED" : ""} WHERE ${where}
     `).get(...values) as { count: number };
     const rows = database.prepare(`
-      ${itemSelect} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
+      ${itemSelect(indexedSearch)} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
     `).all(...values, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
     const tags = tagsByItem(rows.map((row) => row.id));
     const categories = categoriesByItem(rows.map((row) => row.id));
@@ -364,7 +374,7 @@ export async function registerMediaRoutes(
 
   app.get("/api/items/:id", async (request, reply) => {
     const { id } = idInput.parse(request.params);
-    const item = database.prepare(`${itemSelect} WHERE m.id = ? AND m.available = 1`).get(id);
+    const item = database.prepare(`${itemSelect()} WHERE m.id = ? AND m.available = 1`).get(id);
     if (!item) return reply.code(404).send({ message: "Media item not found." });
     const categoryIds = database.prepare("SELECT category_id FROM effective_item_categories WHERE item_id = ?").all(id)
       .map((row) => (row as { category_id: number }).category_id);

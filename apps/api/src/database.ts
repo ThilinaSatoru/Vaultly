@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { initializeSearchIndex } from "./search-index.js";
 
 export const runtimeDirectory = process.env.VAULTLY_RUNTIME_DIR
   ? path.resolve(process.env.VAULTLY_RUNTIME_DIR)
@@ -257,6 +258,13 @@ const circleColumns = (database.prepare("PRAGMA table_info(circles)").all() as A
 if (!circleColumns.includes("preferred_type")) database.exec("ALTER TABLE circles ADD COLUMN preferred_type TEXT NOT NULL DEFAULT 'mixed'");
 
 database.exec("CREATE INDEX IF NOT EXISTS idx_media_items_format ON media_items(available, media_type, file_extension)");
+database.exec(`
+  CREATE INDEX IF NOT EXISTS idx_media_items_available_title ON media_items(available, title COLLATE NOCASE, id);
+  CREATE INDEX IF NOT EXISTS idx_media_items_type_title ON media_items(available, media_type, title COLLATE NOCASE, id);
+  CREATE INDEX IF NOT EXISTS idx_media_items_available_filename ON media_items(available, filename COLLATE NOCASE, id);
+`);
+
+initializeSearchIndex(database);
 
 database.exec("PRAGMA optimize");
 

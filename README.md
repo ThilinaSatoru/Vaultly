@@ -38,6 +38,9 @@ Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian pa
 - Register multiple directory roots, including folders containing mixed media.
 - Scan nested folders for videos, PDFs, CBZ/ZIP comics, and image-based comic folders.
 - Persist source records and indexed item metadata in SQLite.
+- Persist a compact SQLite FTS5 trigram index for fast substring searches across titles, filenames, and paths. Existing libraries are indexed once on upgrade; scans, edits, renames, deletions, and backup restores keep it synchronized automatically. One- and two-character searches retain a scan fallback.
+- Scan directories and file metadata in bounded parallel batches, aggregate comic pages without keeping per-page metadata, and skip unchanged media-row writes on rescans.
+- Start a fresh breadcrumb trail and discard carried-over gallery/viewer state when opening Home or a destination from the main menu; nested browsing still restores filters and scroll with Back.
 - Show per-source counts, scanning state, errors, and last scan time.
 - Rescan or remove a source. Removing one only deletes its Vaultly records.
 - Match existing category and tag names against complete words or phrases in filenames during every scan; rescan adds newly matching metadata without clearing manual assignments. Cast/artist names are matched only when their role is already established elsewhere.
@@ -54,4 +57,4 @@ Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian pa
 - Assign searchable multi-person cast and artist credits to any media type, and manage names from the People section.
 - Edit an item title without losing it during a rescan.
 
-CBZ/ZIP archives are indexed but not yet readable in-browser. Video formats unsupported by the browser need a future compatibility transcoder. Live folder watching and a dedicated high-volume search index are also future work. Node's built-in SQLite API is currently experimental and may change in future Node releases; use the stated Node version for now.
+CBZ/ZIP archives are indexed but not yet readable in-browser. Video formats unsupported by the browser need a future compatibility transcoder. Live folder watching and Windows NTFS MFT/USN journal integration (as used by Everything) are future work; initial scans still traverse source folders. Node's built-in SQLite API is currently experimental and may change in future Node releases; use the stated Node version for now.

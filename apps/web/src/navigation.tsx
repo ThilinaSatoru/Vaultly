@@ -78,12 +78,17 @@ export function useNavigation() {
     saveScroll();
     commit(nextEntry(current.current, fields, label), true);
   };
+  const reset = (fields: Record<string, unknown>, label: string) => {
+    saveScroll();
+    const id = crypto.randomUUID();
+    commit({ id, pageId: id, label, fields, scroll: { x: 0, y: 0 }, breadcrumbs: [] }, true);
+  };
   const back = () => { if (current.current.breadcrumbs.length) window.history.back(); };
   const goTo = (id: string) => {
     const index = current.current.breadcrumbs.findIndex((crumb) => crumb.id === id);
     if (index >= 0) window.history.go(index - current.current.breadcrumbs.length);
   };
-  return { entry, current, update, push, back, goTo };
+  return { entry, current, update, push, reset, back, goTo };
 }
 
 export const NavigationContext = createContext<ReturnType<typeof useNavigation> | null>(null);

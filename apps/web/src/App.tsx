@@ -457,12 +457,10 @@ function LibraryApp() {
   const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
   const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics", video: "Videos", story: "Stories", categories: "Categories", tags: "Tags", people: "People", sources: "Sources", settings: "Settings" };
   const selectSection = (nextSection: Section) => {
-    if (nextSection === section && libraryView === "browse" && !search) return;
-    navigation.push({ section: nextSection, libraryView: "browse", search: "", selectedSeriesId: null, selectedItemId: null, "SeriesView.selectedId": null }, sectionNames[nextSection]);
+    navigation.reset({ section: nextSection, libraryView: "browse", search: "" }, sectionNames[nextSection]);
   };
   const selectLibraryView = (view: LibraryView) => {
-    if (view === libraryView) return;
-    navigation.push({ libraryView: view, search: "", selectedSeriesId: null, selectedItemId: null, "SeriesView.selectedId": null, "SeriesView.entityView": view === "circles" ? "circles" : "sets" }, sectionNames[section] + " · " + view);
+    navigation.reset({ section, libraryView: view, search: "", "SeriesView.entityView": view === "circles" ? "circles" : "sets" }, sectionNames[section] + " · " + view);
   };
   const openSeries = (id: number) => navigation.push({ selectedSeriesId: id, "SeriesView.selectedId": id, "SeriesView.entityView": "sets", selectedItemId: null, viewerSeriesContext: null, viewerFloating: false, libraryView: "series" }, "Collection");
   const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
