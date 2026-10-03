@@ -57,7 +57,7 @@ export function BulkActionDialog({ itemIds, tags, categories, people, series, on
         <label>Action<select value={mode} onChange={(event) => { setMode(event.target.value as "add" | "remove"); setValueIds([]); }}><option value="add">Add</option><option value="remove">Remove</option></select></label>
         <label>Metadata<select value={field} onChange={(event) => { setField(event.target.value as BulkField); setValueIds([]); }}><option value="tags">Tags</option><option value="categories">Categories</option><option value="series">Series & sets</option><option value="cast">Cast</option><option value="artists">Artists</option></select></label>
       </div>
-      <TagCombobox label={`Choose ${labels[field].toLowerCase()}`} tags={options} selectedIds={valueIds} onChange={setValueIds} onCreate={onCreate} disabled={busy} placeholder={`Search ${labels[field].toLowerCase()}`} />
+      <TagCombobox attributeKind={field === "tags" ? "tag" : field === "categories" ? "category" : field === "artists" ? "artist" : field} label={`Choose ${labels[field].toLowerCase()}`} tags={options} selectedIds={valueIds} onChange={setValueIds} onCreate={onCreate} disabled={busy} placeholder={`Search ${labels[field].toLowerCase()}`} />
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="dialog-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="button" onClick={() => void apply()} disabled={busy || !valueIds.length}>{busy ? <LoaderCircle className="spin" size={17} /> : null}{mode === "add" ? "Add" : "Remove"} {labels[field].toLowerCase()}</button></div>
     </section>

@@ -2,6 +2,8 @@ import { Check, Plus, Search, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Tag } from "./media";
+import { AttributeBadge } from "./AttributeBadge";
+import type { AttributeKind } from "./attribute-navigation";
 
 interface TagComboboxProps {
   label: string;
@@ -11,9 +13,10 @@ interface TagComboboxProps {
   onCreate?: (name: string) => Promise<Tag>;
   disabled?: boolean;
   placeholder?: string;
+  attributeKind: AttributeKind;
 }
 
-export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disabled, placeholder = "Search tags" }: TagComboboxProps) {
+export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disabled, attributeKind, placeholder = "Search tags" }: TagComboboxProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
@@ -86,9 +89,9 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
       <span className="tag-combobox-label">{label}</span>
       <div className={`tag-combobox-control${open ? " is-open" : ""}`} onClick={() => { if (!disabled) inputRef.current?.focus(); }}>
         {selected.map((tag) => (
-          <span className="tag-badge tag-badge-selected" key={tag.id}>
-            {tag.name}
-            <button type="button" onClick={(event) => { event.stopPropagation(); toggle(tag.id); }} disabled={disabled} aria-label={`Remove ${tag.name}`}><X size={12} /></button>
+          <span className="tag-badge-selected" key={tag.id}>
+            <AttributeBadge kind={attributeKind} {...tag} disabled={disabled} onBrowse={() => setOpen(false)} />
+            <button className="tag-badge-remove" type="button" onClick={(event) => { event.stopPropagation(); toggle(tag.id); }} disabled={disabled} aria-label={`Remove ${tag.name}`}><X size={12} /></button>
           </span>
         ))}
         <Search size={15} className="tag-combobox-search-icon" />

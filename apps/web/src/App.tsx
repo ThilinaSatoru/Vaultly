@@ -1,5 +1,10 @@
+import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
+import { AttributeBadge, AttributeBrowseProvider } from "./AttributeBadge";
+import { NavigationContext, useNavigation, useNavigationField } from "./navigation";
+import type { GalleryVideoContext } from "./video-playlist";
 import {
   AlertTriangle,
+  ArrowLeft,
   ArrowRight,
   BookOpen,
   Check,
@@ -27,7 +32,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CategoriesView } from "./CategoriesView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
@@ -50,6 +55,8 @@ interface LibrarySource {
   comic_count: number;
   video_count: number;
   story_count: number;
+  tags?: Tag[];
+  categories?: Category[];
   path_available: boolean;
   path_error: string | null;
 }
@@ -81,8 +88,10 @@ const formatScanDate = (value: string | null) => {
   return relativeTime.format(Math.round(hours / 24), "day");
 };
 
-function AddSourceDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttributeOptions & { onClose: () => void; onAdded: () => void }) {
   const [rootPath, setRootPath] = useState("");
+  const [tagIds, setTagIds] = useState<number[]>([]);
+  const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -112,7 +121,7 @@ function AddSourceDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
     try {
       await api("/api/sources", {
         method: "POST",
-        body: JSON.stringify({ rootPath: rootPath.trim(), name: name.trim() || undefined }),
+        body: JSON.stringify({ rootPath: rootPath.trim(), name: name.trim() || undefined, tagIds, categoryIds }),
       });
       onAdded();
       onClose();
@@ -157,6 +166,8 @@ function AddSourceDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
             placeholder="Uses the folder name by default"
           />
 
+          <SourceAttributeFields {...attributeOptions} tagIds={tagIds} categoryIds={categoryIds} onTagsChange={setTagIds} onCategoriesChange={setCategoryIds} disabled={saving} />
+
           <div className="mixed-note">
             <Grid2X2 size={18} />
             <div><strong>Mixed media is supported</strong><span>Nested folders are scanned. Existing category, tag, and known cast/artist names in filenames are added automatically.</span></div>
@@ -177,7 +188,8 @@ function AddSourceDialog({ onClose, onAdded }: { onClose: () => void; onAdded: (
   );
 }
 
-function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: () => void }) {
+function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeOptions & { source: LibrarySource; onChanged: () => void }) {
+  const [attributesOpen, setAttributesOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -250,6 +262,7 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
           </button>
           {menuOpen && (
             <div className="source-menu">
+              <button type="button" onClick={() => { setMenuOpen(false); setAttributesOpen(true); }}><TagIcon size={16} /> Common attributes</button>
               <button type="button" onClick={() => void relocate()}><FolderOpen size={16} /> Relocate source</button>
               <button type="button" onClick={rescan} disabled={!source.path_available}><RefreshCw size={16} /> Scan again</button>
               <button className="danger" type="button" onClick={remove} disabled={source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
@@ -264,6 +277,11 @@ function SourceCard({ source, onChanged }: { source: LibrarySource; onChanged: (
         <div><BookOpen size={17} /><span>Stories</span><strong>{formatCount(source.story_count)}</strong></div>
       </div>
 
+      <div className="source-common-attributes">
+        <div className="attribute-badges">{(source.tags ?? []).map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{(source.categories ?? []).map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>
+        <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
+      </div>
+      {attributesOpen && <SourceAttributesDialog source={source} {...attributeOptions} onClose={() => setAttributesOpen(false)} onSaved={onChanged} />}
       <footer>
         <span>{source.status === "scanning" ? "Scanning folders…" : formatScanDate(source.last_scanned_at)}</span>
         <strong>{formatCount(source.item_count)} items</strong>
@@ -324,16 +342,22 @@ function HomeView({ sources, categories, onOpenLibrary, onOpenCategories, onAddS
     <section className="home-section">
       <div className="home-section-heading"><div><p className="eyebrow">Organize</p><h2>Categories</h2></div><button type="button" onClick={onOpenCategories}>View all <ArrowRight size={16} /></button></div>
       {visibleCategories.length ? <div className="home-category-list">
-        {visibleCategories.map((category) => <button type="button" key={category.id} onClick={onOpenCategories}><Folder size={18} /><span>{category.name}</span><strong>{formatCount(category.item_count)}</strong><ChevronRight size={17} /></button>)}
+        {visibleCategories.map((category) => <AttributeBadge key={category.id} kind="category" {...category}><Folder size={18} /><span>{category.name}</span><strong>{formatCount(category.item_count)}</strong><ChevronRight size={17} /></AttributeBadge>)}
       </div> : <div className="home-empty-categories"><Folder size={24} /><span>Categories with available media will appear here.</span></div>}
     </section>
   </>;
 }
 
 export function App() {
-  const [section, setSection] = useState<Section>("home");
-  const [libraryView, setLibraryView] = useState<LibraryView>("browse");
-  const [search, setSearch] = useState("");
+  const navigation = useNavigation();
+  return <NavigationContext.Provider value={navigation}><LibraryApp /></NavigationContext.Provider>;
+}
+
+function LibraryApp() {
+  const navigation = useContext(NavigationContext)!;
+  const [section] = useNavigationField<Section>("section", "home");
+  const [libraryView] = useNavigationField<LibraryView>("libraryView", "browse");
+  const [search, setSearch] = useNavigationField("search", "");
   const [sources, setSources] = useState<LibrarySource[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -341,16 +365,17 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
-  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [selectedItemId] = useNavigationField<number | null>("selectedItemId", null);
   const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
-  const [viewerFloating, setViewerFloating] = useState(false);
-  const [viewerSeriesContext, setViewerSeriesContext] = useState<SeriesViewerContext | null>(null);
-  const [selectedSeriesId, setSelectedSeriesId] = useState<number | null>(null);
-  const [seriesNavigationKey, setSeriesNavigationKey] = useState(0);
+  const [viewerFloating, setViewerFloating] = useNavigationField("viewerFloating", false);
+  const [viewerSeriesContext, setViewerSeriesContext] = useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
+  const [viewerGalleryContext] = useNavigationField<GalleryVideoContext | null>("viewerGalleryContext", null);
+  const [selectedSeriesId] = useNavigationField<number | null>("selectedSeriesId", null);
+
   const [refreshKey, setRefreshKey] = useState(0);
   const [rescanningAll, setRescanningAll] = useState(false);
   const wasScanning = useRef(false);
-  const libraryLocation = useRef({ x: 0, y: 0 });
+
 
   const loadSources = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -428,28 +453,31 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [isScanning, loadSources]);
 
+  const attributeOptions: SourceAttributeOptions = { tags, categories, onTagCreated: createTag, onCategoryCreated: createCategory };
   const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
-  const selectSection = (nextSection: Section) => { setSection(nextSection); setLibraryView("browse"); setSearch(""); setSelectedSeriesId(null); };
-  const selectLibraryView = (view: LibraryView) => { setLibraryView(view); setSearch(""); setSelectedSeriesId(null); };
+  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics", video: "Videos", story: "Stories", categories: "Categories", tags: "Tags", people: "People", sources: "Sources", settings: "Settings" };
+  const selectSection = (nextSection: Section) => {
+    if (nextSection === section && libraryView === "browse" && !search) return;
+    navigation.push({ section: nextSection, libraryView: "browse", search: "", selectedSeriesId: null, selectedItemId: null, "SeriesView.selectedId": null }, sectionNames[nextSection]);
+  };
+  const selectLibraryView = (view: LibraryView) => {
+    if (view === libraryView) return;
+    navigation.push({ libraryView: view, search: "", selectedSeriesId: null, selectedItemId: null, "SeriesView.selectedId": null, "SeriesView.entityView": view === "circles" ? "circles" : "sets" }, sectionNames[section] + " · " + view);
+  };
+  const openSeries = (id: number) => navigation.push({ selectedSeriesId: id, "SeriesView.selectedId": id, "SeriesView.entityView": "sets", selectedItemId: null, viewerSeriesContext: null, viewerFloating: false, libraryView: "series" }, "Collection");
   const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
-  const openItem = (id: number, context: SeriesViewerContext | null = null) => {
-    libraryLocation.current = { x: window.scrollX, y: window.scrollY };
-    setViewerSeriesContext(context);
-    setViewerFloating(false);
-    setSelectedItemId(id);
+  const openItem = (id: number, context: SeriesViewerContext | null = null, gallery: GalleryVideoContext | null = null) => {
+    navigation.push({ selectedItemId: id, viewerSeriesContext: context, viewerGalleryContext: gallery, viewerFloating: false }, gallery?.videos.find((item) => item.id === id)?.title ?? context?.items.find((item) => item.id === id)?.title ?? `File ${id}`);
   };
   const closeViewer = () => {
-    setSelectedItemId(null);
-    setViewerSeriesContext(null);
-    setViewerFloating(false);
-    window.requestAnimationFrame(() => window.scrollTo(libraryLocation.current.x, libraryLocation.current.y));
+    const origin = [...navigation.entry.breadcrumbs].reverse().find((crumb) => !crumb.viewer);
+    if (origin) navigation.goTo(origin.id);
+    else navigation.update({ selectedItemId: null, viewerSeriesContext: null, viewerGalleryContext: null, viewerFloating: false });
   };
   const queueVideo = (item: MediaItem) => {
     setTemporaryPlaylist((current) => current.some((entry) => entry.id === item.id) ? current : [...current, item]);
     if (selectedItemId === null) {
-      libraryLocation.current = { x: window.scrollX, y: window.scrollY };
-      setViewerSeriesContext(null);
-      setSelectedItemId(item.id);
+      navigation.push({ selectedItemId: item.id, viewerSeriesContext: null, viewerGalleryContext: null, viewerFloating: true }, "Temporary playlist");
     }
     setViewerFloating(true);
   };
@@ -465,7 +493,7 @@ export function App() {
   };
 
   return (
-    <div className="app-shell">
+    <AttributeBrowseProvider onNavigate={() => setShowAddSource(false)}><div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
         <nav aria-label="Main navigation">
@@ -485,7 +513,11 @@ export function App() {
 
       <main>
         <header className="topbar">
-          <div className="search-box"><Search size={19} /><input aria-label="Search library" placeholder="Search your library" value={search} onChange={(event) => { setSearch(event.target.value); if (event.target.value) { setSection("all"); setLibraryView("browse"); } }} /></div>
+          <div className="search-box"><Search size={19} /><input aria-label="Search library" placeholder="Search your library" value={search} onChange={(event) => {
+            const nextSearch = event.target.value;
+            if (nextSearch && (section !== "all" || libraryView !== "browse")) navigation.push({ section: "all", libraryView: "browse", search: nextSearch, selectedItemId: null }, "Search results");
+            else setSearch(nextSearch);
+          }} /></div>
           <div className="topbar-actions">
             {temporaryPlaylist.length > 0 && <button className="playlist-launch" type="button" onClick={() => openItem(temporaryPlaylist[0].id)}><ListVideo size={17} /> Temporary playlist <strong>{temporaryPlaylist.length}</strong></button>}
             <div className="local-pill"><span /> Local only</div>
@@ -493,8 +525,13 @@ export function App() {
         </header>
 
         <div className="content">
+          <nav className="navigation-trail" aria-label="Navigation history">
+            <button className="secondary-button" type="button" onClick={navigation.back} disabled={!navigation.entry.breadcrumbs.length}><ArrowLeft size={16} /> Back</button>
+            {navigation.entry.breadcrumbs.map((crumb) => <span key={crumb.id}><button type="button" onClick={() => navigation.goTo(crumb.id)}>{crumb.label}</button><ChevronRight size={14} /></span>)}
+            <strong aria-current="page">{navigation.entry.label}</strong>
+          </nav>
           {section === "home" ? (
-            <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => { setSection("all"); setLibraryView("categories"); setSearch(""); }} onAddSource={() => { setSection("sources"); setShowAddSource(true); }} />
+            <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={() => { selectSection("sources"); setShowAddSource(true); }} />
           ) : section === "sources" ? <>
           <div className="page-heading">
             <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames.</p></div>
@@ -513,7 +550,7 @@ export function App() {
           {loading ? (
             <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading sources…</span></div>
           ) : sources.length > 0 ? (
-            <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} onChanged={() => { void loadSources(true); refreshMedia(); }} />)}</div>
+            <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} {...attributeOptions} onChanged={() => { void loadSources(true); refreshMedia(); }} />)}</div>
           ) : (
             <section className="empty-state">
               <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
@@ -532,10 +569,10 @@ export function App() {
           ) : section === "people" ? (
             <PeopleView people={people} onChanged={() => { void loadPeople(); setRefreshKey((value) => value + 1); }} />
           ) : libraryView === "series" || libraryView === "circles" ? (
-            <SeriesView key={`${seriesNavigationKey}-${section}-${libraryView}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
+            <SeriesView key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}-${selectedSeriesId ?? "list"}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
           ) : (
             <GalleryView
-              key={`${section}-${libraryView}`}
+              key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}`}
               view={libraryView}
               type={section === "all" ? undefined : section}
               search={search}
@@ -547,19 +584,19 @@ export function App() {
               onPersonCreated={createPerson}
               onChanged={refreshMedia}
               sources={sources.filter((source) => source.path_available).map((source) => ({ id: source.id, name: source.name }))}
-              onOpen={(id) => openItem(id)}
+              onOpen={(id, context) => openItem(id, null, context)}
               onQueueVideo={queueVideo}
               queuedVideoIds={temporaryPlaylist.map((item) => item.id)}
-              onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setLibraryView("series"); }}
-              onAddSource={() => { setSection("sources"); setShowAddSource(true); }}
+              onOpenSeries={openSeries}
+              onAddSource={() => { selectSection("sources"); setShowAddSource(true); }}
               refreshKey={refreshKey}
             />
           )}
         </div>
       </main>
 
-      {showAddSource && <AddSourceDialog onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
-      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={setSelectedItemId} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={(id) => { setSelectedSeriesId(id); setSeriesNavigationKey((value) => value + 1); setSelectedItemId(null); setViewerSeriesContext(null); setViewerFloating(false); setLibraryView("series"); }} onClose={closeViewer} onChanged={refreshMedia} />}
-    </div>
+      {showAddSource && <AddSourceDialog {...attributeOptions} onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
+      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} galleryContext={viewerGalleryContext} onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, temporaryPlaylist.find((item) => item.id === id)?.title ?? `File ${id}`)} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={openSeries} onClose={closeViewer} onChanged={refreshMedia} />}
+    </div></AttributeBrowseProvider>
   );
 }

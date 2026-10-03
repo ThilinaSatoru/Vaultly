@@ -1,3 +1,4 @@
+import { registerAttributeRoutes, sourceAttributesInput, sourceAttributes, invalidSourceAttribute, setSourceAttributes } from "./attribute-routes.js";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
@@ -25,17 +26,30 @@ export interface VaultlyServerOptions {
 export async function buildVaultlyServer(options: VaultlyServerOptions = {}) {
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
+app.setErrorHandler((error, _request, reply) => {
+  if (error instanceof z.ZodError) {
+    return reply.code(400).send({ message: error.issues[0]?.message ?? "Invalid request." });
+  }
+  if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    return reply.code(400).send({ message: "That directory does not exist or is unavailable." });
+  }
+  app.log.error(error);
+  return reply.code(500).send({ message: "Something went wrong while updating the library." });
+});
+
 await app.register(registerMediaRoutes, { revealPath: options.revealPath });
 await app.register(registerSeriesRoutes);
 await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);
 await app.register(registerCircleRoutes);
 await app.register(registerBackupRoutes);
+await app.register(registerAttributeRoutes);
 
 const sourceInput = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   rootPath: z.string().trim().min(1),
 });
+const sourceCreateInput = sourceInput.merge(sourceAttributesInput);
 
 const sourceIdInput = z.object({ id: z.coerce.number().int().positive() });
 
@@ -74,7 +88,7 @@ app.get("/api/sources", async () => {
   }
   const availability = new Map(checked.map((source) => [source.id, { path_available: source.path_available, path_error: source.path_error }]));
   const summaries = database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all() as Array<SourceRow & Record<string, unknown>>;
-  return summaries.map((source) => ({ ...source, ...availability.get(source.id) }));
+  return summaries.map((source) => ({ ...source, ...availability.get(source.id), ...sourceAttributes(source.id) }));
 });
 
 app.post("/api/system/pick-directory", async (_request, reply) => {
@@ -88,7 +102,9 @@ app.post("/api/system/pick-directory", async (_request, reply) => {
 });
 
 app.post("/api/sources", async (request, reply) => {
-  const input = sourceInput.parse(request.body);
+  const input = sourceCreateInput.parse(request.body);
+  const invalid = invalidSourceAttribute(input);
+  if (invalid) return reply.code(400).send({ message: invalid });
   const resolvedPath = await realpath(path.resolve(input.rootPath));
   const rootStat = await stat(resolvedPath);
   if (!rootStat.isDirectory()) {
@@ -99,14 +115,20 @@ app.post("/api/sources", async (request, reply) => {
   const name = input.name || path.basename(resolvedPath) || resolvedPath;
 
   try {
-    const result = database.prepare(`
-      INSERT INTO sources (name, root_path, normalized_path, status)
-      VALUES (?, ?, ?, 'idle')
-    `).run(name, resolvedPath, normalizedPath);
-    const sourceId = Number(result.lastInsertRowid);
+    database.exec("BEGIN IMMEDIATE");
+    let sourceId: number;
+    try {
+      const result = database.prepare(`
+        INSERT INTO sources (name, root_path, normalized_path, status)
+        VALUES (?, ?, ?, 'idle')
+      `).run(name, resolvedPath, normalizedPath);
+      sourceId = Number(result.lastInsertRowid);
+      setSourceAttributes(sourceId, input);
+      database.exec("COMMIT");
+    } catch (error) { database.exec("ROLLBACK"); throw error; }
     void scanSource(sourceId, resolvedPath);
     const source = database.prepare(`${sourceSummaryQuery} HAVING s.id = ?`).get(sourceId);
-    return reply.code(201).send(source);
+    return reply.code(201).send({ ...(source as Record<string, unknown>), ...sourceAttributes(sourceId) });
   } catch (error) {
     if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
       return reply.code(409).send({ message: "That folder is already in your library." });
@@ -160,16 +182,7 @@ app.delete("/api/sources/:id", async (request, reply) => {
   return reply.code(204).send();
 });
 
-app.setErrorHandler((error, _request, reply) => {
-  if (error instanceof z.ZodError) {
-    return reply.code(400).send({ message: error.issues[0]?.message ?? "Invalid request." });
-  }
-  if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-    return reply.code(400).send({ message: "That directory does not exist or is unavailable." });
-  }
-  app.log.error(error);
-  return reply.code(500).send({ message: "Something went wrong while updating the library." });
-});
+
 
 if (options.staticRoot) {
   await app.register(fastifyStatic, { root: path.resolve(options.staticRoot) });

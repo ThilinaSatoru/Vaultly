@@ -1,3 +1,5 @@
+import { AttributePatterns } from "./AttributePatterns";
+import { AttributeBadge } from "./AttributeBadge";
 import { Pencil, Plus, Tag as TagIcon, Trash2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { api, formatCount, type Tag } from "./media";
@@ -58,7 +60,8 @@ export function TagsView({ tags, onChanged }: { tags: Tag[]; onChanged: () => vo
         {tags.length === 0 ? <div className="category-empty">No tags yet. Create one here or while editing an item.</div> : tags.map((tag) => (
           <div className="category-row" key={tag.id}>
             <div className="category-symbol"><TagIcon size={20} /></div>
-            <div><strong><span className="tag-badge">{tag.name}</span></strong><span>{formatCount(tag.item_count ?? 0)} items</span></div>
+            <div><strong><AttributeBadge kind="tag" {...tag} /></strong><span>{formatCount(tag.item_count ?? 0)} items</span></div>
+            <AttributePatterns kind="tags" attribute={tag} onChanged={onChanged} />
             <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${tag.name}`} onClick={() => rename(tag)}><Pencil size={17} /></button>
             <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${tag.name}`} onClick={() => remove(tag)}><Trash2 size={17} /></button>
           </div>

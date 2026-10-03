@@ -1,21 +1,22 @@
-import { type RefObject, useEffect } from "react";
+import { type RefObject, useLayoutEffect } from "react";
 import { matchesShortcut, readNumberPreference } from "./preferences";
 
-export function useContinuousReaderScroll(scrollRef: RefObject<HTMLElement | null>, enabled = true) {
-  useEffect(() => {
+export function useContinuousReaderScroll(scrollRef: RefObject<HTMLElement | null>, enabled = true, pageKey?: string | number) {
+  useLayoutEffect(() => {
     if (!enabled) return;
 
     let frame = 0;
     let direction = 0;
     let held = false;
-    let extended = false;
+    let activeCode = "";
     let target = 0;
     let lastFrame = 0;
+    const keySensitivity = () => readNumberPreference("vaultly.reader.keySensitivity", 100, 25, 300) / 100;
 
     const cancel = () => {
       direction = 0;
+      activeCode = "";
       held = false;
-      extended = false;
       window.cancelAnimationFrame(frame);
       frame = 0;
     };
@@ -24,26 +25,21 @@ export function useContinuousReaderScroll(scrollRef: RefObject<HTMLElement | nul
       const element = scrollRef.current;
       if (!direction || !element) return cancel();
       const elapsed = Math.min(32, Math.max(0, now - lastFrame));
-      const step = readNumberPreference("vaultly.reader.scrollStep", 320, 80, 1600);
       const maximum = Math.max(0, element.scrollHeight - element.clientHeight);
       target = Math.max(0, Math.min(maximum, target));
-      const distance = target - element.scrollTop;
-
-      // Keep one scroll-step ahead while held. Direct scrollTop updates avoid
-      // repeatedly restarting the container's CSS smooth-scroll animation.
-      if (held && direction * distance < step * 0.15) {
-        target = Math.max(0, Math.min(maximum, target + direction * step));
-        extended = true;
-      }
       const nextDistance = target - element.scrollTop;
       const smoothing = 1 - Math.exp(-12 * elapsed / 1000);
-      element.scrollTop += nextDistance * smoothing;
+      // Held keys move at a steady two viewports per second, without the
+      // slowing down and speeding up of repeated smooth-scroll destinations.
+      const nextTop = held
+        ? element.scrollTop + direction * element.clientHeight * 2 * keySensitivity() * elapsed / 1000
+        : element.scrollTop + nextDistance * smoothing;
+      element.scrollTo({ top: Math.max(0, Math.min(maximum, nextTop)), behavior: "instant" });
       lastFrame = now;
       if (!held && Math.abs(target - element.scrollTop) < 0.5) {
-        element.scrollTop = target;
+        element.scrollTo({ top: target, behavior: "instant" });
         cancel();
-      } else if ((target === 0 || target === maximum) && Math.abs(target - element.scrollTop) < 0.5) {
-        element.scrollTop = target;
+      } else if (held && (direction < 0 ? element.scrollTop <= 0 : element.scrollTop >= maximum)) {
         cancel();
       } else {
         frame = window.requestAnimationFrame(animate);
@@ -58,16 +54,22 @@ export function useContinuousReaderScroll(scrollRef: RefObject<HTMLElement | nul
       if (!nextDirection) return;
       event.preventDefault();
       if (direction === nextDirection) {
-        held = true;
+        activeCode = event.code;
+        if (event.repeat) held = true;
+        else {
+          held = false;
+          const element = scrollRef.current;
+          if (element) target += direction * element.clientHeight / 2 * keySensitivity();
+        }
         return;
       }
       cancel();
       const element = scrollRef.current;
       if (!element) return;
       direction = nextDirection;
-      held = true;
-      extended = false;
-      const step = readNumberPreference("vaultly.reader.scrollStep", 320, 80, 1600);
+      activeCode = event.code;
+      held = event.repeat;
+      const step = element.clientHeight / 2 * keySensitivity();
       target = element.scrollTop + direction * step;
       lastFrame = performance.now();
       frame = window.requestAnimationFrame(animate);
@@ -75,22 +77,37 @@ export function useContinuousReaderScroll(scrollRef: RefObject<HTMLElement | nul
 
     const onKeyUp = (event: KeyboardEvent) => {
       if (!direction) return;
-      if (!matchesShortcut(event, direction < 0 ? "reader.scrollUp" : "reader.scrollDown")) return;
-      held = false;
-      if (extended && scrollRef.current) {
-        const remaining = Math.abs(target - scrollRef.current.scrollTop);
-        target = scrollRef.current.scrollTop + direction * Math.min(remaining, 48);
-      }
+      if (event.code !== activeCode) return;
+      if (held) cancel();
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      const element = scrollRef.current;
+      if (!element || !(event.target instanceof Node) || !element.contains(event.target) || event.ctrlKey || event.defaultPrevented) return;
+      cancel();
+      const sensitivity = readNumberPreference("vaultly.reader.scrollSensitivity", 100, 25, 300) / 100;
+      // Preserve native wheel/trackpad behavior at the default sensitivity.
+      if (sensitivity === 1) return;
+      event.preventDefault();
+      const verticalUnit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientHeight : 1;
+      const horizontalUnit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientWidth : 1;
+      element.scrollBy({
+        top: event.deltaY * verticalUnit * sensitivity,
+        left: event.deltaX * horizontalUnit * sensitivity,
+        behavior: "instant",
+      });
     };
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", cancel);
+    window.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       cancel();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", cancel);
+      window.removeEventListener("wheel", onWheel);
     };
-  }, [enabled, scrollRef]);
+  }, [enabled, scrollRef, pageKey]);
 }

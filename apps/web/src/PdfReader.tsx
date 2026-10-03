@@ -30,7 +30,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useContinuousReaderScroll(scrollRef, Boolean(pdfDocument));
+  useContinuousReaderScroll(scrollRef, Boolean(pdfDocument), `${itemId}:${pageNumber}:${fitMode}`);
 
   useEffect(() => { window.localStorage.setItem("vaultly.pdf.fit", fitMode); }, [fitMode]);
   useEffect(() => { window.localStorage.setItem("vaultly.pdf.zoom", String(zoomPercent)); }, [zoomPercent]);
@@ -77,8 +77,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
 
   useLayoutEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
-      scrollRef.current.scrollLeft = 0;
+      scrollRef.current.scrollTo({ top: 0, left: 0, behavior: "instant" });
     }
   }, [itemId, pageNumber, fitMode]);
 

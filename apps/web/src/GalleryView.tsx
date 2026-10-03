@@ -1,9 +1,13 @@
 import { ArrowLeft, BookOpen, Check, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useContext, type Dispatch, type SetStateAction } from "react";
+import { NavigationContext, useNavigationField } from "./navigation";
 import { TagCombobox } from "./TagCombobox";
+import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { BulkActionDialog } from "./BulkActionDialog";
-import { api, formatCount, formatDuration, formatSize, type Category, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
+import { api, formatCount, formatDuration, formatSize, type Category, type CircleSummary, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
 import type { LibraryView } from "./App";
+import { galleryVideoContext, type GalleryVideoContext } from "./video-playlist";
 
 interface GalleryViewProps {
   view: LibraryView;
@@ -17,7 +21,7 @@ interface GalleryViewProps {
   onPersonCreated: (name: string) => Promise<Person>;
   onChanged: () => void;
   sources: Array<{ id: number; name: string }>;
-  onOpen: (id: number) => void;
+  onOpen: (id: number, context: GalleryVideoContext | null) => void;
   onQueueVideo: (item: MediaItem) => void;
   queuedVideoIds: number[];
   onOpenSeries: (id: number) => void;
@@ -179,19 +183,25 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
         <span className="media-type-badge">{item.media_type === "video" ? formatDuration(duration) : item.media_type}</span>
         {item.media_type === "video" && <span className="play-overlay"><Play size={19} fill="currentColor" /></span>}
       </div>
-      <div className="media-card-body">
-        <h3 title={item.title}>{item.title}</h3>
-        <p title={item.relative_path}>{item.source_name} · {item.relative_path}</p>
-        {item.tags.length > 0 && <div className="media-card-tags" title={item.tags.map((tag) => tag.name).join(", ")}>{item.tags.slice(0, 3).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}{item.tags.length > 3 && <span className="tag-badge">+{item.tags.length - 3}</span>}</div>}
-        {(item.cast.length > 0 || item.artists.length > 0) && <div className="media-card-people" title={[...item.cast.map((person) => `Cast: ${person.name}`), ...item.artists.map((person) => `Artist: ${person.name}`)].join(" · ")}>{item.cast.length > 0 && <span>Cast: {item.cast.map((person) => person.name).join(", ")}</span>}{item.artists.length > 0 && <span>Artists: {item.artists.map((person) => person.name).join(", ")}</span>}</div>}
-        <div className="media-card-meta"><span>{formatSize(item.size_bytes)}</span><span>{item.media_type === "comic" ? `${item.file_count} ${item.file_count === 1 ? "file" : "pages"}` : item.category_names || "Uncategorized"}</span></div>
-      </div>
       </button>
+      <div className="media-card-body">
+        <h3 title={item.title}><button className="card-title-open" type="button" onClick={onOpen}>{item.title}</button></h3>
+        <p title={item.relative_path}>{item.source_name} · {item.relative_path}</p>
+        <div className="media-card-tags">
+          {item.tags.map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} mediaType={item.media_type} />)}
+          {item.categories.map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} mediaType={item.media_type} />)}
+          {item.cast.map((person) => <AttributeBadge key={`cast-${person.id}`} kind="cast" {...person} mediaType={item.media_type}>Cast: {person.name}</AttributeBadge>)}
+          {item.artists.map((person) => <AttributeBadge key={`artist-${person.id}`} kind="artist" {...person} mediaType={item.media_type}>Artist: {person.name}</AttributeBadge>)}
+        </div>
+        <div className="media-card-meta"><span>{formatSize(item.size_bytes)}</span><span>{item.media_type === "comic" ? `${item.file_count} ${item.file_count === 1 ? "file" : "pages"}` : item.categories.length ? "" : "Uncategorized"}</span></div>
+      </div>
     </article>
   );
 }
 
-function CollectionCard({ series, onOpen }: { series: SeriesSummary; onOpen: () => void }) {
+function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; onOpen: () => void; mediaType?: MediaType }) {
+  const contentTypes = (["video", "comic", "story"] as const).filter((type) => series[`${type}_count`] > 0);
+  const badgeType = mediaType ?? (contentTypes.length === 1 ? contentTypes[0] : contentTypes.length === 0 && series.preferred_type !== "mixed" ? series.preferred_type : undefined);
   const fallback = series.cover_item_id === null || !series.cover_item_type ? null
     : series.cover_item_type === "comic" && !/\.(cbz|zip)$/i.test(series.cover_item_path ?? "")
       ? `/api/items/${series.cover_item_id}/pages/0`
@@ -200,40 +210,46 @@ function CollectionCard({ series, onOpen }: { series: SeriesSummary; onOpen: () 
   return <article className="media-card collection-media-card">
     <button className="media-card-open" type="button" onClick={onOpen} aria-label={`Open collection ${series.title}`}>
       <div className="media-art collection-art"><Layers3 size={44} />{cover && <img src={cover} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
-      <div className="media-card-body"><h3 title={series.title}>{series.title}</h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{series.tags.slice(0, 3).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
     </button>
+    <div className="media-card-body"><h3 title={series.title}><button className="card-title-open" type="button" onClick={onOpen}>{series.title}</button></h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{series.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{series.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
   </article>;
 }
 
 export function GalleryView({ view, type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, sources, onOpen, onQueueVideo, queuedVideoIds, onOpenSeries, onAddSource, refreshKey }: GalleryViewProps) {
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
-  const [selectedCastIds, setSelectedCastIds] = useState<number[]>([]);
-  const [selectedArtistIds, setSelectedArtistIds] = useState<number[]>([]);
+  const navigation = useContext(NavigationContext)!;
+  function useGalleryField<T>(key: string, fallback: T, destination?: string): [T, Dispatch<SetStateAction<T>>] {
+    return useNavigationField("gallery." + (type ?? "all") + "." + view + "." + key, fallback, destination);
+  }
+  const [selectedCategoryIds, setSelectedCategoryIds] = useGalleryField<number[]>("selectedCategoryIds", []);
+  const [selectedTagIds, setSelectedTagIds] = useGalleryField<number[]>("selectedTagIds", []);
+  const [selectedCastIds, setSelectedCastIds] = useGalleryField<number[]>("selectedCastIds", []);
+  const [selectedArtistIds, setSelectedArtistIds] = useGalleryField<number[]>("selectedArtistIds", []);
   const [selectedItemIds, setSelectedItemIds] = useState<number[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [filename, setFilename] = useState("");
-  const [pathText, setPathText] = useState("");
-  const [debouncedFilename, setDebouncedFilename] = useState("");
-  const [debouncedPath, setDebouncedPath] = useState("");
-  const [selectedType, setSelectedType] = useState<MediaType | "">("");
-  const [sourceId, setSourceId] = useState("");
-  const [extension, setExtension] = useState("");
-  const [seriesFilter, setSeriesFilter] = useState("");
-  const [minMb, setMinMb] = useState("");
-  const [maxMb, setMaxMb] = useState("");
-  const [modifiedFrom, setModifiedFrom] = useState("");
-  const [modifiedTo, setModifiedTo] = useState("");
-  const [uncategorized, setUncategorized] = useState(false);
-  const [untagged, setUntagged] = useState(false);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [filename, setFilename] = useGalleryField("filename", "");
+  const [pathText, setPathText] = useGalleryField("pathText", "");
+  const [debouncedFilename, setDebouncedFilename] = useState(filename);
+  const [debouncedPath, setDebouncedPath] = useState(pathText);
+  const [selectedType, setSelectedType] = useGalleryField<MediaType | "">("selectedType", "");
+  const [sourceId, setSourceId] = useGalleryField("sourceId", "");
+  const [extension, setExtension] = useGalleryField("extension", "");
+  const [seriesFilter, setSeriesFilter] = useGalleryField("seriesFilter", "");
+  const [circleFilter, setCircleFilter] = useGalleryField("circleFilter", "");
+  const [minMb, setMinMb] = useGalleryField("minMb", "");
+  const [maxMb, setMaxMb] = useGalleryField("maxMb", "");
+  const [modifiedFrom, setModifiedFrom] = useGalleryField("modifiedFrom", "");
+  const [modifiedTo, setModifiedTo] = useGalleryField("modifiedTo", "");
+  const [uncategorized, setUncategorized] = useGalleryField("uncategorized", false);
+  const [untagged, setUntagged] = useGalleryField("untagged", false);
+  const [advancedOpen, setAdvancedOpen] = useGalleryField("advancedOpen", false);
   const [formats, setFormats] = useState<Array<{ extension: string; item_count: number }>>([]);
   const [seriesOptions, setSeriesOptions] = useState<SeriesSummary[]>([]);
-  const [sort, setSort] = useState<"title" | "filename" | "recent" | "oldest" | "size" | "smallest">("title");
-  const [page, setPage] = useState(0);
+  const [circleOptions, setCircleOptions] = useState<CircleSummary[]>([]);
+  const [sort, setSort] = useGalleryField<"title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "title");
+  const [page, setPage] = useGalleryField("page", 0);
   const [result, setResult] = useState<ItemPage | null>(null);
   const [categoryOverview, setCategoryOverview] = useState<{ categories: Category[]; uncategorized_count: number } | null>(null);
-  const [browseCategory, setBrowseCategory] = useState<number | "uncategorized" | null>(null);
+  const [browseCategory, setBrowseCategory] = useGalleryField<number | "uncategorized" | null>("browseCategory", null, "Category");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -248,10 +264,12 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     void Promise.all([
       api<Array<{ extension: string; item_count: number }>>(`/api/items/formats${effectiveType ? `?type=${effectiveType}` : ""}`),
       api<SeriesSummary[]>("/api/series"),
-    ]).then(([nextFormats, nextSeries]) => {
+      api<CircleSummary[]>("/api/circles"),
+    ]).then(([nextFormats, nextSeries, nextCircles]) => {
       if (!active) return;
       setFormats(nextFormats);
       setSeriesOptions(nextSeries);
+      setCircleOptions(nextCircles);
     }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load filter choices."); });
     return () => { active = false; };
   }, [type, selectedType, refreshKey]);
@@ -266,7 +284,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     return () => { active = false; };
   }, [view, type, refreshKey]);
 
-  useEffect(() => { setExtension(""); if (type) setSelectedType(""); }, [type]);
+
   useEffect(() => { setSelectedItemIds([]); }, [type]);
   useEffect(() => { if (sourceId && !sources.some((source) => String(source.id) === sourceId)) setSourceId(""); }, [sourceId, sources]);
 
@@ -287,7 +305,14 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     setSelectedArtistIds((current) => current.filter((id) => people.some((person) => person.id === id)));
   }, [people]);
 
-  useEffect(() => { setPage(0); }, [type, view, browseCategory, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
+  const filterKey = JSON.stringify([type, view, browseCategory, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
+  const previousFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (previousFilterKey.current !== filterKey) {
+      previousFilterKey.current = filterKey;
+      setPage(0);
+    }
+  }, [filterKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -315,6 +340,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     if (sourceId) params.set("source", sourceId);
     if (extension) params.set("extension", extension);
     if (seriesFilter) params.set("series", seriesFilter);
+    if (circleFilter) params.set("circle", circleFilter);
     if (minMb) params.set("minMb", minMb);
     if (maxMb) params.set("maxMb", maxMb);
     if (modifiedFrom) params.set("modifiedFrom", modifiedFrom);
@@ -335,16 +361,16 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [view, browseCategory, type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
+  }, [view, browseCategory, type, search, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
 
   const libraryTitle = type ? galleryNames[type] : "All media";
   const selectedCategoryName = browseCategory === "uncategorized" ? "Uncategorized" : categoryOverview?.categories.find((category) => category.id === browseCategory)?.name;
   const title = view === "categories" ? selectedCategoryName ? `${libraryTitle} · ${selectedCategoryName}` : `${libraryTitle} categories` : view === "favorites" ? `${libraryTitle} favorites` : libraryTitle;
-  const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
-  const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
+  const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || circleFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
+  const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
   const clearFilters = () => {
     setFilename(""); setPathText(""); setDebouncedFilename(""); setDebouncedPath("");
-    setSelectedType(""); setSourceId(""); setExtension(""); setSeriesFilter("");
+    setSelectedType(""); setSourceId(""); setExtension(""); setSeriesFilter(""); setCircleFilter("");
     setMinMb(""); setMaxMb(""); setModifiedFrom(""); setModifiedTo("");
     setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSelectedCastIds([]); setSelectedArtistIds([]); setSort("title");
   };
@@ -371,10 +397,10 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     const shownSeries = new Set<number>();
     return items.flatMap((item) => {
       const memberships = (item.series_ids ?? []).map((id) => seriesOptions.find((series) => series.id === id)).filter((series): series is SeriesSummary => Boolean(series));
-      if (!memberships.length) return [<MediaCard key={`${keyPrefix}item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id)} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} />];
+      if (!memberships.length) return [<MediaCard key={`${keyPrefix}item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id, galleryVideoContext(result, item.id))} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} />];
       return memberships.filter((series) => !shownSeries.has(series.id)).map((series) => {
         shownSeries.add(series.id);
-        return <CollectionCard key={`${keyPrefix}series-${series.id}`} series={series} onOpen={() => onOpenSeries(series.id)} />;
+        return <CollectionCard key={`${keyPrefix}series-${series.id}`} series={series} mediaType={type || selectedType || undefined} onOpen={() => onOpenSeries(series.id)} />;
       });
     });
   };
@@ -385,21 +411,21 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   </div> : null;
 
   return (
-    <section className="gallery-view">
+    <AttributeMediaContext.Provider value={type || selectedType || undefined}><section className="gallery-view">
       <div className="page-heading gallery-heading">
-        <div>{view === "categories" && browseCategory !== null && <button className="category-back" type="button" onClick={() => { setBrowseCategory(null); setSelectedItemIds([]); }}><ArrowLeft size={16} /> All categories</button>}<p className="eyebrow">Your library</p><h1>{title}</h1><p>{view === "categories" && browseCategory === null ? "Choose a category to open its media library." : search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
+        <div>{view === "categories" && browseCategory !== null && <button className="category-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setBrowseCategory(null); setSelectedItemIds([]); } }}><ArrowLeft size={16} /> All categories</button>}<p className="eyebrow">Your library</p><h1>{title}</h1><p>{view === "categories" && browseCategory === null ? "Choose a category to open its media library." : search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
         <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : `${formatCount(result?.total ?? 0)} items`}</span>
       </div>
 
       {view === "categories" && browseCategory === null && categoryOverview && <div className="category-selection-grid">
-        {categoryOverview.categories.map((category) => <button className="category-selection-card" type="button" key={category.id} onClick={() => setBrowseCategory(category.id)}><span className="category-selection-icon"><Folder size={23} /></span><strong>{category.name}</strong><small>{formatCount(category.item_count)} items</small></button>)}
+        {categoryOverview.categories.map((category) => <button className="category-selection-card" type="button" key={category.id} onClick={() => setBrowseCategory(category.id)}><span className="category-selection-icon"><Folder size={23} /></span><strong><span className="tag-badge">{category.name}</span></strong><small>{formatCount(category.item_count)} items</small></button>)}
         {categoryOverview.uncategorized_count > 0 && <button className="category-selection-card" type="button" onClick={() => setBrowseCategory("uncategorized")}><span className="category-selection-icon"><FolderPlus size={23} /></span><strong>Uncategorized</strong><small>{formatCount(categoryOverview.uncategorized_count)} items</small></button>}
       </div>}
 
       {view === "browse" && <div className="gallery-toolbar">
         <label className="gallery-filter-field"><span>File name</span><input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Search filenames" aria-label="File name contains" /></label>
-        <TagCombobox label="Categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized} placeholder="All categories" />
-        <TagCombobox label="Tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged} placeholder="All tags" />
+        <TagCombobox attributeKind="category" label="Categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized} placeholder="All categories" />
+        <TagCombobox attributeKind="tag" label="Tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged} placeholder="All tags" />
         <label className="select-wrap">
           <span>Sort</span>
           <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
@@ -421,13 +447,14 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
         <label className="gallery-filter-field"><span>Source folder</span><select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
         <label className="gallery-filter-field"><span>File format</span><select value={extension} onChange={(event) => setExtension(event.target.value)}><option value="">All formats</option>{formats.map((format) => <option key={format.extension || "folder"} value={format.extension || "folder"}>{format.extension ? `.${format.extension.toUpperCase()}` : "Image folder"} ({format.item_count})</option>)}</select></label>
         <label className="gallery-filter-field"><span>Series / set</span><select value={seriesFilter} onChange={(event) => setSeriesFilter(event.target.value)}><option value="">All items</option><option value="grouped">In any set</option><option value="ungrouped">Not in a set</option>{seriesOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>
+        <label className="gallery-filter-field"><span>Circle</span><select value={circleFilter} onChange={(event) => setCircleFilter(event.target.value)}><option value="">All circles</option>{circleOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>
         <label className="gallery-filter-field"><span>Path contains</span><input value={pathText} onChange={(event) => setPathText(event.target.value)} placeholder="Folder or relative path" /></label>
         <label className="gallery-filter-field"><span>Minimum size (MB)</span><input type="number" min="0" step="0.1" value={minMb} onChange={(event) => setMinMb(event.target.value)} placeholder="No minimum" /></label>
         <label className="gallery-filter-field"><span>Maximum size (MB)</span><input type="number" min="0" step="0.1" value={maxMb} onChange={(event) => setMaxMb(event.target.value)} placeholder="No maximum" /></label>
         <label className="gallery-filter-field"><span>Modified from</span><input type="date" value={modifiedFrom} max={modifiedTo || undefined} onChange={(event) => setModifiedFrom(event.target.value)} /></label>
         <label className="gallery-filter-field"><span>Modified through</span><input type="date" value={modifiedTo} min={modifiedFrom || undefined} onChange={(event) => setModifiedTo(event.target.value)} /></label>
-        <TagCombobox label="Cast (match all)" tags={people} selectedIds={selectedCastIds} onChange={setSelectedCastIds} placeholder="Any cast" />
-        <TagCombobox label="Artists (match all)" tags={people} selectedIds={selectedArtistIds} onChange={setSelectedArtistIds} placeholder="Any artist" />
+        <TagCombobox attributeKind="cast" label="Cast (match all)" tags={people} selectedIds={selectedCastIds} onChange={setSelectedCastIds} placeholder="Any cast" />
+        <TagCombobox attributeKind="artist" label="Artists (match all)" tags={people} selectedIds={selectedArtistIds} onChange={setSelectedArtistIds} placeholder="Any artist" />
         <label className="gallery-filter-check"><input type="checkbox" checked={uncategorized} onChange={(event) => { setUncategorized(event.target.checked); if (event.target.checked) setSelectedCategoryIds([]); }} /> Uncategorized only</label>
         <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
       </div>}
@@ -455,6 +482,6 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
         </div>
       )}
       {bulkOpen && <BulkActionDialog itemIds={selectedItemIds} tags={tags} categories={categories} people={people} series={seriesOptions} onTagCreated={onTagCreated} onCategoryCreated={onCategoryCreated} onPersonCreated={onPersonCreated} onSeriesCreated={createSeries} onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); setSelectedItemIds([]); onChanged(); }} />}
-    </section>
+    </section></AttributeMediaContext.Provider>
   );
 }

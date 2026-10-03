@@ -1,3 +1,4 @@
+import { itemAssignmentIds, sourceAttributes } from "./attribute-routes.js";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
@@ -28,6 +29,7 @@ const listInput = z.object({
   modifiedFrom: dateInput.optional(),
   modifiedTo: dateInput.optional(),
   series: z.string().regex(/^(grouped|ungrouped|[1-9]\d*)$/).optional(),
+  circle: z.coerce.number().int().positive().optional(),
   uncategorized: z.enum(["1"]).optional(),
   untagged: z.enum(["1"]).optional(),
   category: z.coerce.number().int().positive().optional(),
@@ -153,7 +155,7 @@ const itemSelect = `
   SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes, m.favorite, m.duration_seconds,
     m.modified_at_ms, m.file_count, s.name AS source_name,
     COALESCE((SELECT group_concat(c.name, ', ')
-      FROM item_categories ic JOIN categories c ON c.id = ic.category_id
+      FROM effective_item_categories ic JOIN categories c ON c.id = ic.category_id
       WHERE ic.item_id = m.id), '') AS category_names
   FROM media_items m JOIN sources s ON s.id = m.source_id
 `;
@@ -164,7 +166,7 @@ function categoriesByItem(itemIds: number[]): Map<number, Array<{ id: number; na
   const result = new Map<number, Array<{ id: number; name: string }>>();
   if (!itemIds.length) return result;
   const rows = database.prepare(`
-    SELECT ic.item_id, c.id, c.name FROM item_categories ic
+    SELECT ic.item_id, c.id, c.name FROM effective_item_categories ic
     JOIN categories c ON c.id = ic.category_id
     WHERE ic.item_id IN (${itemIds.map(() => "?").join(",")}) ORDER BY c.name COLLATE NOCASE
   `).all(...itemIds) as unknown as Array<{ item_id: number; id: number; name: string }>;
@@ -190,7 +192,7 @@ function tagsByItem(itemIds: number[]): Map<number, Array<{ id: number; name: st
   if (itemIds.length === 0) return result;
   const placeholders = itemIds.map(() => "?").join(", ");
   const rows = database.prepare(`
-    SELECT it.item_id, t.id, t.name FROM item_tags it
+    SELECT it.item_id, t.id, t.name FROM effective_item_tags it
     JOIN tags t ON t.id = it.tag_id
     WHERE it.item_id IN (${placeholders}) ORDER BY t.name COLLATE NOCASE
   `).all(...itemIds) as unknown as TagRow[];
@@ -280,13 +282,17 @@ export async function registerMediaRoutes(
       conditions.push("EXISTS (SELECT 1 FROM series_items si WHERE si.item_id = m.id AND si.series_id = ?)");
       values.push(Number(input.series));
     }
-    if (input.uncategorized) conditions.push("NOT EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id)");
-    if (input.untagged) conditions.push("NOT EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id)");
+    if (input.circle) {
+      conditions.push("EXISTS (SELECT 1 FROM series_items si JOIN circle_series cs ON cs.series_id = si.series_id WHERE si.item_id = m.id AND cs.circle_id = ?)");
+      values.push(input.circle);
+    }
+    if (input.uncategorized) conditions.push("NOT EXISTS (SELECT 1 FROM effective_item_categories ic WHERE ic.item_id = m.id)");
+    if (input.untagged) conditions.push("NOT EXISTS (SELECT 1 FROM effective_item_tags it WHERE it.item_id = m.id)");
     for (const categoryId of new Set([
       ...(input.category ? [input.category] : []),
       ...(input.categories?.split(",").map(Number) ?? []),
     ])) {
-      conditions.push("EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id AND ic.category_id = ?)");
+      conditions.push("EXISTS (SELECT 1 FROM effective_item_categories ic WHERE ic.item_id = m.id AND ic.category_id = ?)");
       values.push(categoryId);
     }
     if (input.q) {
@@ -297,7 +303,7 @@ export async function registerMediaRoutes(
       }
     }
     for (const tagId of new Set(input.tags?.split(",").map(Number) ?? [])) {
-      conditions.push("EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id AND it.tag_id = ?)");
+      conditions.push("EXISTS (SELECT 1 FROM effective_item_tags it WHERE it.item_id = m.id AND it.tag_id = ?)");
       values.push(tagId);
     }
     for (const personId of new Set(input.cast?.split(",").map(Number) ?? [])) {
@@ -340,10 +346,10 @@ export async function registerMediaRoutes(
         (CASE WHEN m.source_id = target.source_id THEN 1 ELSE 0 END
           + 12 * (SELECT COUNT(*) FROM series_items candidate
             WHERE candidate.item_id = m.id AND candidate.series_id IN (SELECT series_id FROM series_items WHERE item_id = target.id))
-          + 5 * (SELECT COUNT(*) FROM item_categories candidate
-            WHERE candidate.item_id = m.id AND candidate.category_id IN (SELECT category_id FROM item_categories WHERE item_id = target.id))
-          + 4 * (SELECT COUNT(*) FROM item_tags candidate
-            WHERE candidate.item_id = m.id AND candidate.tag_id IN (SELECT tag_id FROM item_tags WHERE item_id = target.id))
+          + 5 * (SELECT COUNT(*) FROM effective_item_categories candidate
+            WHERE candidate.item_id = m.id AND candidate.category_id IN (SELECT category_id FROM effective_item_categories WHERE item_id = target.id))
+          + 4 * (SELECT COUNT(*) FROM effective_item_tags candidate
+            WHERE candidate.item_id = m.id AND candidate.tag_id IN (SELECT tag_id FROM effective_item_tags WHERE item_id = target.id))
           + 3 * (SELECT COUNT(*) FROM item_people candidate
             WHERE candidate.item_id = m.id AND (candidate.person_id, candidate.role) IN
               (SELECT person_id, role FROM item_people WHERE item_id = target.id))) AS similarity_score
@@ -360,13 +366,13 @@ export async function registerMediaRoutes(
     const { id } = idInput.parse(request.params);
     const item = database.prepare(`${itemSelect} WHERE m.id = ? AND m.available = 1`).get(id);
     if (!item) return reply.code(404).send({ message: "Media item not found." });
-    const categoryIds = database.prepare("SELECT category_id FROM item_categories WHERE item_id = ?").all(id)
+    const categoryIds = database.prepare("SELECT category_id FROM effective_item_categories WHERE item_id = ?").all(id)
       .map((row) => (row as { category_id: number }).category_id);
     const tags = tagsByItem([id]).get(id) ?? [];
     const categories = categoriesByItem([id]).get(id) ?? [];
     const seriesIds = seriesByItem([id]).get(id) ?? [];
     const credits = creditsByItem([id]).get(id);
-    return { ...item, series_ids: seriesIds, categories, category_ids: categoryIds, tags, cast: credits?.cast ?? [], artists: credits?.artists ?? [] };
+    return { ...item, source_attributes: sourceAttributes(Number(item.source_id)), series_ids: seriesIds, categories, category_ids: categoryIds, tags, cast: credits?.cast ?? [], artists: credits?.artists ?? [] };
   });
 
   app.patch("/api/items/:id", async (request, reply) => {
@@ -543,7 +549,7 @@ export async function registerMediaRoutes(
     return database.prepare(`
       SELECT c.id, c.name, COUNT(m.id) AS item_count
       FROM categories c
-      LEFT JOIN item_categories ic ON ic.category_id = c.id
+      LEFT JOIN effective_item_categories ic ON ic.category_id = c.id
       LEFT JOIN media_items m ON m.id = ic.item_id AND m.available = 1
       GROUP BY c.id ORDER BY c.name COLLATE NOCASE
     `).all();
@@ -556,14 +562,14 @@ export async function registerMediaRoutes(
     const categories = database.prepare(`
       SELECT c.id, c.name, COUNT(m.id) AS item_count
       FROM categories c
-      LEFT JOIN item_categories ic ON ic.category_id = c.id
+      LEFT JOIN effective_item_categories ic ON ic.category_id = c.id
       LEFT JOIN media_items m ON m.id = ic.item_id AND m.available = 1 ${typeClause}
       GROUP BY c.id HAVING COUNT(m.id) > 0 ORDER BY c.name COLLATE NOCASE
     `).all(...values);
     const uncategorized = database.prepare(`
       SELECT COUNT(*) AS item_count FROM media_items m
       WHERE m.available = 1 ${type ? "AND m.media_type = ?" : ""}
-        AND NOT EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id)
+        AND NOT EXISTS (SELECT 1 FROM effective_item_categories ic WHERE ic.item_id = m.id)
     `).get(...values) as { item_count: number };
     return { categories, uncategorized_count: uncategorized.item_count };
   });
@@ -572,7 +578,7 @@ export async function registerMediaRoutes(
     return database.prepare(`
       SELECT t.id, t.name, COUNT(m.id) AS item_count
       FROM tags t
-      LEFT JOIN item_tags it ON it.tag_id = t.id
+      LEFT JOIN effective_item_tags it ON it.tag_id = t.id
       LEFT JOIN media_items m ON m.id = it.item_id AND m.available = 1
       GROUP BY t.id ORDER BY t.name COLLATE NOCASE
     `).all();
@@ -625,9 +631,10 @@ export async function registerMediaRoutes(
     }
     database.exec("BEGIN IMMEDIATE");
     try {
+      const assignments = itemAssignmentIds("tags", id, uniqueIds);
       database.prepare("DELETE FROM item_tags WHERE item_id = ?").run(id);
       const insert = database.prepare("INSERT INTO item_tags(item_id, tag_id) VALUES (?, ?)");
-      for (const tagId of uniqueIds) insert.run(id, tagId);
+      for (const tagId of assignments) insert.run(id, tagId);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");
@@ -683,14 +690,15 @@ export async function registerMediaRoutes(
     }
     database.exec("BEGIN IMMEDIATE");
     try {
+      const assignments = itemAssignmentIds("categories", id, uniqueIds);
       database.prepare("DELETE FROM item_categories WHERE item_id = ?").run(id);
       const insert = database.prepare("INSERT INTO item_categories(item_id, category_id) VALUES (?, ?)");
-      for (const categoryId of uniqueIds) insert.run(id, categoryId);
+      for (const categoryId of assignments) insert.run(id, categoryId);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");
       throw error;
     }
-    return { id, category_ids: uniqueIds };
+    return { id, category_ids: (database.prepare("SELECT category_id FROM effective_item_categories WHERE item_id = ?").all(id) as Array<{ category_id: number }>).map((row) => row.category_id) };
   });
 }

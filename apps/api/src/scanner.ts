@@ -1,3 +1,4 @@
+import { withAttributePatterns } from "./attribute-routes.js";
 import { opendir, stat } from "node:fs/promises";
 import path from "node:path";
 import { database } from "./database.js";
@@ -164,9 +165,9 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
             MAX(CASE WHEN ip.role = 'artist' THEN 1 ELSE 0 END) AS is_artist
           FROM people p LEFT JOIN item_people ip ON ip.person_id = p.id GROUP BY p.id
         `).all() as Array<{ id: number; name: string; is_cast: number; is_artist: number }>;
-        const categoryMatcher = new FilenameMetadataMatcher(categories);
-        const tagMatcher = new FilenameMetadataMatcher(tags);
-        const peopleMatcher = new FilenameMetadataMatcher(people.filter((person) => person.is_cast || person.is_artist));
+        const categoryMatcher = new FilenameMetadataMatcher(withAttributePatterns("categories", categories));
+        const tagMatcher = new FilenameMetadataMatcher(withAttributePatterns("tags", tags));
+        const peopleMatcher = new FilenameMetadataMatcher(withAttributePatterns("people", people.filter((person) => person.is_cast || person.is_artist)));
         const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) VALUES (?, ?)");
         const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) VALUES (?, ?)");
         const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");

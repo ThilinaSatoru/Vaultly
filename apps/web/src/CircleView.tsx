@@ -1,3 +1,5 @@
+import { useContext } from "react";
+import { NavigationContext, useNavigationField } from "./navigation";
 import { ArrowDown, ArrowLeft, ArrowUp, Layers3, LoaderCircle, Orbit, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api, type CircleDetail, type CircleSummary, type MediaType, type SeriesSummary } from "./media";
@@ -23,11 +25,12 @@ function circleType(circle: CircleSummary): CircleType {
 }
 
 export function CircleView({ series, createRequested, mediaType, onOpenSeries }: CircleViewProps) {
+  const navigation = useContext(NavigationContext)!;
   const [circles, setCircles] = useState<CircleSummary[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useNavigationField<number | null>("CircleView.selectedId", null, "Circle");
   const [detail, setDetail] = useState<CircleDetail | null>(null);
-  const [search, setSearch] = useState("");
-  const [memberSearch, setMemberSearch] = useState("");
+  const [search, setSearch] = useNavigationField("CircleView.search", "");
+  const [memberSearch, setMemberSearch] = useNavigationField("CircleView.memberSearch", "");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState("");
@@ -52,6 +55,10 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
   useEffect(() => { void loadCircles(); }, [loadCircles]);
   useEffect(() => { if (selectedId !== null) void loadDetail(selectedId); else setDetail(null); }, [selectedId, loadDetail]);
   useEffect(() => { if (createRequested > 0) { setTitle(""); setDescription(""); setShowCreate(true); } }, [createRequested]);
+
+  useEffect(() => {
+    if (detail && detail.id === selectedId && navigation.current.current.fields.selectedItemId == null && navigation.current.current.label !== detail.title) navigation.update({}, detail.title);
+  }, [detail?.id, detail?.title, selectedId]);
 
   const create = async (event: FormEvent) => {
     event.preventDefault(); if (!title.trim()) return;
@@ -100,7 +107,7 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
   const renderCards = (entries: CircleSummary[]) => <div className="circle-grid">{entries.map((circle) => <button className="circle-card" type="button" key={circle.id} onClick={() => setSelectedId(circle.id)}><span><Orbit size={28} /></span><div><h2>{circle.title}</h2><p>{circle.description || "A story circle"}</p><small>{circle.set_count} {circle.set_count === 1 ? "set" : "sets"} · {circle.item_count} items</small></div></button>)}</div>;
 
   if (selectedId !== null) return <section className="circle-view">
-    <button className="series-back" type="button" onClick={() => { setSelectedId(null); setEditing(false); setMemberSearch(""); }}><ArrowLeft size={17} /> All circles</button>
+    <button className="series-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setSelectedId(null); setEditing(false); setMemberSearch(""); } }}><ArrowLeft size={17} /> All circles</button>
     {error && <p className="page-error" role="alert">{error}</p>}
     {!detail || detail.id !== selectedId ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading circle…</div> : <>
       <div className="circle-hero"><div className="circle-symbol"><Orbit size={44} /></div><div>

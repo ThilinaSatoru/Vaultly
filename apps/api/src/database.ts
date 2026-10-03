@@ -155,6 +155,45 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_circle_series_order ON circle_series(circle_id, position);
   CREATE INDEX IF NOT EXISTS idx_circle_series_series ON circle_series(series_id, circle_id);
 
+  CREATE TABLE IF NOT EXISTS tag_patterns (
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    pattern TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (tag_id, pattern)
+  );
+  CREATE TABLE IF NOT EXISTS category_patterns (
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    pattern TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (category_id, pattern)
+  );
+  CREATE TABLE IF NOT EXISTS person_patterns (
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    pattern TEXT NOT NULL COLLATE NOCASE,
+    PRIMARY KEY (person_id, pattern)
+  );
+  CREATE TABLE IF NOT EXISTS source_tags (
+    source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+    PRIMARY KEY (source_id, tag_id)
+  );
+  CREATE TABLE IF NOT EXISTS source_categories (
+    source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    PRIMARY KEY (source_id, category_id)
+  );
+
+  DROP VIEW IF EXISTS effective_item_tags;
+  CREATE VIEW effective_item_tags AS
+    SELECT item_id, tag_id FROM item_tags
+    UNION ALL SELECT m.id AS item_id, st.tag_id FROM media_items m
+      JOIN source_tags st ON st.source_id = m.source_id
+      WHERE NOT EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id AND it.tag_id = st.tag_id);
+  DROP VIEW IF EXISTS effective_item_categories;
+  CREATE VIEW effective_item_categories AS
+    SELECT item_id, category_id FROM item_categories
+    UNION ALL SELECT m.id AS item_id, sc.category_id FROM media_items m
+      JOIN source_categories sc ON sc.source_id = m.source_id
+      WHERE NOT EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id AND ic.category_id = sc.category_id);
+
 `);
 
 const sourceColumns = (database.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>).map((column) => column.name);

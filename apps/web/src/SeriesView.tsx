@@ -1,6 +1,9 @@
+import { useContext } from "react";
+import { NavigationContext, useNavigationField } from "./navigation";
 import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Clapperboard, Heart, Image, Layers3, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
+import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { CircleView } from "./CircleView";
 import { api, type Category, type CircleSummary, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 import type { LibraryView } from "./App";
@@ -65,24 +68,26 @@ function setType(entry: SeriesSummary): SetType {
   return entry.video_count ? "video" : entry.comic_count ? "comic" : "story";
 }
 
-function SeriesCard({ entry, version, onOpen, onFavorite }: { entry: SeriesSummary; version: number; onOpen: () => void; onFavorite: () => void }) {
+function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: SeriesSummary; version: number; onOpen: () => void; onFavorite: () => void; mediaType?: MediaType }) {
+  const badgeType = mediaType ?? (setType(entry) === "mixed" ? undefined : setType(entry) as MediaType);
   return <article className="series-card-wrap">
-    <button type="button" className="series-card" onClick={onOpen}>
-      <Cover series={entry} version={version} />
-      <div className="series-card-body"><h2>{entry.title}</h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.slice(0, 4).map((tag) => <span className="tag-badge" key={tag.id}>{tag.name}</span>)}</div></div>
-    </button>
+    <div className="series-card">
+      <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} /></button>
+      <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{entry.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div></div>
+    </div>
     <button className={`series-card-favorite${entry.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={entry.favorite ? `Remove ${entry.title} from favorites` : `Add ${entry.title} to favorites`}><Heart size={17} fill={entry.favorite ? "currentColor" : "none"} /></button>
   </article>;
 }
 
 export function SeriesView({ view, mediaType, initialSeriesId = null, initialEntityView = "sets", categories, tags, onCategoryCreated, onTagCreated, onCategoriesChanged, onTagsChanged, onOpenItem }: SeriesViewProps) {
+  const navigation = useContext(NavigationContext)!;
   const [seriesList, setSeriesList] = useState<SeriesSummary[]>([]);
-  const [selectedId, setSelectedId] = useState<number | null>(initialSeriesId);
+  const [selectedId, setSelectedId] = useNavigationField<number | null>("SeriesView.selectedId", initialSeriesId, "Collection");
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
-  const [search, setSearch] = useState("");
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
-  const [groupFilter, setGroupFilter] = useState<"all" | SetType>("all");
+  const [search, setSearch] = useNavigationField("SeriesView.search", "");
+  const [selectedTagIds, setSelectedTagIds] = useNavigationField<number[]>("SeriesView.selectedTagIds", []);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useNavigationField<number[]>("SeriesView.selectedCategoryIds", []);
+  const [groupFilter, setGroupFilter] = useNavigationField<"all" | SetType>("SeriesView.groupFilter", "all");
   const [preferredType, setPreferredType] = useState<SetType>("mixed");
   const [showCreate, setShowCreate] = useState(false);
   const [title, setTitle] = useState("");
@@ -94,12 +99,12 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [coverVersion, setCoverVersion] = useState(0);
-  const [entityView, setEntityView] = useState<"sets" | "circles">(initialEntityView);
+  const [entityView, setEntityView] = useNavigationField<"sets" | "circles">("SeriesView.entityView", initialEntityView);
   const [circleCreateRequest, setCircleCreateRequest] = useState(0);
   const [circleOptions, setCircleOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [circleIds, setCircleIds] = useState<number[]>([]);
 
-  useEffect(() => { if (initialSeriesId !== null) { setEntityView("sets"); setSelectedId(initialSeriesId); } }, [initialSeriesId]);
+
 
   const loadList = useCallback(async () => {
     try {
@@ -141,6 +146,12 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [detail?.id, itemSearch]);
+
+  useEffect(() => {
+    if (detail && detail.id === selectedId && navigation.current.current.fields.selectedItemId == null && navigation.current.current.label !== detail.title) {
+      navigation.update({}, detail.title);
+    }
+  }, [detail?.id, detail?.title, selectedId]);
 
   const create = async (event: FormEvent) => {
     event.preventDefault();
@@ -271,14 +282,15 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
   const categorySections = [
     ...categories.map((category) => ({
       id: `category-${category.id}`,
+      categoryId: category.id,
       title: category.name,
       entries: visible.filter((entry) => (entry.categories ?? []).some((value) => value.id === category.id)),
     })).filter((section) => section.entries.length > 0),
-    { id: "uncategorized", title: "Uncategorized", entries: visible.filter((entry) => (entry.categories ?? []).length === 0) },
+    { id: "uncategorized", categoryId: null, title: "Uncategorized", entries: visible.filter((entry) => (entry.categories ?? []).length === 0) },
   ].filter((section) => section.entries.length > 0);
 
   if (selectedId !== null) return <section className="series-view">
-    <button className="series-back" type="button" onClick={() => { setSelectedId(null); setEditing(false); setItemSearch(""); }}><ArrowLeft size={17} /> All series & sets</button>
+    <button className="series-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setSelectedId(null); setEditing(false); setItemSearch(""); } }}><ArrowLeft size={17} /> Back</button>
     {error && <p className="page-error" role="alert">{error}</p>}
     {!detail || detail.id !== selectedId ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading set…</div> : <>
       <div className="series-hero">
@@ -298,9 +310,9 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
             {Boolean(detail.has_cover) && <button className="secondary-button" type="button" onClick={() => void deleteCover()} disabled={busy}>Remove cover</button>}
             <button className="secondary-button series-danger" type="button" onClick={() => void deleteSeries()} disabled={busy}><Trash2 size={15} /> Delete set</button>
           </div>
-          <TagCombobox label="Set tags" tags={tags} selectedIds={detail.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={busy} placeholder="Search or create tags" />
-          <TagCombobox label="Set categories" tags={categories} selectedIds={(detail.categories ?? []).map((category) => category.id)} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={busy} placeholder="Search or create categories" />
-          <TagCombobox label="In story circles" tags={circleOptions} selectedIds={circleIds} onChange={(ids) => void updateCircles(ids)} onCreate={createCircle} disabled={busy} placeholder="Search or create circles" />
+          <AttributeMediaContext.Provider value={mediaType ?? (setType(detail) === "mixed" ? undefined : setType(detail) as MediaType)}><TagCombobox attributeKind="tag" label="Set tags" tags={tags} selectedIds={detail.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={busy} placeholder="Search or create tags" />
+          <TagCombobox attributeKind="category" label="Set categories" tags={categories} selectedIds={(detail.categories ?? []).map((category) => category.id)} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={busy} placeholder="Search or create categories" />
+          <TagCombobox attributeKind="circle" label="In story circles" tags={circleOptions} selectedIds={circleIds} onChange={(ids) => void updateCircles(ids)} onCreate={createCircle} disabled={busy} placeholder="Search or create circles" /></AttributeMediaContext.Provider>
         </div>
       </div>
 
@@ -332,7 +344,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
   if (entityView === "circles") return <section className="series-view">
     <div className="page-heading"><div><p className="eyebrow">Your library</p><h1>{mediaType ? `${mediaType === "story" ? "Story" : mediaType[0].toUpperCase() + mediaType.slice(1)} circles` : "Story circles"}</h1><p>Arrange several collections or comic episode sets as one complete story.</p></div><button className="primary-button" type="button" onClick={() => setCircleCreateRequest((value) => value + 1)}><Plus size={18} /> New circle</button></div>
     <div className="series-entity-tabs" role="group" aria-label="Collection level"><button type="button" onClick={() => setEntityView("sets")}>Sets</button><button className="active" type="button">Circles</button></div>
-    <CircleView series={seriesList} createRequested={circleCreateRequest} mediaType={mediaType} onOpenSeries={(id) => { setEntityView("sets"); setSelectedId(id); }} />
+    <CircleView series={seriesList} createRequested={circleCreateRequest} mediaType={mediaType} onOpenSeries={(id) => navigation.push({ "SeriesView.entityView": "sets", "SeriesView.selectedId": id }, "Collection")} />
   </section>;
 
   return <section className="series-view">
@@ -340,17 +352,17 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       {view === "browse" && <button className="primary-button" type="button" onClick={() => { setTitle(""); setDescription(""); setPreferredType(groupFilter === "all" ? "mixed" : groupFilter); setError(""); setShowCreate(true); }}><Plus size={18} /> New set</button>}</div>
     {view === "browse" && <div className="series-entity-tabs" role="group" aria-label="Collection level"><button className="active" type="button">Sets</button><button type="button" onClick={() => setEntityView("circles")}>Circles</button></div>}
     {view === "browse" && <div className="series-filters"><div className="series-search"><Search size={17} /><input aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div>
-      <TagCombobox label="Filter set categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} placeholder="All categories" />
-      <TagCombobox label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>}
+      <TagCombobox attributeKind="category" label="Filter set categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} placeholder="All categories" />
+      <TagCombobox attributeKind="tag" label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>}
     {view === "browse" && !mediaType && <div className="series-type-tabs" role="group" aria-label="Set content type">{(["all", "video", "comic", "story", "mixed"] as const).map((value) =>
       <button key={value} type="button" className={groupFilter === value ? "active" : ""} onClick={() => setGroupFilter(value)}>{value === "all" ? "All" : value === "story" ? "Stories" : value === "comic" ? "Comics" : value === "video" ? "Videos" : "Mixed"}</button>)}</div>}
     {error && <p className="page-error" role="alert">{error}</p>}
     {loading ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading sets…</div> : visible.length ? (view === "categories" ? categorySections.map((section) =>
-      <section className="category-card-section" key={section.id}><div className="category-card-heading"><h2>{section.title}</h2><span>{section.entries.length}</span></div><div className="series-grid">{section.entries.map((entry) =>
-        <SeriesCard key={`${section.id}-${entry.id}`} entry={entry} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>) : setSections.map((section) => {
+      <section className="category-card-section" key={section.id}><div className="category-card-heading"><h2>{section.categoryId === null ? section.title : <AttributeBadge kind="category" id={section.categoryId} name={section.title} mediaType={mediaType} />}</h2><span>{section.entries.length}</span></div><div className="series-grid">{section.entries.map((entry) =>
+        <SeriesCard key={`${section.id}-${entry.id}`} entry={entry} mediaType={mediaType} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>) : setSections.map((section) => {
           const entries = visible.filter((entry) => setType(entry) === section.type);
           if (!entries.length) return null;
-          return <section className="series-type-section" key={section.type}><h2>{section.title} <span>{entries.length}</span></h2><div className="series-grid">{entries.map((entry) => <SeriesCard key={entry.id} entry={entry} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>;
+          return <section className="series-type-section" key={section.type}><h2>{section.title} <span>{entries.length}</span></h2><div className="series-grid">{entries.map((entry) => <SeriesCard key={entry.id} entry={entry} mediaType={mediaType} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>;
         }))
       : <div className="gallery-empty"><Layers3 size={38} /><h2>{seriesList.length ? "No matching sets" : "No series or sets yet"}</h2><p>{seriesList.length ? "Try another search or tag combination." : "Create a set, then add related media in the order you want."}</p></div>}
     {showCreate && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><section className="dialog" role="dialog" aria-modal="true" aria-label="Create series or set" onMouseDown={(event) => event.stopPropagation()}>

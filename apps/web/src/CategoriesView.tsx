@@ -1,3 +1,5 @@
+import { AttributePatterns } from "./AttributePatterns";
+import { AttributeBadge } from "./AttributeBadge";
 import { Folder, Pencil, Plus, Trash2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { api, formatCount, type Category } from "./media";
@@ -63,7 +65,8 @@ export function CategoriesView({ categories, onChanged }: CategoriesViewProps) {
         {categories.length === 0 ? <div className="category-empty">No categories yet. Add one above to start organizing your library.</div> : categories.map((category) => (
           <div className="category-row" key={category.id}>
             <div className="category-symbol"><Folder size={20} /></div>
-            <div><strong>{category.name}</strong><span>{formatCount(category.item_count)} items</span></div>
+            <div><strong><AttributeBadge kind="category" {...category} /></strong><span>{formatCount(category.item_count)} items</span></div>
+            <AttributePatterns kind="categories" attribute={category} onChanged={onChanged} />
             <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${category.name}`} onClick={() => rename(category)}><Pencil size={17} /></button>
             <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${category.name}`} onClick={() => remove(category)}><Trash2 size={17} /></button>
           </div>

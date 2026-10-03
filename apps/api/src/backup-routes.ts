@@ -6,7 +6,10 @@ const tableOrder = [
   "sources", "media_items", "categories", "tags", "people", "series", "circles",
   "item_categories", "item_tags", "item_people", "series_items", "series_tags",
   "series_categories", "circle_series",
+  "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories",
 ] as const;
+
+const optionalTables = new Set<string>(["tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories"]);
 
 const deleteOrder = [...tableOrder].reverse();
 
@@ -25,6 +28,11 @@ const columns: Record<(typeof tableOrder)[number], string[]> = {
   series_tags: ["series_id", "tag_id"],
   series_categories: ["series_id", "category_id"],
   circle_series: ["circle_id", "series_id", "position"],
+  tag_patterns: ["tag_id", "pattern"],
+  category_patterns: ["category_id", "pattern"],
+  person_patterns: ["person_id", "pattern"],
+  source_tags: ["source_id", "tag_id"],
+  source_categories: ["source_id", "category_id"],
 };
 
 type BackupRow = Record<string, unknown>;
@@ -58,6 +66,7 @@ export async function registerBackupRoutes(app: FastifyInstance) {
   app.post("/api/backup/restore", { bodyLimit: 100 * 1024 * 1024 }, async (request, reply) => {
     const backup = backupInput.parse(request.body);
     for (const table of tableOrder) {
+      if (optionalTables.has(table) && backup.data[table] === undefined) continue;
       if (!Array.isArray(backup.data[table])) return reply.code(400).send({ message: `Backup is missing ${table}.` });
     }
 
@@ -67,7 +76,7 @@ export async function registerBackupRoutes(app: FastifyInstance) {
       for (const table of tableOrder) {
         const tableColumns = columns[table];
         const insert = database.prepare(`INSERT INTO ${table} (${tableColumns.join(", ")}) VALUES (${tableColumns.map(() => "?").join(", ")})`);
-        for (const row of backup.data[table]!) {
+        for (const row of backup.data[table] ?? []) {
           insert.run(...tableColumns.map((column) => importValue(table, column, row[column]) as never));
         }
       }

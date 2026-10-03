@@ -24,6 +24,7 @@ export interface MediaItem {
 
 export interface MediaDetail extends MediaItem {
   category_ids: number[];
+  source_attributes?: { tags: Tag[]; categories: Array<{ id: number; name: string }> };
 }
 
 export interface SimilarVideo {

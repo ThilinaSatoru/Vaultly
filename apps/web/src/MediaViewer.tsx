@@ -1,10 +1,12 @@
 import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, Trash2, X, ZoomIn } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { TagCombobox } from "./TagCombobox";
+import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { VideoPlayer } from "./VideoPlayer";
 import { api, formatDuration, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type SimilarVideo, type Tag } from "./media";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
+import { viewerNavigationItems, type GalleryVideoContext } from "./video-playlist";
 
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
 type ComicFit = "screen" | "width" | "custom";
@@ -21,12 +23,14 @@ const storedComicZoom = () => {
 interface MediaViewerProps {
   itemId: number;
   seriesContext: SeriesViewerContext | null;
+  galleryContext: GalleryVideoContext | null;
   playlist: Array<{ id: number; title: string }>;
   floating: boolean;
   onToggleFloating: () => void;
   onRemoveFromPlaylist: (id: number) => void;
   onClearPlaylist: () => void;
   onNavigateItem: (id: number) => void;
+  onNavigatePlaylistItem: (id: number) => void;
   categories: Category[];
   tags: Tag[];
   people: Person[];
@@ -38,7 +42,7 @@ interface MediaViewerProps {
   onChanged: () => void;
 }
 
-export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggleFloating, onRemoveFromPlaylist, onClearPlaylist, onNavigateItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged }: MediaViewerProps) {
+export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, floating, onToggleFloating, onRemoveFromPlaylist, onClearPlaylist, onNavigateItem, onNavigatePlaylistItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged }: MediaViewerProps) {
   const viewerRef = useRef<HTMLElement>(null);
   const comicScrollRef = useRef<HTMLDivElement>(null);
   const comicStageRef = useRef<HTMLDivElement>(null);
@@ -59,14 +63,16 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
   const lastFullscreenExit = useRef(-Infinity);
   const playlistIndex = playlist.findIndex((entry) => entry.id === itemId);
   const similarNavigation = item?.media_type === "video" ? [{ id: item.id, title: item.title }, ...similarVideos] : undefined;
-  const navigationItems = playlistIndex >= 0 ? playlist : seriesContext?.items ?? similarNavigation;
+  const navigationItems = viewerNavigationItems(itemId, galleryContext, playlist, seriesContext, similarNavigation);
+  const suggestedVideos = galleryContext?.videos ?? similarVideos;
+  const hasPlaylist = playlist.length > 0 || Boolean(galleryContext?.videos.length);
   const seriesIndex = navigationItems?.findIndex((entry) => entry.id === itemId) ?? -1;
   const previousItem = seriesIndex > 0 ? navigationItems?.[seriesIndex - 1] : undefined;
   const nextItem = navigationItems && seriesIndex >= 0 ? navigationItems[seriesIndex + 1] : undefined;
   const openPreviousItem = () => { if (previousItem) onNavigateItem(previousItem.id); };
   const openNextItem = () => { if (nextItem) onNavigateItem(nextItem.id); };
   const continuousReading = readBooleanPreference("vaultly.reader.continuous", true);
-  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic");
+  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic", `${itemId}:${page}`);
 
   useEffect(() => { window.localStorage.setItem("vaultly.comic.fit", fit); }, [fit]);
   useEffect(() => { window.localStorage.setItem("vaultly.comic.zoom", String(comicZoom)); }, [comicZoom]);
@@ -111,7 +117,7 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
       .then(async (detail) => {
         if (!active) return;
         setItem(detail);
-        if (detail.media_type === "video") {
+        if (detail.media_type === "video" && !galleryContext) {
           setSimilarLoading(true);
           api<SimilarVideo[]>(`/api/items/${itemId}/similar`)
             .then((videos) => { if (active) setSimilarVideos(videos); })
@@ -133,7 +139,7 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
       setSeriesIds(memberships.map((entry) => entry.id));
     }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load series and sets."); });
     return () => { active = false; };
-  }, [itemId]);
+  }, [itemId, galleryContext]);
 
   const changeComicZoom = (delta: number) => {
     setComicZoom((value) => Math.max(25, Math.min(400, value + delta)));
@@ -160,8 +166,8 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
     else if (continuousReading) openNextItem();
   };
 
-  useEffect(() => {
-    comicScrollRef.current?.scrollTo({ top: 0, left: 0 });
+  useLayoutEffect(() => {
+    comicScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [itemId, page]);
 
   useEffect(() => {
@@ -272,8 +278,8 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
     setSaving(true);
     setError("");
     try {
-      await api(`/api/items/${item.id}/categories`, { method: "PUT", body: JSON.stringify({ categoryIds }) });
-      setItem({ ...item, category_ids: categoryIds });
+      const result = await api<{ category_ids: number[] }>(`/api/items/${item.id}/categories`, { method: "PUT", body: JSON.stringify({ categoryIds }) });
+      setItem({ ...item, category_ids: result.category_ids });
       onChanged();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not update categories.");
@@ -343,10 +349,10 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
   };
 
   return (
-    <div className={`viewer-backdrop${floating ? " is-floating" : ""}${playlist.length ? " has-playlist" : ""}`} role="presentation" onMouseDown={floating ? undefined : onClose}>
-      <section ref={viewerRef} className={`viewer${floating ? " viewer-floating" : ""}${playlist.length ? " has-playlist" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+    <div className={`viewer-backdrop${floating ? " is-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} role="presentation" onMouseDown={floating ? undefined : onClose}>
+      <section ref={viewerRef} className={`viewer${floating ? " viewer-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <header className="viewer-header">
-          <div className="viewer-title"><strong>{item?.title || "Opening media…"}</strong><span>{playlistIndex >= 0 ? `Temporary playlist · ${playlistIndex + 1} / ${playlist.length}` : seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
+          <div className="viewer-title"><strong>{item?.title || "Opening media…"}</strong><span>{galleryContext && seriesIndex >= 0 ? `Gallery page ${galleryContext.page + 1} · ${seriesIndex + 1} / ${galleryContext.videos.length}` : playlistIndex >= 0 ? `Temporary playlist · ${playlistIndex + 1} / ${playlist.length}` : seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
           <div className="viewer-header-actions">
             {item && <button className={item.favorite ? "is-favorite" : ""} type="button" onClick={() => void toggleFavorite()} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} title={item.favorite ? "Remove from favorites" : "Add to favorites"}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>}
             {navigationItems && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file"><ChevronLeft size={17} /> Previous</button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file">Next <ChevronRight size={17} /></button></>}
@@ -404,19 +410,19 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
             {item.media_type === "video" && sidebarTab === "playlist" && <div className="viewer-playlist-panel" role="tabpanel">
               {playlist.length > 0 && <section className="temporary-playlist">
                 <div className="temporary-playlist-heading"><span><ListVideo size={16} /> Temporary playlist</span><button type="button" onClick={onClearPlaylist}>Clear</button></div>
-                <div>{playlist.map((entry, index) => <div className={entry.id === itemId ? "is-playing" : ""} key={entry.id}><button type="button" onClick={() => onNavigateItem(entry.id)}><span>{index + 1}</span><strong>{entry.title}</strong></button><button type="button" onClick={() => onRemoveFromPlaylist(entry.id)} aria-label={`Remove ${entry.title} from playlist`}><Trash2 size={14} /></button></div>)}</div>
+                <div>{playlist.map((entry, index) => <div className={entry.id === itemId ? "is-playing" : ""} key={entry.id}><button type="button" onClick={() => onNavigatePlaylistItem(entry.id)}><span>{index + 1}</span><strong>{entry.title}</strong></button><button type="button" onClick={() => onRemoveFromPlaylist(entry.id)} aria-label={`Remove ${entry.title} from playlist`}><Trash2 size={14} /></button></div>)}</div>
               </section>}
-              <section className="similar-playlist">
-                <div className="similar-playlist-heading"><span>Similar videos</span><small>{similarVideos.length || ""}</small></div>
-                {similarLoading && <div className="viewer-playlist-state"><LoaderCircle className="spin" size={16} /> Finding similar videos…</div>}
-                {!similarLoading && similarVideos.length === 0 && <p className="viewer-playlist-state">No other videos are available yet.</p>}
-                <div className="similar-playlist-list">{similarVideos.map((video) => <button type="button" key={video.id} onClick={() => onNavigateItem(video.id)} title={video.filename}>
+              <section className={`similar-playlist${galleryContext ? " gallery-playlist" : ""}`}>
+                <div className="similar-playlist-heading"><span>{galleryContext ? `Current page · ${galleryContext.page + 1}` : "Similar videos"}</span><small>{suggestedVideos.length || ""}</small></div>
+                {!galleryContext && similarLoading && <div className="viewer-playlist-state"><LoaderCircle className="spin" size={16} /> Finding similar videos…</div>}
+                {!similarLoading && suggestedVideos.length === 0 && <p className="viewer-playlist-state">{galleryContext ? "No videos on this gallery page." : "No other videos are available yet."}</p>}
+                <div className="similar-playlist-list">{suggestedVideos.map((video) => <button type="button" key={video.id} className={video.id === itemId ? "is-playing" : undefined} aria-current={video.id === itemId ? "true" : undefined} onClick={() => { if (video.id !== itemId) onNavigateItem(video.id); }} title={video.filename}>
                   <span className="similar-video-art"><img src={`/api/items/${video.id}/thumbnail`} alt="" loading="lazy" /></span>
                   <span className="similar-video-copy"><strong>{video.title}</strong><small>{video.source_name} · {formatDuration(video.duration_seconds)}</small></span>
                 </button>)}</div>
               </section>
             </div>}
-            {(item.media_type !== "video" || sidebarTab === "info") && <div className="viewer-info-panel" role={item.media_type === "video" ? "tabpanel" : undefined}>
+            {(item.media_type !== "video" || sidebarTab === "info") && <AttributeMediaContext.Provider value={item.media_type}><div className="viewer-info-panel" role={item.media_type === "video" ? "tabpanel" : undefined}>
               <div className="viewer-detail-row"><span>Type</span><strong>{item.media_type}</strong></div>
               <div className="viewer-detail-row"><span>{item.file_extension ? "File name" : "Folder name"}</span><strong title={item.filename}>{item.filename}</strong></div>
               <div className="viewer-detail-row"><span>Path</span><strong title={item.relative_path}>{item.relative_path}</strong></div>
@@ -428,18 +434,19 @@ export function MediaViewer({ itemId, seriesContext, playlist, floating, onToggl
               <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
               {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
               <h3>Categories</h3>
-              <TagCombobox label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
+              {item.source_attributes && (item.source_attributes.tags.length > 0 || item.source_attributes.categories.length > 0) && <div className="attribute-help">Common source attributes:<div className="attribute-badges">{item.source_attributes.tags.map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{item.source_attributes.categories.map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>These apply to every file; edit them in Sources.</div>}
+              <TagCombobox attributeKind="category" label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
               <h3>Tags</h3>
-              <TagCombobox label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
+              <TagCombobox attributeKind="tag" label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
               <h3>Cast</h3>
-              <TagCombobox label="Cast" tags={people} selectedIds={item.cast.map((person) => person.id)} onChange={(ids) => void updatePeople("cast", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add people" />
+              <TagCombobox attributeKind="cast" label="Cast" tags={people} selectedIds={item.cast.map((person) => person.id)} onChange={(ids) => void updatePeople("cast", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add people" />
               <h3>Artists</h3>
-              <TagCombobox label="Artists" tags={people} selectedIds={item.artists.map((person) => person.id)} onChange={(ids) => void updatePeople("artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add artists" />
+              <TagCombobox attributeKind="artist" label="Artists" tags={people} selectedIds={item.artists.map((person) => person.id)} onChange={(ids) => void updatePeople("artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add artists" />
               <h3>Series & sets</h3>
-              <TagCombobox label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
+              <TagCombobox attributeKind="series" label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
               {seriesIds.length > 0 && <div className="viewer-series-links">{seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) =>
                 <button key={entry.id} type="button" onClick={() => onOpenSeries(entry.id)}>View {entry.name}</button>)}</div>}
-            </div>}
+            </div></AttributeMediaContext.Provider>}
           </>}
         </aside>
       </section>
