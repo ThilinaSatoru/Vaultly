@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { database } from "./database.js";
@@ -155,6 +155,38 @@ test("scan preserves an item's identity and metadata after an external rename", 
   } finally {
     if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
     if (tagId) database.prepare("DELETE FROM tags WHERE id = ?").run(tagId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("batch renames preserve distinct identities when many documents share the same size", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-batch-rename-"));
+  let sourceId = 0;
+  try {
+    for (let index = 0; index < 32; index++) {
+      const file = path.join(root, `Original-${index}.pdf`);
+      await writeFile(file, "equal size");
+      const modified = new Date(1_700_000_000_000 + index * 1000);
+      await utimes(file, modified, modified);
+    }
+    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)").run("Batch rename", root, root).lastInsertRowid);
+    await scanSource(sourceId, root);
+    const originals = database.prepare("SELECT id, filename FROM media_items WHERE source_id = ?").all(sourceId) as Array<{ id: number; filename: string }>;
+    for (const item of originals) {
+      database.prepare("UPDATE media_items SET title = ?, favorite = 1 WHERE id = ?").run(`Custom ${item.id}`, item.id);
+      await rename(path.join(root, item.filename), path.join(root, item.filename.replace("Original", "Renamed")));
+    }
+    await scanSource(sourceId, root);
+    for (const item of originals) {
+      expect(database.prepare("SELECT filename, title, favorite, available FROM media_items WHERE id = ?").get(item.id))
+        .toEqual({ filename: item.filename.replace("Original", "Renamed"), title: `Custom ${item.id}`, favorite: 1, available: 1 });
+    }
+    expect(database.prepare("SELECT COUNT(*) AS count FROM media_items WHERE source_id = ?").get(sourceId)).toEqual({ count: 32 });
+  } finally {
+    if (sourceId) {
+      database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
+      database.prepare("DELETE FROM series WHERE auto_key LIKE ?").run(`${sourceId}|%`);
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

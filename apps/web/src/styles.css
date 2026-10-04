@@ -119,6 +119,19 @@ main { grid-column: 2; min-width: 0; }
 .source-stats strong { font-size: .91rem; }
 .source-card footer { display: flex; justify-content: space-between; padding-top: 13px; border-top: 1px solid #25282f; color: #727782; font-size: .75rem; }
 .source-card footer strong { color: #aeb2ba; font-weight: 600; }
+.scan-progress { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: .75rem; }
+.scan-progress-heading { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; }
+.scan-progress-heading strong { color: #d9edc9; }
+.scan-progress-heading span, .scan-progress-media { color: var(--muted); }
+.scan-progress-track { height: 5px; overflow: hidden; border-radius: 4px; background: #30363e; }
+.scan-progress-track > span { display: block; height: 100%; border-radius: inherit; background: var(--acid); transition: width .25s ease; }
+.scan-progress-track.indeterminate > span { width: 30%; animation: scan-progress-slide 1.6s ease-in-out infinite alternate; }
+.scan-progress p { margin: 8px 0 0; line-height: 1.5; }
+.scan-progress-counts { color: #d2d6dc; }
+.scan-progress-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8e99a5; }
+.scan-progress-warning { color: #ffce72; }
+@keyframes scan-progress-slide { from { transform: translateX(0); } to { transform: translateX(230%); } }
+@media (prefers-reduced-motion: reduce) { .scan-progress-track.indeterminate > span { animation: none; } .scan-progress-track > span { transition: none; } }
 .scan-error, .form-error { color: #ff8d80; font-size: .8rem; }
 .source-unavailable { display: flex; align-items: center; gap: 7px; margin: 13px 0 0; color: #ffc36c; font-size: .77rem; }
 .page-heading-actions { display: flex; align-items: center; gap: 9px; }

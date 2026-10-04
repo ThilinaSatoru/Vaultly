@@ -42,6 +42,7 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#111315",
+    icon: path.join(currentDirectory, process.platform === "win32" ? "icon.ico" : "icon.png"),
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
@@ -84,6 +85,10 @@ if (!app.requestSingleInstanceLock()) {
     app.quit();
   });
 }
+
+app.on("ready", () => {
+  if (process.platform === "win32") app.setAppUserModelId("com.vaultly.app");
+});
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();

@@ -33,6 +33,8 @@ pnpm desktop:dist
 
 Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian package on Linux. Build each installer on its target operating system; macOS distribution also requires Apple signing/notarization credentials.
 
+Desktop builds generate the application PNG and Windows ICO from `apps/web/public/favicon.svg`, and include them in the app window, executable, and installer. Edit that SVG to update the branding; generated icons live in `apps/desktop/build/`.
+
 ## Current scope
 
 - Register multiple directory roots, including folders containing mixed media.
@@ -42,7 +44,9 @@ Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian pa
 - Scan directories and file metadata in bounded parallel batches, aggregate comic pages without keeping per-page metadata, and skip unchanged media-row writes on rescans.
 - Start a fresh breadcrumb trail and discard carried-over gallery/viewer state when opening Home or a destination from the main menu; nested browsing still restores filters and scroll with Back.
 - Show per-source counts, scanning state, errors, and last scan time.
-- Rescan or remove a source. Removing one only deletes its Vaultly records.
+- Show live scan stages, folder/file counts, comic-page and media counts, current path, elapsed time, and progress within categorization, collection grouping, and thumbnail preparation. Folder discovery shows counts until the total is known.
+- Keep scanning responsive to progress and cancellation requests with short indexing transactions, normalize filenames once for metadata matching, and reuse unchanged PDF/video thumbnails during manual rescans.
+- Rescan sources manually, cancel an individual scan or all active scans, or remove a source. Existing sources are never rescanned on app startup; interrupted scans keep their index until you rescan. Adding or relocating a source starts its initial scan. Removing one only deletes its Vaultly records.
 - Match existing category and tag names against complete words or phrases in filenames during every scan; rescan adds newly matching metadata without clearing manual assignments. Cast/artist names are matched only when their role is already established elsewhere.
 - Browse all media or filter to Comics, Videos, and Stories.
 - Search titles and paths, or filter specifically by filename. Combine media type, source, format, series membership, categories, tags, size, and modified-date filters; sort by title, filename, date, or size.

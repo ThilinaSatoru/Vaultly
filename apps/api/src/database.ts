@@ -268,6 +268,10 @@ initializeSearchIndex(database);
 
 database.exec("PRAGMA optimize");
 
+// A previous process may have exited mid-scan. Keep its index and wait for a manual rescan.
+database.exec(`UPDATE sources SET status = CASE WHEN last_scanned_at IS NULL THEN 'idle' ELSE 'ready' END,
+  last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE status = 'scanning'`);
+
 export type SourceStatus = "idle" | "scanning" | "ready" | "error";
 
 export interface SourceRow {

@@ -7,7 +7,7 @@ import path from "node:path";
 import { z } from "zod";
 import { database, type SourceRow } from "./database.js";
 import { pickDirectory } from "./folder-picker.js";
-import { scanSource } from "./scanner.js";
+import { cancelAllSourceScans, cancelSourceScan, getScanProgress, scanSource } from "./scanner.js";
 import { registerMediaRoutes } from "./media-routes.js";
 import { registerSeriesRoutes } from "./series-routes.js";
 import { registerPeopleRoutes } from "./people-routes.js";
@@ -88,7 +88,13 @@ app.get("/api/sources", async () => {
   }
   const availability = new Map(checked.map((source) => [source.id, { path_available: source.path_available, path_error: source.path_error }]));
   const summaries = database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all() as Array<SourceRow & Record<string, unknown>>;
-  return summaries.map((source) => ({ ...source, ...availability.get(source.id), ...sourceAttributes(source.id) }));
+  return summaries.map((source) => ({ ...source, ...availability.get(source.id), ...sourceAttributes(source.id), scan_progress: getScanProgress(source.id) }));
+});
+
+// Progress polls avoid recounting the library and checking every source folder.
+app.get("/api/sources/scan/progress", async () => {
+  const sources = database.prepare("SELECT id, status, last_error, last_scanned_at FROM sources").all() as Array<Pick<SourceRow, "id" | "status" | "last_error" | "last_scanned_at">>;
+  return sources.map((source) => ({ ...source, scan_progress: getScanProgress(source.id) }));
 });
 
 app.post("/api/system/pick-directory", async (_request, reply) => {
@@ -139,7 +145,7 @@ app.post("/api/sources", async (request, reply) => {
 
 app.post("/api/sources/scan", async (_request, reply) => {
   const sources = database.prepare("SELECT * FROM sources ORDER BY id").all() as unknown as SourceRow[];
-  for (const source of sources) void scanSource(source.id, source.root_path, { regenerateThumbnails: true });
+  for (const source of sources) void scanSource(source.id, source.root_path, { generateThumbnails: true });
   return reply.code(202).send({ status: "scanning", count: sources.length });
 });
 
@@ -147,8 +153,18 @@ app.post("/api/sources/:id/scan", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
-  void scanSource(source.id, source.root_path, { regenerateThumbnails: true });
+  void scanSource(source.id, source.root_path, { generateThumbnails: true });
   return reply.code(202).send({ status: "scanning" });
+});
+
+app.post("/api/sources/scan/cancel", async () => ({ count: await cancelAllSourceScans() }));
+
+app.post("/api/sources/:id/scan/cancel", async (request, reply) => {
+  const { id } = sourceIdInput.parse(request.params);
+  if (!database.prepare("SELECT id FROM sources WHERE id = ?").get(id)) {
+    return reply.code(404).send({ message: "Library source not found." });
+  }
+  return { cancelled: await cancelSourceScan(id) };
 });
 
 app.patch("/api/sources/:id", async (request, reply) => {
@@ -156,6 +172,7 @@ app.patch("/api/sources/:id", async (request, reply) => {
   const input = sourceInput.parse(request.body);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
+  await cancelSourceScan(id);
   const resolvedPath = await realpath(path.resolve(input.rootPath));
   const rootStat = await stat(resolvedPath);
   if (!rootStat.isDirectory()) return reply.code(400).send({ message: "Choose a directory, not a file." });
@@ -177,6 +194,7 @@ app.patch("/api/sources/:id", async (request, reply) => {
 
 app.delete("/api/sources/:id", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
+  await cancelSourceScan(id);
   const result = database.prepare("DELETE FROM sources WHERE id = ?").run(id);
   if (result.changes === 0) return reply.code(404).send({ message: "Library source not found." });
   return reply.code(204).send();

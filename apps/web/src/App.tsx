@@ -39,6 +39,7 @@ import { MediaViewer } from "./MediaViewer";
 import { PeopleView } from "./PeopleView";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
+import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
 import { TagsView } from "./TagsView";
 import { api, formatCount, type Category, type MediaItem, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
 
@@ -51,6 +52,7 @@ interface LibrarySource {
   status: SourceStatus;
   last_error: string | null;
   last_scanned_at: string | null;
+  scan_progress: SourceScanProgress | null;
   item_count: number;
   comic_count: number;
   video_count: number;
@@ -209,6 +211,18 @@ function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeO
     }
   };
 
+  const cancelScan = async () => {
+    setWorking(true);
+    setMenuOpen(false);
+    setActionError("");
+    try {
+      await api(`/api/sources/${source.id}/scan/cancel`, { method: "POST" });
+      onChanged();
+    } catch (requestError) {
+      setActionError(requestError instanceof Error ? requestError.message : "Could not cancel this scan.");
+    } finally { setWorking(false); }
+  };
+
   const remove = async () => {
     if (!window.confirm(`Remove “${source.name}” from Vaultly? Your files will not be deleted.`)) return;
     setWorking(true);
@@ -263,8 +277,10 @@ function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeO
           {menuOpen && (
             <div className="source-menu">
               <button type="button" onClick={() => { setMenuOpen(false); setAttributesOpen(true); }}><TagIcon size={16} /> Common attributes</button>
-              <button type="button" onClick={() => void relocate()}><FolderOpen size={16} /> Relocate source</button>
-              <button type="button" onClick={rescan} disabled={!source.path_available}><RefreshCw size={16} /> Scan again</button>
+              <button type="button" onClick={() => void relocate()} disabled={source.status === "scanning"}><FolderOpen size={16} /> Relocate source</button>
+              {source.status === "scanning"
+                ? <button type="button" onClick={() => void cancelScan()}><X size={16} /> Cancel scan</button>
+                : <button type="button" onClick={rescan} disabled={!source.path_available}><RefreshCw size={16} /> Scan again</button>}
               <button className="danger" type="button" onClick={remove} disabled={source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
             </div>
           )}
@@ -282,9 +298,12 @@ function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeO
         <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
       </div>
       {attributesOpen && <SourceAttributesDialog source={source} {...attributeOptions} onClose={() => setAttributesOpen(false)} onSaved={onChanged} />}
+      {source.status === "scanning" && source.scan_progress && <ScanProgress progress={source.scan_progress} />}
       <footer>
-        <span>{source.status === "scanning" ? "Scanning folders…" : formatScanDate(source.last_scanned_at)}</span>
-        <strong>{formatCount(source.item_count)} items</strong>
+        <span>{source.status === "scanning" ? "Scan in progress…" : formatScanDate(source.last_scanned_at)}</span>
+        {source.status === "scanning"
+          ? <button className="source-attributes-edit" type="button" onClick={() => void cancelScan()} disabled={working}>{working ? <LoaderCircle className="spin" size={15} /> : <X size={15} />}{working ? "Cancelling…" : "Cancel scan"}</button>
+          : <strong>{formatCount(source.item_count)} items</strong>}
       </footer>
       {source.last_error && <p className="scan-error">{source.last_error}</p>}
       {!source.path_available && <p className="source-unavailable"><AlertTriangle size={15} /> {source.path_error || "The source path or drive is unavailable."}</p>}
@@ -374,7 +393,7 @@ function LibraryApp() {
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [rescanningAll, setRescanningAll] = useState(false);
-  const wasScanning = useRef(false);
+  const previousScanningSourceKey = useRef("");
 
 
   const loadSources = useCallback(async (quiet = false) => {
@@ -428,6 +447,7 @@ function LibraryApp() {
   useEffect(() => { void loadPeople(); }, [loadPeople]);
 
   const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
+  const scanningSourceKey = useMemo(() => sources.filter((source) => source.status === "scanning").map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
   const availableSourceKey = useMemo(() => sources.filter((source) => source.path_available).map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
   const previousAvailableSourceKey = useRef<string | null>(null);
   useEffect(() => {
@@ -442,15 +462,31 @@ function LibraryApp() {
     }
   }, [availableSourceKey, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
-    if (wasScanning.current && !isScanning) {
+    if (previousScanningSourceKey.current && previousScanningSourceKey.current !== scanningSourceKey) {
+      void loadSources(true);
       setRefreshKey((value) => value + 1);
       void loadCategories(); void loadTags(); void loadPeople();
     }
-    wasScanning.current = isScanning;
-  }, [isScanning, loadCategories, loadTags, loadPeople]);
+    previousScanningSourceKey.current = scanningSourceKey;
+  }, [scanningSourceKey, loadSources, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
-    const timer = window.setInterval(() => void loadSources(true), isScanning ? 1200 : 5000);
-    return () => window.clearInterval(timer);
+    let polling = false;
+    let stopped = false;
+    const timer = window.setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        if (isScanning) {
+          const updates = await api<Array<Pick<LibrarySource, "id" | "status" | "last_error" | "last_scanned_at" | "scan_progress">>>("/api/sources/scan/progress");
+          if (stopped) return;
+          const byId = new Map(updates.map((update) => [update.id, update]));
+          setSources((current) => current.map((source) => ({ ...source, ...byId.get(source.id) })));
+        } else await loadSources(true);
+      } catch {
+        if (!stopped) await loadSources(true);
+      } finally { polling = false; }
+    }, isScanning ? 1000 : 5000);
+    return () => { stopped = true; window.clearInterval(timer); };
   }, [isScanning, loadSources]);
 
   const attributeOptions: SourceAttributeOptions = { tags, categories, onTagCreated: createTag, onCategoryCreated: createCategory };
@@ -487,6 +523,18 @@ function LibraryApp() {
       await loadSources(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not rescan all sources.");
+    } finally { setRescanningAll(false); }
+  };
+
+  const cancelAllScans = async () => {
+    setRescanningAll(true);
+    setError("");
+    try {
+      await api("/api/sources/scan/cancel", { method: "POST" });
+      await loadSources(true);
+      refreshMedia();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not cancel scans.");
     } finally { setRescanningAll(false); }
   };
 
@@ -532,8 +580,10 @@ function LibraryApp() {
             <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={() => { selectSection("sources"); setShowAddSource(true); }} />
           ) : section === "sources" ? <>
           <div className="page-heading">
-            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames.</p></div>
-            <div className="page-heading-actions"><button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || isScanning || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button><button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
+            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames. Existing sources only rescan when you choose to; opening the app does not rescan them.</p></div>
+            <div className="page-heading-actions">{isScanning
+              ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
+              : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
           </div>
 
           <section className="summary-strip" aria-label="Source summary">

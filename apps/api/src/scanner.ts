@@ -1,8 +1,9 @@
 import { withAttributePatterns } from "./attribute-routes.js";
 import { opendir, stat } from "node:fs/promises";
 import path from "node:path";
+import { setImmediate as yieldToRequests } from "node:timers/promises";
 import { database } from "./database.js";
-import { FilenameMetadataMatcher } from "./filename-metadata.js";
+import { FilenameMetadataMatcher, normalizeMetadataFilename } from "./filename-metadata.js";
 import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail } from "./thumbnails.js";
 
 const videoExtensions = new Set([
@@ -28,6 +29,33 @@ interface ExistingItem extends ScannedItem {
   indexed: number;
   available: number;
 }
+
+export interface ScanProgress {
+  phase: "discovering" | "indexing" | "collections" | "thumbnails";
+  startedAt: number;
+  directoriesScanned: number;
+  directoriesFound: number;
+  filesChecked: number;
+  comicPages: number;
+  comicsFound: number;
+  videosFound: number;
+  pdfsFound: number;
+  itemsProcessed: number;
+  itemsTotal: number;
+  collectionsProcessed: number;
+  collectionsTotal: number;
+  thumbnailsProcessed: number;
+  thumbnailsTotal: number;
+  thumbnailErrors: number;
+  currentPath: string;
+}
+
+const newProgress = (): ScanProgress => ({
+  phase: "discovering", startedAt: Date.now(), directoriesScanned: 0, directoriesFound: 1,
+  filesChecked: 0, comicPages: 0, comicsFound: 0, videosFound: 0, pdfsFound: 0,
+  itemsProcessed: 0, itemsTotal: 0, collectionsProcessed: 0, collectionsTotal: 0,
+  thumbnailsProcessed: 0, thumbnailsTotal: 0, thumbnailErrors: 0, currentPath: ".",
+});
 
 const titleFromFilename = (filename: string) =>
   path.basename(filename, path.extname(filename)).replace(/[._]+/g, " ").trim();
@@ -60,28 +88,44 @@ export function inferCollectionPattern(filename: string): { title: string; order
   return Number.isFinite(order) ? { title, order } : null;
 }
 
-export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
+export async function collectItems(rootPath: string, signal?: AbortSignal, progress?: ScanProgress): Promise<ScannedItem[]> {
+  signal?.throwIfAborted();
   const items: ScannedItem[] = [];
   const directories = [rootPath];
 
   const scanDirectory = async (currentDirectory: string) => {
+    signal?.throwIfAborted();
     const directory = await opendir(currentDirectory, { bufferSize: 128 });
+    if (progress) progress.currentPath = path.relative(rootPath, currentDirectory) || ".";
     let imageCount = 0;
     let totalSize = 0;
     let latestModification = 0;
     let pending: Array<{ name: string; extension: string; absolutePath: string }> = [];
     const flush = async () => {
+      signal?.throwIfAborted();
       const batch = pending;
       pending = [];
       // Bounded metadata reads avoid one round-trip per file without launching
       // thousands of simultaneous requests or retaining every comic page.
       const results = await Promise.all(batch.map(async (file) => ({ ...file, fileStat: await stat(file.absolutePath) })));
+      signal?.throwIfAborted();
       for (const { name, extension, absolutePath, fileStat } of results) {
+        if (progress) {
+          progress.filesChecked++;
+          progress.currentPath = path.relative(rootPath, absolutePath);
+        }
         if (imageExtensions.has(extension)) {
+          if (progress) progress.comicPages++;
           imageCount++;
           totalSize += fileStat.size;
           latestModification = Math.max(latestModification, fileStat.mtimeMs);
         } else {
+          if (progress) {
+            if (videoExtensions.has(extension)) progress.videosFound++;
+            else if (storyExtensions.has(extension)) progress.pdfsFound++;
+            else progress.comicsFound++;
+            progress.itemsTotal++;
+          }
           items.push({
             mediaType: videoExtensions.has(extension) ? "video" : storyExtensions.has(extension) ? "story" : "comic",
             title: titleFromFilename(name), filename: name, fileExtension: extension.slice(1),
@@ -92,12 +136,17 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
       }
     };
     for await (const entry of directory) {
+      signal?.throwIfAborted();
       const absolutePath = path.join(currentDirectory, entry.name);
       if (entry.isDirectory()) {
         directories.push(absolutePath);
+        if (progress) progress.directoriesFound++;
       } else if (entry.isFile()) {
         const extension = path.extname(entry.name).toLowerCase();
-        if (!videoExtensions.has(extension) && !storyExtensions.has(extension) && !comicArchiveExtensions.has(extension) && !imageExtensions.has(extension)) continue;
+        if (!videoExtensions.has(extension) && !storyExtensions.has(extension) && !comicArchiveExtensions.has(extension) && !imageExtensions.has(extension)) {
+          if (progress) progress.filesChecked++;
+          continue;
+        }
         pending.push({ name: entry.name, extension, absolutePath });
         if (pending.length === 8) await flush();
       }
@@ -105,6 +154,7 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
     await flush();
 
     if (imageCount > 0) {
+      if (progress) { progress.comicsFound++; progress.itemsTotal++; }
       const relativeDirectory = path.relative(rootPath, currentDirectory) || ".";
       items.push({
         mediaType: "comic",
@@ -117,22 +167,51 @@ export async function collectItems(rootPath: string): Promise<ScannedItem[]> {
         fileCount: imageCount,
       });
     }
+    if (progress) progress.directoriesScanned++;
   };
   while (directories.length > 0) {
+    signal?.throwIfAborted();
     const batch = directories.splice(-4);
     // Wait for every open directory to finish before surfacing a failure.
     const results = await Promise.allSettled(batch.map(scanDirectory));
     for (const result of results) if (result.status === "rejected") throw result.reason;
   }
 
+  signal?.throwIfAborted();
   return items;
 }
 
-const scans = new Map<number, Promise<void>>();
+const scans = new Map<number, { promise: Promise<void>; controller: AbortController; progress: ScanProgress }>();
 
-export function scanSource(sourceId: number, rootPath: string, options: { regenerateThumbnails?: boolean } = {}): Promise<void> {
+export function getScanProgress(sourceId: number): (ScanProgress & { elapsedMs: number }) | null {
+  const progress = scans.get(sourceId)?.progress;
+  return progress ? { ...progress, elapsedMs: Date.now() - progress.startedAt } : null;
+}
+
+export async function cancelSourceScan(sourceId: number): Promise<boolean> {
+  const scan = scans.get(sourceId);
+  if (!scan) return false;
+  scan.controller.abort();
+  await scan.promise;
+  return true;
+}
+
+export async function cancelAllSourceScans(): Promise<number> {
+  const active = [...scans.values()];
+  for (const scan of active) scan.controller.abort();
+  await Promise.all(active.map((scan) => scan.promise));
+  return active.length;
+}
+
+export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean } = {}): Promise<void> {
   const existingScan = scans.get(sourceId);
-  if (existingScan) return existingScan;
+  if (existingScan) return existingScan.promise;
+
+  const controller = new AbortController();
+  const { signal } = controller;
+  const progress = newProgress();
+  const previousSource = database.prepare("SELECT status, last_error FROM sources WHERE id = ?")
+    .get(sourceId) as { status: string; last_error: string | null } | undefined;
 
   const scan = (async () => {
     database.prepare(
@@ -145,9 +224,26 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
         modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
         FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[]);
       const previousItemIds = previousItems.map((row) => row.id);
-      const items = await collectItems(rootPath);
+      const items = await collectItems(rootPath, signal, progress);
+      signal.throwIfAborted();
+      progress.phase = "indexing";
+      progress.itemsTotal = items.length;
+      await yieldToRequests();
+      signal.throwIfAborted();
       const indexedItems: Array<{ id: number; item: ScannedItem }> = [];
       database.exec("BEGIN IMMEDIATE");
+      let transactionOpen = true;
+      let lastYield = performance.now();
+      const yieldBetweenBatches = async () => {
+        database.exec("COMMIT");
+        transactionOpen = false;
+        // Requests may read progress, cancel, or edit the library only after this transaction ends.
+        await yieldToRequests();
+        signal.throwIfAborted();
+        database.exec("BEGIN IMMEDIATE");
+        transactionOpen = true;
+        lastYield = performance.now();
+      };
       try {
         const categories = database.prepare("SELECT id, name FROM categories").all() as Array<{ id: number; name: string }>;
         const tags = database.prepare("SELECT id, name FROM tags").all() as Array<{ id: number; name: string }>;
@@ -160,23 +256,23 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
         const categoryMatcher = new FilenameMetadataMatcher(withAttributePatterns("categories", categories));
         const tagMatcher = new FilenameMetadataMatcher(withAttributePatterns("tags", tags));
         const peopleMatcher = new FilenameMetadataMatcher(withAttributePatterns("people", people.filter((person) => person.is_cast || person.is_artist)));
-        const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) VALUES (?, ?)");
-        const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) VALUES (?, ?)");
-        const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");
+        const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) SELECT ?, id FROM categories WHERE id = ?");
+        const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) SELECT ?, id FROM tags WHERE id = ?");
+        const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) SELECT ?, id, ? FROM people WHERE id = ?");
         const pathKey = (item: ScannedItem) => `${item.mediaType}|${process.platform === "win32" ? item.relativePath.toLowerCase() : item.relativePath}`;
         const previousByPath = new Map(previousItems.map((item) => [pathKey(item), item]));
         const incomingPaths = new Set(items.map(pathKey));
         // Only missing paths are candidates for a move, so identical files that
         // still exist never donate their identity to a newly discovered file.
         const availablePrevious = previousItems.filter((item) => item.indexed === 1 && !incomingPaths.has(pathKey(item)));
-        const strictMatches = new Map<string, ExistingItem[]>();
-        const looseMatches = new Map<string, ExistingItem[]>();
+        const strictMatches = new Map<string, Set<ExistingItem>>();
+        const looseMatches = new Map<string, Set<ExistingItem>>();
         for (const existing of availablePrevious) {
-          const strict = strictMatches.get(strictIdentity(existing)) ?? [];
-          strict.push(existing);
+          const strict = strictMatches.get(strictIdentity(existing)) ?? new Set<ExistingItem>();
+          strict.add(existing);
           strictMatches.set(strictIdentity(existing), strict);
-          const loose = looseMatches.get(looseIdentity(existing)) ?? [];
-          loose.push(existing);
+          const loose = looseMatches.get(looseIdentity(existing)) ?? new Set<ExistingItem>();
+          loose.add(existing);
           looseMatches.set(looseIdentity(existing), loose);
         }
         const looseIncomingCounts = new Map<string, number>();
@@ -206,19 +302,23 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `);
-        for (const item of items) {
+        for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+          const item = items[itemIndex];
           const previous = previousByPath.get(pathKey(item));
           let row: { id: number };
           if (!previous) {
-            const strict = (strictMatches.get(strictIdentity(item)) ?? []).filter((entry) => !reconciledIds.has(entry.id));
-            const loose = (looseMatches.get(looseIdentity(item)) ?? []).filter((entry) => !reconciledIds.has(entry.id));
-            const match = strict.length === 1 ? strict[0]
-              : strict.length === 0 && loose.length === 1 && looseIncomingCounts.get(looseIdentity(item)) === 1 ? loose[0] : undefined;
+            const strict = strictMatches.get(strictIdentity(item));
+            const loose = looseMatches.get(looseIdentity(item));
+            // Bucket sizes make ambiguity checks constant-time even when thousands of PDFs share a size.
+            const match = strict?.size === 1 ? strict.values().next().value
+              : !strict?.size && loose?.size === 1 && looseIncomingCounts.get(looseIdentity(item)) === 1 ? loose.values().next().value : undefined;
             if (match) {
               const nextTitle = match.title === titleFromFilename(match.filename) ? item.title : match.title;
               reconcileMoved.run(nextTitle, item.filename, item.fileExtension, item.relativePath, item.sizeBytes,
                 item.modifiedAtMs, item.fileCount, item.sizeBytes, item.modifiedAtMs, match.id);
               reconciledIds.add(match.id);
+              strictMatches.get(strictIdentity(match))?.delete(match);
+              looseMatches.get(looseIdentity(match))?.delete(match);
               row = { id: match.id };
             } else {
               row = upsert.get(sourceId, item.mediaType, item.title, item.filename, item.fileExtension,
@@ -241,20 +341,25 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
           }
           reconciledIds.add(row.id);
           indexedItems.push({ id: row.id, item });
-          for (const category of categoryMatcher.match(item.filename, item.fileExtension)) {
+          const normalizedFilename = normalizeMetadataFilename(item.filename, item.fileExtension);
+          for (const category of categoryMatcher.matchNormalized(normalizedFilename)) {
             addCategory.run(row.id, category.id);
           }
-          for (const tag of tagMatcher.match(item.filename, item.fileExtension)) {
+          for (const tag of tagMatcher.matchNormalized(normalizedFilename)) {
             addTag.run(row.id, tag.id);
           }
-          for (const person of peopleMatcher.match(item.filename, item.fileExtension)) {
-            if (person.is_cast) addPerson.run(row.id, person.id, "cast");
-            if (person.is_artist) addPerson.run(row.id, person.id, "artist");
+          for (const person of peopleMatcher.matchNormalized(normalizedFilename)) {
+            if (person.is_cast) addPerson.run(row.id, "cast", person.id);
+            if (person.is_artist) addPerson.run(row.id, "artist", person.id);
           }
+          progress.itemsProcessed = itemIndex + 1;
+          progress.currentPath = item.relativePath;
+          if ((itemIndex + 1) % 128 === 0 || performance.now() - lastYield >= 25) await yieldBetweenBatches();
         }
 
-        const markMissing = database.prepare("UPDATE media_items SET indexed = 0, available = 0 WHERE id = ? AND (indexed <> 0 OR available <> 0)");
-        for (const previous of previousItems) if (!reconciledIds.has(previous.id)) markMissing.run(previous.id);
+        progress.phase = "collections";
+        progress.currentPath = "";
+        await yieldBetweenBatches();
 
         const collectionGroups = new Map<string, { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> }>();
         for (const indexed of indexedItems) {
@@ -270,36 +375,68 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
         const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
         const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
         const addSeriesItem = database.prepare("INSERT OR IGNORE INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)");
+        const groupedItemIds = new Set((database.prepare(`SELECT si.item_id FROM series_items si
+          JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?`).all(sourceId) as Array<{ item_id: number }>).map((row) => row.item_id));
+        progress.collectionsTotal = collectionGroups.size;
         for (const [autoKey, group] of collectionGroups) {
+          if (progress.collectionsProcessed % 128 === 0 || performance.now() - lastYield >= 25) await yieldBetweenBatches();
+          progress.currentPath = group.title;
           let series = findAutoSeries.get(autoKey) as { id: number } | undefined;
-          if (!series && group.entries.length < 2) continue;
+          if (!series && group.entries.length < 2) { progress.collectionsProcessed++; continue; }
           if (!series) {
-            const placeholders = group.entries.map(() => "?").join(",");
-            const alreadyGrouped = database.prepare(`SELECT 1 FROM series_items WHERE item_id IN (${placeholders}) LIMIT 1`)
-              .get(...group.entries.map((entry) => entry.id));
-            if (alreadyGrouped) continue;
+            const alreadyGrouped = group.entries.some((entry) => groupedItemIds.has(entry.id));
+            if (alreadyGrouped) { progress.collectionsProcessed++; continue; }
             createAutoSeries.run(group.title, group.mediaType, autoKey);
             series = findAutoSeries.get(autoKey) as { id: number } | undefined;
           }
-          if (!series) continue;
+          if (!series) { progress.collectionsProcessed++; continue; }
           group.entries.sort((a, b) => a.order - b.order || a.path.localeCompare(b.path));
-          group.entries.forEach((entry, position) => addSeriesItem.run(series!.id, entry.id, position));
+          for (let position = 0; position < group.entries.length; position++) {
+            const entry = group.entries[position];
+            addSeriesItem.run(series.id, entry.id, position);
+            groupedItemIds.add(entry.id);
+            if ((position + 1) % 128 === 0 && performance.now() - lastYield >= 25) await yieldBetweenBatches();
+          }
+          progress.collectionsProcessed++;
         }
 
+        // Only a fully indexed source may mark previously known files as missing.
+        const markMissing = database.prepare("UPDATE media_items SET indexed = 0, available = 0 WHERE id = ? AND (indexed <> 0 OR available <> 0)");
+        for (const previous of previousItems) if (!reconciledIds.has(previous.id)) markMissing.run(previous.id);
         database.exec("COMMIT");
+        transactionOpen = false;
       } catch (transactionError) {
-        database.exec("ROLLBACK");
+        if (transactionOpen) database.exec("ROLLBACK");
         throw transactionError;
       }
-      if (options.regenerateThumbnails) {
-        await clearThumbnailCache([...new Set([...previousItemIds, ...indexedItems.map((entry) => entry.id)])]);
-        await Promise.allSettled(indexedItems.filter((entry) => entry.item.mediaType === "video" || entry.item.mediaType === "story").map((entry) => {
-          const inputPath = path.resolve(rootPath, entry.item.relativePath);
-          return entry.item.mediaType === "video"
-            ? getVideoThumbnail(entry.id, inputPath, entry.item.sizeBytes, entry.item.modifiedAtMs)
-            : getPdfThumbnail(entry.id, inputPath, entry.item.sizeBytes, entry.item.modifiedAtMs);
+      if (options.generateThumbnails || options.regenerateThumbnails) {
+        signal.throwIfAborted();
+        progress.phase = "thumbnails";
+        progress.currentPath = "";
+        if (options.regenerateThumbnails) await clearThumbnailCache([...new Set([...previousItemIds, ...indexedItems.map((entry) => entry.id)])]);
+        signal.throwIfAborted();
+        const thumbnails = indexedItems.filter((entry) => entry.item.mediaType === "video" || entry.item.mediaType === "story");
+        progress.thumbnailsTotal = thumbnails.length;
+        let nextThumbnail = 0;
+        // Schedule only two at a time so cancellation never leaves a library-sized queue.
+        await Promise.allSettled(Array.from({ length: 2 }, async () => {
+          while (nextThumbnail < thumbnails.length) {
+            signal.throwIfAborted();
+            const entry = thumbnails[nextThumbnail++];
+            progress.currentPath = entry.item.relativePath;
+            const inputPath = path.resolve(rootPath, entry.item.relativePath);
+            try {
+              if (entry.item.mediaType === "video") {
+                await getVideoThumbnail(entry.id, inputPath, entry.item.sizeBytes, entry.item.modifiedAtMs, signal);
+              } else {
+                await getPdfThumbnail(entry.id, inputPath, entry.item.sizeBytes, entry.item.modifiedAtMs, signal);
+              }
+            } catch { signal.throwIfAborted(); progress.thumbnailErrors++; }
+            progress.thumbnailsProcessed++;
+          }
         }));
       }
+      signal.throwIfAborted();
       database.prepare(`
         UPDATE sources
         SET status = 'ready', connected = 1, last_error = NULL, last_scanned_at = CURRENT_TIMESTAMP,
@@ -307,6 +444,11 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
         WHERE id = ?
       `).run(sourceId);
     } catch (error) {
+      if (signal.aborted) {
+        database.prepare("UPDATE sources SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .run(previousSource?.status === "scanning" ? "idle" : previousSource?.status ?? "idle", previousSource?.last_error ?? null, sourceId);
+        return;
+      }
       const message = error instanceof Error ? error.message : "The folder could not be scanned.";
       database.prepare(`
         UPDATE sources SET status = 'error', last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
@@ -314,6 +456,6 @@ export function scanSource(sourceId: number, rootPath: string, options: { regene
     }
   })().finally(() => scans.delete(sourceId));
 
-  scans.set(sourceId, scan);
+  scans.set(sourceId, { promise: scan, controller, progress });
   return scan;
 }

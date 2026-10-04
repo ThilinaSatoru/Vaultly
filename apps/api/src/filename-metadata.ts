@@ -5,6 +5,13 @@ export function normalizeMetadataPhrase(value: string): string {
     .toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().replace(/\s+/g, " ");
 }
 
+export function normalizeMetadataFilename(filename: string, extension: string): string {
+  const suffix = extension ? `.${extension}` : "";
+  const baseName = suffix && filename.toLocaleLowerCase().endsWith(suffix.toLocaleLowerCase())
+    ? filename.slice(0, -suffix.length) : filename;
+  return normalizeMetadataPhrase(baseName);
+}
+
 /** Match complete words or phrases, not arbitrary substrings or file extensions. */
 export class FilenameMetadataMatcher<T extends NamedEntry> {
   private readonly byFirstWord = new Map<string, Array<{ entry: T; phrase: string }>>();
@@ -22,10 +29,10 @@ export class FilenameMetadataMatcher<T extends NamedEntry> {
   }
 
   match(filename: string, extension: string): T[] {
-    const suffix = extension ? `.${extension}` : "";
-    const baseName = suffix && filename.toLocaleLowerCase().endsWith(suffix.toLocaleLowerCase())
-      ? filename.slice(0, -suffix.length) : filename;
-    const normalized = normalizeMetadataPhrase(baseName);
+    return this.matchNormalized(normalizeMetadataFilename(filename, extension));
+  }
+
+  matchNormalized(normalized: string): T[] {
     if (!normalized) return [];
     const padded = ` ${normalized} `;
     const matches: T[] = [];

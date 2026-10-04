@@ -36,58 +36,87 @@ async function exists(filePath: string): Promise<boolean> {
   catch { return false; }
 }
 
-async function withWorker<T>(task: () => Promise<T>): Promise<T> {
-  if (running >= 2) await new Promise<void>((resolve) => waiting.push(resolve));
+function waitForTask<T>(task: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return task;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    task.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
+function waitForSlot(queue: Array<() => void>, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const ready = () => { signal?.removeEventListener("abort", abort); resolve(); };
+    const abort = () => {
+      const index = queue.indexOf(ready);
+      if (index !== -1) queue.splice(index, 1);
+      reject(signal?.reason);
+    };
+    queue.push(ready);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
+async function withWorker<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  if (running >= 2) await waitForSlot(waiting, signal);
   running += 1;
-  try { return await task(); }
+  try { signal?.throwIfAborted(); return await task(); }
   finally {
     running -= 1;
     waiting.shift()?.();
   }
 }
 
-async function withProbe<T>(task: () => Promise<T>): Promise<T> {
-  if (probesRunning >= 2) await new Promise<void>((resolve) => probeWaiting.push(resolve));
+async function withProbe<T>(task: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  if (probesRunning >= 2) await waitForSlot(probeWaiting, signal);
   probesRunning += 1;
-  try { return await task(); }
+  try { signal?.throwIfAborted(); return await task(); }
   finally {
     probesRunning -= 1;
     probeWaiting.shift()?.();
   }
 }
 
-async function captureFrame(inputPath: string, outputPath: string, seekSeconds: string) {
+async function captureFrame(inputPath: string, outputPath: string, seekSeconds: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   await execFileAsync(ffmpegInstaller.path, [
     "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", seekSeconds,
     "-i", inputPath, "-frames:v", "1", "-vf", "scale=480:-2",
     "-q:v", "5", "-y", outputPath,
-  ], { windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024 });
+  ], { windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024, signal });
   if (!(await exists(outputPath))) throw new Error("FFmpeg did not produce a frame.");
 }
 
-export function getVideoDuration(inputPath: string): Promise<number | null> {
+export function getVideoDuration(inputPath: string, signal?: AbortSignal): Promise<number | null> {
   const pending = durationInFlight.get(inputPath);
-  if (pending) return pending;
+  if (pending) return waitForTask(pending, signal);
   const task = withProbe(async () => {
     let diagnostic = "";
     try {
       const result = await execFileAsync(ffmpegInstaller.path, ["-hide_banner", "-i", inputPath], {
-        windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024,
+        windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024, signal,
       });
       diagnostic = result.stderr;
     } catch (error) {
+      signal?.throwIfAborted();
       diagnostic = typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
     }
     const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(diagnostic);
     if (!match) return null;
     const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
     return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
-  }).finally(() => durationInFlight.delete(inputPath));
+  }, signal).finally(() => durationInFlight.delete(inputPath));
   durationInFlight.set(inputPath, task);
   return task;
 }
 
-function renderPdfInWorker(inputPath: string, outputPath: string): Promise<void> {
+function renderPdfInWorker(inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const workerUrl = process.env.VAULTLY_PDF_WORKER_PATH
     ? pathToFileURL(path.resolve(process.env.VAULTLY_PDF_WORKER_PATH))
     : new URL("../pdf-thumbnail-worker.mjs", import.meta.url);
@@ -101,18 +130,23 @@ function renderPdfInWorker(inputPath: string, outputPath: string): Promise<void>
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       if (error) reject(error); else resolve();
     };
     const timer = setTimeout(() => {
       void worker.terminate();
       finish(new Error("PDF thumbnail rendering timed out."));
     }, 8_000);
+    const abort = () => { void worker.terminate().then(() => finish(signal?.reason)); };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
     worker.once("message", (message: { ok: boolean; error?: string }) => {
       finish(message.ok ? undefined : new Error(message.error || "PDF thumbnail rendering failed."));
     });
     worker.once("error", (error) => finish(error));
     worker.once("exit", (code) => {
-      if (code !== 0) finish(new Error(`PDF thumbnail worker exited with code ${code}.`));
+      if (signal?.aborted) finish(signal.reason);
+      else if (code !== 0) finish(new Error(`PDF thumbnail worker exited with code ${code}.`));
     });
   });
 }
@@ -122,33 +156,37 @@ export function getVideoThumbnail(
   inputPath: string,
   sizeBytes: number,
   modifiedAtMs: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   // Versioned so previously cached opening-frame thumbnails are replaced.
   const cacheKey = `video-mid-v2-${id}-${sizeBytes}-${Math.round(modifiedAtMs)}`;
   const targetPath = path.join(thumbnailDirectory, `${cacheKey}.jpg`);
   const pending = inFlight.get(cacheKey);
-  if (pending) return pending;
+  if (pending) return waitForTask(pending, signal);
 
   const task = (async () => {
+    signal?.throwIfAborted();
     if (await exists(targetPath)) return targetPath;
     return withWorker(async () => {
       if (await exists(targetPath)) return targetPath;
       await mkdir(thumbnailDirectory, { recursive: true });
       const temporaryPath = path.join(thumbnailDirectory, `${cacheKey}-${process.pid}-${Date.now()}.tmp.jpg`);
       try {
-        const duration = await getVideoDuration(inputPath);
+        const duration = await getVideoDuration(inputPath, signal);
         const middle = duration ? Math.max(0.1, duration * 0.5).toFixed(3) : "10";
-        try { await captureFrame(inputPath, temporaryPath, middle); }
+        try { await captureFrame(inputPath, temporaryPath, middle, signal); }
         catch {
-          try { await captureFrame(inputPath, temporaryPath, "5"); }
-          catch { await captureFrame(inputPath, temporaryPath, "1"); }
+          signal?.throwIfAborted();
+          try { await captureFrame(inputPath, temporaryPath, "5", signal); }
+          catch { signal?.throwIfAborted(); await captureFrame(inputPath, temporaryPath, "1", signal); }
         }
+        signal?.throwIfAborted();
         await rename(temporaryPath, targetPath);
         return targetPath;
       } finally {
         await unlink(temporaryPath).catch(() => undefined);
       }
-    });
+    }, signal);
   })().finally(() => inFlight.delete(cacheKey));
 
   inFlight.set(cacheKey, task);
@@ -160,11 +198,12 @@ export function getPdfThumbnail(
   inputPath: string,
   sizeBytes: number,
   modifiedAtMs: number,
+  signal?: AbortSignal,
 ): Promise<string> {
   const cacheKey = `pdf-${id}-${sizeBytes}-${Math.round(modifiedAtMs)}`;
   const targetPath = path.join(thumbnailDirectory, `${cacheKey}.jpg`);
   const pending = inFlight.get(cacheKey);
-  if (pending) return pending;
+  if (pending) return waitForTask(pending, signal);
   const retryAfter = failedPdfUntil.get(cacheKey);
   if (retryAfter && retryAfter > Date.now()) {
     return Promise.reject(new Error("PDF thumbnail rendering is temporarily unavailable."));
@@ -172,21 +211,23 @@ export function getPdfThumbnail(
   failedPdfUntil.delete(cacheKey);
 
   const task = (async () => {
+    signal?.throwIfAborted();
     if (await exists(targetPath)) return targetPath;
     return withWorker(async () => {
       if (await exists(targetPath)) return targetPath;
       await mkdir(thumbnailDirectory, { recursive: true });
       const temporaryPath = path.join(thumbnailDirectory, `${cacheKey}-${process.pid}-${Date.now()}.tmp.jpg`);
       try {
-        await renderPdfInWorker(inputPath, temporaryPath);
+        await renderPdfInWorker(inputPath, temporaryPath, signal);
+        signal?.throwIfAborted();
         await rename(temporaryPath, targetPath);
         return targetPath;
       } finally {
         await unlink(temporaryPath).catch(() => undefined);
       }
-    });
+    }, signal);
   })().catch((error: unknown) => {
-    failedPdfUntil.set(cacheKey, Date.now() + 5 * 60_000);
+    if (!signal?.aborted) failedPdfUntil.set(cacheKey, Date.now() + 5 * 60_000);
     throw error;
   }).finally(() => inFlight.delete(cacheKey));
 

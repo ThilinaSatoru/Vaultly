@@ -1,7 +1,15 @@
 import { build } from "esbuild";
 import { copyFile, rm } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { generateIcons } from "./generate-icons.mjs";
 
-await rm("dist", { recursive: true, force: true });
+const outputDirectory = path.resolve("dist");
+if (path.dirname(outputDirectory) !== path.resolve(fileURLToPath(new URL(".", import.meta.url)))) {
+  throw new Error("Run the desktop build from apps/desktop.");
+}
+await generateIcons();
+await rm(outputDirectory, { recursive: true, force: true });
 
 const shared = {
   bundle: true,
@@ -35,3 +43,5 @@ await copyFile(
   "../api/node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
   "dist/pdf.worker.mjs",
 );
+
+await Promise.all(["icon.png", "icon.ico"].map((filename) => copyFile(`build/${filename}`, `dist/${filename}`)));
