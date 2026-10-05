@@ -31,10 +31,10 @@ test("patterns and inherited source attributes work across scans, queries, edits
       expect(response.statusCode).toBe(200);
       expect(response.json().patterns).toHaveLength(2);
       expect((await app.inject(`/api/attributes/${kind}/${id}/patterns`)).json().patterns).toHaveLength(2);
+      const listed = (await app.inject(`/api/${kind}`)).json().find((entry: { id: number }) => entry.id === id);
+      expect(listed.patterns.map((pattern: string) => pattern.toLowerCase()))
+        .toEqual(expect.arrayContaining([alias.toLowerCase(), `${alias} extra`.toLowerCase()]));
     }
-    // Existing credit establishes the person's role without guessing from their name.
-    const seed = Number(database.prepare("INSERT INTO media_items(source_id, media_type, title, filename, relative_path) VALUES (?, 'video', 'seed', 'seed.mp4', 'seed.mp4')").run(sourceId).lastInsertRowid);
-    database.prepare("INSERT INTO item_people(item_id, person_id, role) VALUES (?, ?, 'artist')").run(seed, person);
     const firstName = `${aliases.tag} - ${aliases.category} - ${aliases.person}.pdf`;
     await writeFile(path.join(root, firstName), "fixture");
     await scanSource(sourceId, root);

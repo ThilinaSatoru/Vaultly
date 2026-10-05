@@ -14,7 +14,9 @@ export function attributeGalleryFields(attribute: BrowseAttribute, mediaType: At
     minMb: "", maxMb: "", modifiedFrom: "", modifiedTo: "", uncategorized: false, untagged: false,
     browseCategory: null, page: 0, sort: "title", advancedOpen: ["cast", "artist", "series", "circle"].includes(attribute.kind),
   };
-  const key = { tag: "selectedTagIds", category: "selectedCategoryIds", cast: "selectedCastIds", artist: "selectedArtistIds", series: "seriesFilter", circle: "circleFilter" }[attribute.kind];
+  const personKind = mediaType === "video" || mediaType === "all" ? "cast" : "artist";
+  const kind = attribute.kind === "cast" || attribute.kind === "artist" ? personKind : attribute.kind;
+  const key = { tag: "selectedTagIds", category: "selectedCategoryIds", cast: "selectedCastIds", artist: "selectedArtistIds", series: "seriesFilter", circle: "circleFilter" }[kind];
   filters[key] = attribute.kind === "series" || attribute.kind === "circle" ? String(attribute.id) : [attribute.id];
   return {
     section: mediaType, libraryView: "browse", search: "", selectedItemId: null, selectedSeriesId: null,

@@ -1,9 +1,12 @@
-import { Maximize, Minimize, Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
+import { LoaderCircle, Maximize, Minimize, Pause, Play, RefreshCw, Volume1, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { matchesShortcut, readNumberPreference } from "./preferences";
+import { useVideoPlayback } from "./useVideoPlayback";
 
 interface VideoPlayerProps {
   src: string;
+  itemId?: number;
+  fileExtension?: string;
   autoPlay: boolean;
   compact?: boolean;
   onEnded?: () => void;
@@ -40,7 +43,10 @@ function formatTime(seconds: number) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }: VideoPlayerProps) {
+export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = false, onEnded, onError }: VideoPlayerProps) {
+  const playback = useVideoPlayback(src, itemId, fileExtension);
+  const resumeTime = useRef(0);
+  const resumePlaying = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
@@ -59,6 +65,14 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
   const [seeking, setSeeking] = useState(false);
   const [seekPreview, setSeekPreview] = useState<number | null>(null);
   const [volumeFeedback, setVolumeFeedback] = useState<number | null>(null);
+
+  const requestCompatiblePlayback = () => {
+    resumeTime.current = videoRef.current?.currentTime ?? 0;
+    resumePlaying.current = playing;
+    videoRef.current?.pause();
+    onError("");
+    playback.fallback();
+  };
 
   const showVolumeFeedback = (value: number) => {
     setVolumeFeedback(Math.round(value * 100));
@@ -103,8 +117,8 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
 
   useEffect(() => {
     const video = videoRef.current;
-    if (autoPlay && video?.paused) void video.play().catch(() => undefined);
-  }, [autoPlay, src]);
+    if (playback.src && (autoPlay || resumePlaying.current) && video?.paused) void video.play().catch(() => undefined);
+  }, [autoPlay, playback.src]);
 
   useEffect(() => {
     const onFsChange = () => setFullscreen(document.fullscreenElement === containerRef.current);
@@ -191,7 +205,7 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.closest("input, textarea, select, [contenteditable]")) return;
+      if (target?.closest("input, textarea, select, [contenteditable], .dialog-backdrop")) return;
       const activatingControl = Boolean(target?.closest("button, a"));
       if (matchesShortcut(event, "video.playPause")) {
         if (activatingControl && (event.code === "Space" || event.code === "Enter")) return;
@@ -252,7 +266,7 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
     >
       <video
         ref={videoRef}
-        src={src}
+        src={playback.src}
         autoPlay={autoPlay}
         preload="auto"
         playsInline
@@ -262,8 +276,30 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
           togglePlay();
           containerRef.current?.focus({ preventScroll: true });
         }}
-        onError={() => onError("Your browser could not play this video format. Try the download link or a browser-supported file such as MP4/WebM.")}
+        onLoadedMetadata={(event) => {
+          // Some browsers play the audio track of an unsupported MP4 while
+          // silently dropping its video, so no media-error event is emitted.
+          if (itemId && !playback.compatible && event.currentTarget.videoWidth === 0) {
+            requestCompatiblePlayback();
+            return;
+          }
+          if (resumeTime.current > 0) {
+            event.currentTarget.currentTime = Math.min(resumeTime.current, event.currentTarget.duration || resumeTime.current);
+            resumeTime.current = 0;
+          }
+        }}
+        onError={() => {
+          if (playback.preparing || playback.error) return;
+          if (itemId && !playback.compatible) {
+            requestCompatiblePlayback();
+          } else onError("This video could not be played. Try downloading the original file.");
+        }}
       />
+
+      {(playback.preparing || playback.error) && <div className="video-preparing" role="status" aria-live="polite">
+        {playback.preparing ? <><LoaderCircle className="spin" size={28} /><strong>{playback.queued ? "Waiting to prepare this video…" : "Preparing this video for playback…"}</strong>{playback.percent > 0 && <span>{playback.percent}%</span>}<small>Larger videos take longer to prepare. The prepared copy is saved for next time.</small></>
+          : <><p>{playback.error}</p><button className="secondary-button" type="button" onClick={playback.retry}>Retry playback</button>{itemId && <a className="secondary-button" href={`/api/items/${itemId}/file`} download>Download original</a>}</>}
+      </div>}
 
       {volumeFeedback !== null && <div className="video-volume-feedback" role="status" aria-live="polite">Volume {volumeFeedback}%</div>}
 
@@ -319,6 +355,7 @@ export function VideoPlayer({ src, autoPlay, compact = false, onEnded, onError }
             />
           </div>
           <div className="video-controls-spacer" />
+          {itemId && !playback.compatible && <button type="button" className="icon-button" title="Use compatibility mode if video or audio does not play correctly" aria-label="Use compatibility mode" onClick={requestCompatiblePlayback}><RefreshCw size={19} /></button>}
           <button type="button" className="icon-button" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}>
             {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
           </button>

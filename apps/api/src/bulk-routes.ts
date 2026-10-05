@@ -4,7 +4,7 @@ import { database } from "./database.js";
 
 const bulkInput = z.object({
   itemIds: z.array(z.number().int().positive()).min(1).max(500),
-  field: z.enum(["tags", "categories", "series", "cast", "artists"]),
+  field: z.enum(["tags", "categories", "series", "people", "cast", "artists"]),
   mode: z.enum(["add", "remove"]),
   valueIds: z.array(z.number().int().positive()).min(1).max(100),
 });
@@ -39,13 +39,13 @@ export async function registerBulkRoutes(app: FastifyInstance) {
           if (input.mode === "add") add.run(seriesId, itemId, seriesId);
           else remove.run(seriesId, itemId);
         }
-      } else if (input.field === "cast" || input.field === "artists") {
-        const role = input.field === "cast" ? "cast" : "artist";
-        const add = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");
-        const remove = database.prepare("DELETE FROM item_people WHERE item_id = ? AND person_id = ? AND role = ?");
+      } else if (input.field === "people" || input.field === "cast" || input.field === "artists") {
+        const add = database.prepare(`INSERT OR IGNORE INTO item_people(item_id, person_id, role)
+          SELECT id, ?, CASE WHEN media_type = 'video' THEN 'cast' ELSE 'artist' END FROM media_items WHERE id = ?`);
+        const remove = database.prepare("DELETE FROM item_people WHERE item_id = ? AND person_id = ?");
         for (const itemId of itemIds) for (const personId of valueIds) {
-          if (input.mode === "add") add.run(itemId, personId, role);
-          else remove.run(itemId, personId, role);
+          if (input.mode === "add") add.run(personId, itemId);
+          else remove.run(itemId, personId);
         }
       } else {
         const table = input.field === "tags" ? "item_tags" : "item_categories";

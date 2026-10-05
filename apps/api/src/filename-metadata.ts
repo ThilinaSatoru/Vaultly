@@ -12,6 +12,31 @@ export function normalizeMetadataFilename(filename: string, extension: string): 
   return normalizeMetadataPhrase(baseName);
 }
 
+/** Explicit metadata values match a whole name or alias, rather than a phrase inside a filename. */
+export class AttributeNameMatcher<T extends NamedEntry> {
+  private readonly names = new Map<string, Map<number, T>>();
+  private readonly patterns = new Map<string, Map<number, T>>();
+
+  constructor(entries: T[]) { for (const entry of entries) this.add(entry); }
+
+  add(entry: T) {
+    for (const [target, values] of [[this.names, [entry.name]], [this.patterns, entry.patterns ?? []]] as const) {
+      for (const value of values) {
+        const key = normalizeMetadataPhrase(value);
+        if (!key) continue;
+        const matches = target.get(key) ?? new Map<number, T>();
+        matches.set(entry.id, entry);
+        target.set(key, matches);
+      }
+    }
+  }
+
+  match(value: string): T[] {
+    const key = normalizeMetadataPhrase(value);
+    return [...(this.names.get(key) ?? this.patterns.get(key) ?? new Map<number, T>()).values()];
+  }
+}
+
 /** Match complete words or phrases, not arbitrary substrings or file extensions. */
 export class FilenameMetadataMatcher<T extends NamedEntry> {
   private readonly byFirstWord = new Map<string, Array<{ entry: T; phrase: string }>>();

@@ -139,7 +139,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
     if (!pdfDocument) return;
     const onKey = (event: KeyboardEvent) => {
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
-      if (targetElement?.closest("input, textarea, select, [contenteditable]")) return;
+      if (targetElement?.closest("input, textarea, select, [contenteditable], .dialog-backdrop")) return;
       const activatingControl = Boolean(targetElement?.closest("button, a"));
       if (matchesShortcut(event, "reader.nextPage")) {
         event.preventDefault();

@@ -24,11 +24,19 @@ describe("attribute gallery destinations", () => {
   });
 
   it.each<[AttributeKind, string, unknown]>([
-    ["category", "selectedCategoryIds", [3]], ["cast", "selectedCastIds", [3]],
+    ["category", "selectedCategoryIds", [3]], ["cast", "selectedArtistIds", [3]],
     ["artist", "selectedArtistIds", [3]], ["series", "seriesFilter", "3"], ["circle", "circleFilter", "3"],
   ])("uses the correct filter for %s badges", (kind, key, value) => {
     const fields = attributeGalleryFields({ kind, id: 3, name: "Example" }, "story");
     expect(fields[`gallery.story.browse.${key}`]).toEqual(value);
     expect(fields["gallery.story.browse.selectedTagIds"]).toEqual([]);
+  });
+
+  it.each(["cast", "artist"] as const)("browses %s as the same person across media types", (kind) => {
+    for (const type of ["video", "comic", "story", "all"] as const) {
+      const fields = attributeGalleryFields({ kind, id: 4, name: "Person" }, type);
+      const key = type === "video" || type === "all" ? "selectedCastIds" : "selectedArtistIds";
+      expect(fields[`gallery.${type}.browse.${key}`]).toEqual([4]);
+    }
   });
 });

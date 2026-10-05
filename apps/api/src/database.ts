@@ -98,6 +98,13 @@ database.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_item_people_role_person ON item_people(role, person_id, item_id);
 
+  -- Preserve legacy credits while deriving their display role from the media type.
+  DROP VIEW IF EXISTS effective_item_people;
+  CREATE VIEW effective_item_people AS
+    SELECT DISTINCT ip.item_id, ip.person_id,
+      CASE WHEN m.media_type = 'video' THEN 'cast' ELSE 'artist' END AS role
+    FROM item_people ip JOIN media_items m ON m.id = ip.item_id;
+
   CREATE TABLE IF NOT EXISTS series (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,

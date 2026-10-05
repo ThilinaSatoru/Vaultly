@@ -1,13 +1,16 @@
-import { itemAssignmentIds, sourceAttributes } from "./attribute-routes.js";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import { itemAssignmentIds, sourceAttributes, withAttributePatterns } from "./attribute-routes.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { opendir, realpath, rename as renamePath, stat } from "node:fs/promises";
+import { lstat, opendir, realpath, rename as renamePath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { database } from "./database.js";
 import { substringFilter } from "./search-index.js";
+import { gallerySearchFilters } from "./gallery-search.js";
+import { getScanProgress } from "./scanner.js";
 import { getPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
+import { cancelVideoPlayback, getVideoPlaybackFile, getVideoPlaybackStatus, prepareVideoPlayback, stopVideoPlaybacks } from "./video-playback.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const pageInput = z.object({
@@ -38,6 +41,7 @@ const listInput = z.object({
   tags: idListInput.optional(),
   cast: idListInput.optional(),
   artists: idListInput.optional(),
+  people: idListInput.optional(),
   favorite: z.enum(["1"]).optional(),
   sort: z.enum(["title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
@@ -46,6 +50,7 @@ const listInput = z.object({
 
 interface MediaPathRow {
   id: number;
+  source_id: number;
   media_type: "comic" | "video" | "story";
   title: string;
   root_path: string;
@@ -60,7 +65,9 @@ const mimeTypes: Record<string, string> = {
   ".mp4": "video/mp4", ".m4v": "video/mp4", ".mkv": "video/x-matroska",
   ".webm": "video/webm", ".avi": "video/x-msvideo", ".mov": "video/quicktime",
   ".wmv": "video/x-ms-wmv", ".flv": "video/x-flv", ".mpeg": "video/mpeg",
-  ".mpg": "video/mpeg", ".pdf": "application/pdf", ".jpg": "image/jpeg",
+  ".mpg": "video/mpeg", ".ts": "video/mp2t", ".pdf": "application/pdf", ".jpg": "image/jpeg",
+  ".mts": "video/mp2t", ".m2ts": "video/mp2t", ".vob": "video/mpeg", ".ogv": "video/ogg",
+  ".3gp": "video/3gpp", ".3g2": "video/3gpp2", ".asf": "video/x-ms-asf", ".mxf": "application/mxf",
   ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
   ".gif": "image/gif", ".avif": "image/avif", ".cbz": "application/zip",
   ".zip": "application/zip",
@@ -68,7 +75,7 @@ const mimeTypes: Record<string, string> = {
 
 function mediaRow(id: number): MediaPathRow | undefined {
   return database.prepare(`
-    SELECT m.id, m.media_type, m.title, m.relative_path, m.file_count,
+    SELECT m.id, m.source_id, m.media_type, m.title, m.relative_path, m.file_count,
       m.size_bytes, m.modified_at_ms, s.root_path
     FROM media_items m JOIN sources s ON s.id = m.source_id
     WHERE m.id = ? AND m.available = 1
@@ -87,17 +94,13 @@ async function resolveItemPath(item: MediaPathRow): Promise<string> {
   return file;
 }
 
-function titleFromFileName(fileName: string): string {
-  return path.basename(fileName, path.extname(fileName)).replace(/[._]+/g, " ").trim();
-}
-
 function invalidFileNameMessage(fileName: string): string | null {
   if (fileName === "." || fileName === ".." || /[\\/\0]/.test(fileName)) {
     return "Enter a file or folder name, not a path.";
   }
   if (process.platform === "win32") {
-    if (/[<>:"|?*]/.test(fileName) || /[ .]$/.test(fileName)) return "That name contains characters Windows does not allow.";
-    const stem = path.basename(fileName, path.extname(fileName)).toUpperCase();
+    if (/[<>:"|?*\x00-\x1f]/.test(fileName) || /[ .]$/.test(fileName)) return "That name contains characters Windows does not allow.";
+    const stem = fileName.split(".", 1)[0].toUpperCase();
     if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem)) return "That name is reserved by Windows.";
   }
   return null;
@@ -120,6 +123,7 @@ async function sendLocalFile(
   reply: FastifyReply,
   filePath: string,
   rangeHeader: string | undefined,
+  cacheControl = "private, max-age=3600",
 ) {
   const fileStat = await stat(filePath);
   if (!fileStat.isFile()) return reply.code(400).send({ message: "This item is a folder, not a file." });
@@ -127,7 +131,7 @@ async function sendLocalFile(
   const mimeType = mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream";
   reply.header("Content-Type", mimeType);
   reply.header("Accept-Ranges", "bytes");
-  reply.header("Cache-Control", "private, max-age=3600");
+  reply.header("Cache-Control", cacheControl);
   reply.header("Content-Disposition", "inline");
 
   if (rangeHeader) {
@@ -209,7 +213,7 @@ function creditsByItem(itemIds: number[]) {
   const result = new Map<number, { cast: Array<{ id: number; name: string }>; artists: Array<{ id: number; name: string }> }>();
   if (!itemIds.length) return result;
   const rows = database.prepare(`
-    SELECT ip.item_id, ip.role, p.id, p.name FROM item_people ip JOIN people p ON p.id = ip.person_id
+    SELECT ip.item_id, ip.role, p.id, p.name FROM effective_item_people ip JOIN people p ON p.id = ip.person_id
     WHERE ip.item_id IN (${itemIds.map(() => "?").join(",")}) ORDER BY p.name COLLATE NOCASE
   `).all(...itemIds) as unknown as Array<{ item_id: number; role: "cast" | "artist"; id: number; name: string }>;
   for (const row of rows) {
@@ -224,6 +228,7 @@ export async function registerMediaRoutes(
   app: FastifyInstance,
   options: { revealPath?: (itemPath: string) => Promise<void> } = {},
 ) {
+  app.addHook("onClose", async () => { await stopVideoPlaybacks(); });
   app.get("/api/items/formats", async (request) => {
     const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
     return database.prepare(`
@@ -302,8 +307,7 @@ export async function registerMediaRoutes(
       values.push(categoryId);
     }
     if (input.q) {
-      for (const token of input.q.split(/\s+/).filter(Boolean)) {
-        const filter = substringFilter(token, ["title", "relative_path"]);
+      for (const filter of gallerySearchFilters(input.q)) {
         indexedSearch ||= filter.indexed;
         conditions.push(filter.sql);
         values.push(...filter.values);
@@ -313,12 +317,16 @@ export async function registerMediaRoutes(
       conditions.push("EXISTS (SELECT 1 FROM effective_item_tags it WHERE it.item_id = m.id AND it.tag_id = ?)");
       values.push(tagId);
     }
+    for (const personId of new Set(input.people?.split(",").map(Number) ?? [])) {
+      conditions.push("EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = m.id AND ip.person_id = ?)");
+      values.push(personId);
+    }
     for (const personId of new Set(input.cast?.split(",").map(Number) ?? [])) {
-      conditions.push("EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = m.id AND ip.role = 'cast' AND ip.person_id = ?)");
+      conditions.push("EXISTS (SELECT 1 FROM effective_item_people ip WHERE ip.item_id = m.id AND ip.role = 'cast' AND ip.person_id = ?)");
       values.push(personId);
     }
     for (const personId of new Set(input.artists?.split(",").map(Number) ?? [])) {
-      conditions.push("EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = m.id AND ip.role = 'artist' AND ip.person_id = ?)");
+      conditions.push("EXISTS (SELECT 1 FROM effective_item_people ip WHERE ip.item_id = m.id AND ip.role = 'artist' AND ip.person_id = ?)");
       values.push(personId);
     }
 
@@ -360,9 +368,9 @@ export async function registerMediaRoutes(
             WHERE candidate.item_id = m.id AND candidate.category_id IN (SELECT category_id FROM effective_item_categories WHERE item_id = target.id))
           + 4 * (SELECT COUNT(*) FROM effective_item_tags candidate
             WHERE candidate.item_id = m.id AND candidate.tag_id IN (SELECT tag_id FROM effective_item_tags WHERE item_id = target.id))
-          + 3 * (SELECT COUNT(*) FROM item_people candidate
+          + 3 * (SELECT COUNT(*) FROM effective_item_people candidate
             WHERE candidate.item_id = m.id AND (candidate.person_id, candidate.role) IN
-              (SELECT person_id, role FROM item_people WHERE item_id = target.id))) AS similarity_score
+              (SELECT person_id, role FROM effective_item_people WHERE item_id = target.id))) AS similarity_score
       FROM media_items m
       JOIN sources s ON s.id = m.source_id
       JOIN media_items target ON target.id = ?
@@ -385,22 +393,15 @@ export async function registerMediaRoutes(
     return { ...item, source_attributes: sourceAttributes(Number(item.source_id)), series_ids: seriesIds, categories, category_ids: categoryIds, tags, cast: credits?.cast ?? [], artists: credits?.artists ?? [] };
   });
 
-  app.patch("/api/items/:id", async (request, reply) => {
+  const renameItem = async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = idInput.parse(request.params);
-    const { title } = z.object({ title: z.string().trim().min(1).max(300) }).parse(request.body);
-    const result = database.prepare("UPDATE media_items SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(title, id);
-    if (!result.changes) return reply.code(404).send({ message: "Media item not found." });
-    return { id, title };
-  });
-
-  app.post("/api/items/:id/rename", async (request, reply) => {
-    const { id } = idInput.parse(request.params);
-    const { fileName } = z.object({ fileName: z.string().trim().min(1).max(255) }).parse(request.body);
-    const invalidMessage = invalidFileNameMessage(fileName);
-    if (invalidMessage) return reply.code(400).send({ message: invalidMessage });
+    const { title } = z.object({ title: z.string().trim().min(1).max(255) }).parse(request.body);
 
     const item = mediaRow(id);
     if (!item) return reply.code(404).send({ message: "Media item not found." });
+    if (getScanProgress(item.source_id)) {
+      return reply.code(409).send({ message: "Wait for this source's scan to finish before renaming media." });
+    }
     if (item.relative_path === ".") {
       return reply.code(400).send({ message: "The library root folder cannot be renamed here. Rename the source instead." });
     }
@@ -409,22 +410,20 @@ export async function registerMediaRoutes(
     const currentPath = await resolveItemPath(item);
     const currentStat = await stat(currentPath);
     const currentName = path.basename(currentPath);
-    if (fileName === currentName) {
-      return { id, title: item.title, filename: currentName, file_extension: path.extname(currentName).slice(1).toLowerCase(), relative_path: item.relative_path };
-    }
-
-    const currentExtension = path.extname(currentName).toLowerCase();
-    const nextExtension = path.extname(fileName).toLowerCase();
-    if (!currentStat.isDirectory() && nextExtension !== currentExtension) {
-      return reply.code(400).send({ message: `Keep the existing ${currentExtension || "file"} extension when renaming this item.` });
+    const extension = currentStat.isDirectory() ? "" : path.extname(currentName);
+    const fileName = `${title}${extension}`;
+    const invalidMessage = invalidFileNameMessage(fileName);
+    if (invalidMessage) return reply.code(400).send({ message: invalidMessage });
+    if (fileName.length > 255 || (Buffer.byteLength(fileName) > 255 && process.platform !== "win32")) {
+      return reply.code(400).send({ message: "The title is too long for this file or folder name." });
     }
 
     const nextPath = path.join(path.dirname(currentPath), fileName);
     if (!withinRoot(root, nextPath)) return reply.code(400).send({ message: "The renamed item must stay inside its library source." });
     const sameWindowsPath = process.platform === "win32" && currentPath.toLocaleLowerCase() === nextPath.toLocaleLowerCase();
-    if (!sameWindowsPath) {
+    if (fileName !== currentName && !sameWindowsPath) {
       try {
-        await stat(nextPath);
+        await lstat(nextPath);
         return reply.code(409).send({ message: "A file or folder with that name already exists." });
       } catch (error) {
         if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
@@ -432,26 +431,39 @@ export async function registerMediaRoutes(
     }
 
     const relativePath = path.relative(root, nextPath);
-    const oldDefaultTitle = currentStat.isDirectory() ? currentName : titleFromFileName(currentName);
-    const nextDefaultTitle = currentStat.isDirectory() ? fileName : titleFromFileName(fileName);
-    const nextTitle = item.title === oldDefaultTitle ? nextDefaultTitle : item.title;
-
-    await renamePath(currentPath, nextPath);
+    const changedPath = fileName !== currentName;
+    // Resolve stored paths rather than following symlinks when updating children.
+    const oldStoredPath = path.resolve(root, item.relative_path);
+    const descendants = currentStat.isDirectory()
+      ? (database.prepare("SELECT id, relative_path FROM media_items WHERE source_id = ? AND id <> ?").all(item.source_id, id) as Array<{ id: number; relative_path: string }>)
+        .map((child) => ({ ...child, suffix: path.relative(oldStoredPath, path.resolve(root, child.relative_path)) }))
+        .filter((child) => child.suffix !== "" && withinRoot(oldStoredPath, path.resolve(root, child.relative_path)))
+      : [];
+    if (changedPath) await renamePath(currentPath, nextPath);
     try {
-      database.prepare(`
-        UPDATE media_items SET title = ?, filename = ?, file_extension = ?, relative_path = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND available = 1
-      `).run(nextTitle, fileName, currentStat.isDirectory() ? "" : nextExtension.slice(1), relativePath, id);
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const result = database.prepare(`
+          UPDATE media_items SET title = ?, filename = ?, file_extension = ?, relative_path = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND available = 1 AND relative_path = ?
+        `).run(title, fileName, extension.slice(1).toLowerCase(), relativePath, id, item.relative_path);
+        if (!result.changes) throw new Error("The media item changed while renaming. Please reload and try again.");
+        const updateChild = database.prepare("UPDATE media_items SET relative_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND relative_path = ?");
+        for (const child of descendants) updateChild.run(path.join(relativePath, child.suffix), child.id, child.relative_path);
+        database.exec("COMMIT");
+      } catch (error) { database.exec("ROLLBACK"); throw error; }
     } catch (error) {
-      await renamePath(nextPath, currentPath).catch(() => undefined);
+      if (changedPath) await renamePath(nextPath, currentPath);
       if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
         return reply.code(409).send({ message: "That renamed path is already indexed." });
       }
       throw error;
     }
 
-    return { id, title: nextTitle, filename: fileName, file_extension: currentStat.isDirectory() ? "" : nextExtension.slice(1), relative_path: relativePath };
-  });
+    return { id, title, filename: fileName, file_extension: extension.slice(1).toLowerCase(), relative_path: relativePath };
+  };
+  app.patch("/api/items/:id", renameItem);
+  app.post("/api/items/:id/rename", renameItem);
 
   app.put("/api/items/:id/favorite", async (request, reply) => {
     const { id } = idInput.parse(request.params);
@@ -468,6 +480,42 @@ export async function registerMediaRoutes(
     if (!item) return reply.code(404).send({ message: "Media item not found." });
     const filePath = await resolveItemPath(item);
     return sendLocalFile(reply, filePath, request.headers.range);
+  });
+
+  const playbackInput = async (request: FastifyRequest) => {
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return null;
+    const inputPath = await resolveItemPath(item);
+    const fileStat = await stat(inputPath);
+    return { id, inputPath, sizeBytes: fileStat.size, modifiedAtMs: fileStat.mtimeMs };
+  };
+  app.post("/api/items/:id/playback", async (request, reply) => {
+    const input = await playbackInput(request);
+    if (!input) return reply.code(404).send({ message: "Video not found." });
+    const { retry, session } = z.object({ retry: z.boolean().default(false), session: z.string().uuid().optional() }).parse(request.body ?? {});
+    const status = await prepareVideoPlayback(input, retry, session);
+    return reply.code(status.state === "queued" || status.state === "preparing" ? 202 : 200)
+      .header("Cache-Control", "no-store").send(status);
+  });
+  app.get("/api/items/:id/playback", async (request, reply) => {
+    const input = await playbackInput(request);
+    if (!input) return reply.code(404).send({ message: "Video not found." });
+    return reply.header("Cache-Control", "no-store").send(await getVideoPlaybackStatus(input));
+  });
+  app.delete("/api/items/:id/playback", async (request, reply) => {
+    const input = await playbackInput(request);
+    if (!input) return reply.code(404).send({ message: "Video not found." });
+    const { session } = z.object({ session: z.string().uuid().optional() }).parse(request.body ?? {});
+    await cancelVideoPlayback(input, session);
+    return reply.code(204).send();
+  });
+  app.get("/api/items/:id/playback/file", async (request, reply) => {
+    const input = await playbackInput(request);
+    if (!input) return reply.code(404).send({ message: "Video not found." });
+    const filePath = await getVideoPlaybackFile(input);
+    if (!filePath) return reply.code(409).send({ message: "Video is still being prepared for playback." });
+    return sendLocalFile(reply, filePath, request.headers.range, "private, no-cache");
   });
 
   app.post("/api/items/:id/reveal", async (request, reply) => {
@@ -556,13 +604,13 @@ export async function registerMediaRoutes(
   });
 
   app.get("/api/categories", async () => {
-    return database.prepare(`
+    return withAttributePatterns("categories", database.prepare(`
       SELECT c.id, c.name, COUNT(m.id) AS item_count
       FROM categories c
       LEFT JOIN effective_item_categories ic ON ic.category_id = c.id
       LEFT JOIN media_items m ON m.id = ic.item_id AND m.available = 1
       GROUP BY c.id ORDER BY c.name COLLATE NOCASE
-    `).all();
+    `).all() as Array<{ id: number; name: string; item_count: number }>);
   });
 
   app.get("/api/categories/overview", async (request) => {
@@ -585,13 +633,13 @@ export async function registerMediaRoutes(
   });
 
   app.get("/api/tags", async () => {
-    return database.prepare(`
+    return withAttributePatterns("tags", database.prepare(`
       SELECT t.id, t.name, COUNT(m.id) AS item_count
       FROM tags t
       LEFT JOIN effective_item_tags it ON it.tag_id = t.id
       LEFT JOIN media_items m ON m.id = it.item_id AND m.available = 1
       GROUP BY t.id ORDER BY t.name COLLATE NOCASE
-    `).all();
+    `).all() as Array<{ id: number; name: string; item_count: number }>);
   });
 
   app.post("/api/tags", async (request, reply) => {

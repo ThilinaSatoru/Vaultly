@@ -41,12 +41,14 @@ export interface Category {
   id: number;
   name: string;
   item_count: number;
+  patterns?: string[];
 }
 
 export interface Tag {
   id: number;
   name: string;
   item_count?: number;
+  patterns?: string[];
 }
 
 export interface Person {
@@ -54,6 +56,7 @@ export interface Person {
   name: string;
   cast_count?: number;
   artist_count?: number;
+  patterns?: string[];
 }
 
 export interface ItemPage {

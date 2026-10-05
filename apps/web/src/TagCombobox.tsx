@@ -1,9 +1,11 @@
-import { Check, Plus, Search, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Check, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Tag } from "./media";
 import { AttributeBadge } from "./AttributeBadge";
 import type { AttributeKind } from "./attribute-navigation";
+import { matchesAttribute } from "./attribute-search";
+import { AttributeManagerContext } from "./attribute-manager";
 
 interface TagComboboxProps {
   label: string;
@@ -17,6 +19,8 @@ interface TagComboboxProps {
 }
 
 export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disabled, attributeKind, placeholder = "Search tags" }: TagComboboxProps) {
+  const manager = useContext(AttributeManagerContext);
+  const managerKind = attributeKind === "tag" ? "tags" : attributeKind === "category" ? "categories" : attributeKind === "cast" || attributeKind === "artist" ? "people" : null;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
@@ -27,7 +31,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useRef(`tag-list-${Math.random().toString(36).slice(2)}`).current;
   const selected = tags.filter((tag) => selectedIds.includes(tag.id));
-  const filtered = tags.filter((tag) => tag.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const filtered = tags.filter((tag) => matchesAttribute(tag, query));
   const canCreate = Boolean(onCreate && query.trim() && !tags.some((tag) => tag.name.toLocaleLowerCase() === query.trim().toLocaleLowerCase()));
 
   useEffect(() => {
@@ -86,7 +90,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
 
   return (
     <div className="tag-combobox" ref={rootRef}>
-      <span className="tag-combobox-label">{label}</span>
+      <div className="tag-combobox-heading"><span className="tag-combobox-label">{label}</span>{manager && managerKind && <button type="button" className="attribute-manage-link" disabled={disabled} aria-label={`Manage ${managerKind === "people" ? "cast and artists" : managerKind}`} onClick={() => { setOpen(false); manager.open(managerKind); }}><SlidersHorizontal size={13} /> Manage</button>}</div>
       <div className={`tag-combobox-control${open ? " is-open" : ""}`} onClick={() => { if (!disabled) inputRef.current?.focus(); }}>
         {selected.map((tag) => (
           <span className="tag-badge-selected" key={tag.id}>

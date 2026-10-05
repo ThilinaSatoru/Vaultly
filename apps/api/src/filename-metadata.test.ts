@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { FilenameMetadataMatcher } from "./filename-metadata.js";
+import { AttributeNameMatcher, FilenameMetadataMatcher } from "./filename-metadata.js";
 
 test("matches complete metadata names in filenames without using the extension", () => {
   const matcher = new FilenameMetadataMatcher([
@@ -26,4 +26,19 @@ test("matches optional synonyms to the canonical entry once, using complete phra
   expect(matcher.match("SF - Sci_Fi - Science Fiction - J Doe.pdf", "pdf")).toEqual([entry, { id: 2, name: "Jane Doe", patterns: ["J. Doe"] }]);
   expect(matcher.match("SFish - Scifi - Jane.pdf", "pdf")).toEqual([]);
   expect(matcher.match("unrelated.sf", "sf")).toEqual([]);
+});
+
+test("explicit metadata matches complete names and aliases, preserving qualifiers and preferring names", () => {
+  const male = { id: 1, name: "Muscle (male)", patterns: ["male muscles"] };
+  const female = { id: 2, name: "Muscle (female)", patterns: ["female muscles", "male muscles"] };
+  const canonical = { id: 3, name: "male muscles" };
+  const matcher = new AttributeNameMatcher([male, female, canonical, { id: 4, name: "Muscle" }, { id: 5, name: "José", patterns: ["J"] }]);
+  expect(matcher.match("MUSCLE (MALE)")).toEqual([male]);
+  expect(matcher.match("female muscles")).toEqual([female]);
+  expect(matcher.match("male muscles")).toEqual([canonical]);
+  expect(matcher.match("muscle (other)")).toEqual([]);
+  expect(matcher.match("j").map((entry) => entry.id)).toEqual([5]);
+  expect(matcher.match("Jose").map((entry) => entry.id)).toEqual([5]);
+  matcher.add({ id: 6, name: "Zoë" });
+  expect(matcher.match("ZOË").map((entry) => entry.id)).toEqual([6]);
 });

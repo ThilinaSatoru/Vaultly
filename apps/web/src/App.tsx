@@ -1,5 +1,7 @@
 import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
 import { AttributeBadge, AttributeBrowseProvider } from "./AttributeBadge";
+import { AttributeManagerDialog } from "./AttributeManagerDialog";
+import { AttributeManagerContext, type AttributeManagerKind } from "./attribute-manager";
 import { NavigationContext, useNavigation, useNavigationField } from "./navigation";
 import type { GalleryVideoContext } from "./video-playlist";
 import {
@@ -33,14 +35,11 @@ import {
   X,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CategoriesView } from "./CategoriesView";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
-import { PeopleView } from "./PeopleView";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
 import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
-import { TagsView } from "./TagsView";
 import { api, formatCount, type Category, type MediaItem, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
 
 type SourceStatus = "idle" | "scanning" | "ready" | "error";
@@ -172,7 +171,7 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
 
           <div className="mixed-note">
             <Grid2X2 size={18} />
-            <div><strong>Mixed media is supported</strong><span>Nested folders are scanned. Existing category, tag, and known cast/artist names in filenames are added automatically.</span></div>
+            <div><strong>Mixed media is supported</strong><span>Nested folders are scanned. Existing category, tag, and cast/artist names in filenames are added automatically.</span></div>
           </div>
 
           {error && <p className="form-error" role="alert">{error}</p>}
@@ -384,6 +383,13 @@ function LibraryApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
+  const [showAttributeManager, setShowAttributeManager] = useState(false);
+  const [attributeManagerKind, setAttributeManagerKind] = useState<AttributeManagerKind>("tags");
+  const [attributeRevision, setAttributeRevision] = useState(0);
+  const openAttributeManager = useCallback((kind: AttributeManagerKind) => {
+    setAttributeManagerKind(kind);
+    setShowAttributeManager(true);
+  }, []);
   const [selectedItemId] = useNavigationField<number | null>("selectedItemId", null);
   const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
   const [viewerFloating, setViewerFloating] = useNavigationField("viewerFloating", false);
@@ -446,6 +452,14 @@ function LibraryApp() {
   useEffect(() => { void loadTags(); }, [loadTags]);
   useEffect(() => { void loadPeople(); }, [loadPeople]);
 
+  // Older history entries may still point to the former standalone management pages.
+  useEffect(() => {
+    if (section === "tags" || section === "categories" || section === "people") {
+      openAttributeManager(section);
+      navigation.update({ section: "home" }, "Home");
+    }
+  }, [section, openAttributeManager]);
+
   const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
   const scanningSourceKey = useMemo(() => sources.filter((source) => source.status === "scanning").map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
   const availableSourceKey = useMemo(() => sources.filter((source) => source.path_available).map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
@@ -491,7 +505,7 @@ function LibraryApp() {
 
   const attributeOptions: SourceAttributeOptions = { tags, categories, onTagCreated: createTag, onCategoryCreated: createCategory };
   const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
-  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics", video: "Videos", story: "Stories", categories: "Categories", tags: "Tags", people: "People", sources: "Sources", settings: "Settings" };
+  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics", video: "Videos", story: "Stories", categories: "Categories", tags: "Tags", people: "Cast & artists", sources: "Sources", settings: "Settings" };
   const selectSection = (nextSection: Section) => {
     navigation.reset({ section: nextSection, libraryView: "browse", search: "" }, sectionNames[nextSection]);
   };
@@ -500,6 +514,10 @@ function LibraryApp() {
   };
   const openSeries = (id: number) => navigation.push({ selectedSeriesId: id, "SeriesView.selectedId": id, "SeriesView.entityView": "sets", selectedItemId: null, viewerSeriesContext: null, viewerFloating: false, libraryView: "series" }, "Collection");
   const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
+  const attributesChanged = () => {
+    refreshMedia();
+    setAttributeRevision((value) => value + 1);
+  };
   const openItem = (id: number, context: SeriesViewerContext | null = null, gallery: GalleryVideoContext | null = null) => {
     navigation.push({ selectedItemId: id, viewerSeriesContext: context, viewerGalleryContext: gallery, viewerFloating: false }, gallery?.videos.find((item) => item.id === id)?.title ?? context?.items.find((item) => item.id === id)?.title ?? `File ${id}`);
   };
@@ -539,7 +557,7 @@ function LibraryApp() {
   };
 
   return (
-    <AttributeBrowseProvider onNavigate={() => setShowAddSource(false)}><div className="app-shell">
+    <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: showAttributeManager }}><AttributeBrowseProvider onNavigate={() => setShowAddSource(false)}><div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
         <nav aria-label="Main navigation">
@@ -549,9 +567,9 @@ function LibraryApp() {
           <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
           <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="Stories" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
           <p>Manage</p>
-          <button className={section === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("categories")}><Folder size={19} /> Categories</button>
-          <button className={section === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("tags")}><TagIcon size={19} /> Tags</button>
-          <button className={section === "people" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("people")}><Users size={19} /> People</button>
+          <button className={showAttributeManager && attributeManagerKind === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => openAttributeManager("categories")}><Folder size={19} /> Categories</button>
+          <button className={showAttributeManager && attributeManagerKind === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => openAttributeManager("tags")}><TagIcon size={19} /> Tags</button>
+          <button className={showAttributeManager && attributeManagerKind === "people" ? "nav-active" : "nav-link"} type="button" onClick={() => openAttributeManager("people")}><Users size={19} /> Cast & artists</button>
           <button className={section === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("sources")}><HardDrive size={19} /> Sources</button>
           <button className={section === "settings" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("settings")}><Settings size={19} /> Settings</button>
         </nav>
@@ -580,7 +598,7 @@ function LibraryApp() {
             <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={() => { selectSection("sources"); setShowAddSource(true); }} />
           ) : section === "sources" ? <>
           <div className="page-heading">
-            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Scans detect media and add missing metadata when existing category, tag, or known cast/artist names appear in filenames. Existing sources only rescan when you choose to; opening the app does not rescan them.</p></div>
+            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Each scan includes the source folder and all its subfolders. Scans detect media and add missing metadata when existing category, tag, or cast/artist names appear in filenames. Existing sources only rescan when you choose to; opening the app does not rescan them.</p></div>
             <div className="page-heading-actions">{isScanning
               ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
               : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
@@ -610,13 +628,8 @@ function LibraryApp() {
           )}
           </> : section === "settings" ? (
             <SettingsView />
-          ) : section === "categories" ? (
-            <CategoriesView categories={categories} onChanged={() => { void loadCategories(); setRefreshKey((value) => value + 1); }} />
-          ) : section === "tags" ? (
-            <TagsView tags={tags} onChanged={() => { void loadTags(); setRefreshKey((value) => value + 1); }} />
-          ) : section === "people" ? (
-            <PeopleView people={people} onChanged={() => { void loadPeople(); setRefreshKey((value) => value + 1); }} />
-          ) : libraryView === "series" || libraryView === "circles" ? (
+          ) : section === "categories" || section === "tags" || section === "people" ? null
+          : libraryView === "series" || libraryView === "circles" ? (
             <SeriesView key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}-${selectedSeriesId ?? "list"}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
           ) : (
             <GalleryView
@@ -644,7 +657,8 @@ function LibraryApp() {
       </main>
 
       {showAddSource && <AddSourceDialog {...attributeOptions} onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
-      {selectedItemId !== null && <MediaViewer itemId={selectedItemId} seriesContext={viewerSeriesContext} galleryContext={viewerGalleryContext} onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, temporaryPlaylist.find((item) => item.id === id)?.title ?? `File ${id}`)} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={openSeries} onClose={closeViewer} onChanged={refreshMedia} />}
-    </div></AttributeBrowseProvider>
+      {selectedItemId !== null && <MediaViewer attributeRevision={attributeRevision} itemId={selectedItemId} seriesContext={viewerSeriesContext} galleryContext={viewerGalleryContext} onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, temporaryPlaylist.find((item) => item.id === id)?.title ?? `File ${id}`)} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={openSeries} onClose={closeViewer} onChanged={refreshMedia} />}
+      <AttributeManagerDialog open={showAttributeManager} kind={attributeManagerKind} onKindChange={setAttributeManagerKind} onClose={() => setShowAttributeManager(false)} tags={tags} categories={categories} people={people} onChanged={attributesChanged} />
+    </div></AttributeBrowseProvider></AttributeManagerContext.Provider>
   );
 }

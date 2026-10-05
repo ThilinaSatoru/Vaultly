@@ -1,6 +1,8 @@
-import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, Trash2, X, ZoomIn } from "lucide-react";
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
+import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AttributeManagerContext } from "./attribute-manager";
 import { TagCombobox } from "./TagCombobox";
+import { RenameMediaDialog } from "./RenameMediaDialog";
 import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { VideoPlayer } from "./VideoPlayer";
 import { api, formatDuration, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type SimilarVideo, type Tag } from "./media";
@@ -40,9 +42,12 @@ interface MediaViewerProps {
   onOpenSeries: (id: number) => void;
   onClose: () => void;
   onChanged: () => void;
+  attributeRevision?: number;
 }
 
-export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, floating, onToggleFloating, onRemoveFromPlaylist, onClearPlaylist, onNavigateItem, onNavigatePlaylistItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged }: MediaViewerProps) {
+export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, floating, onToggleFloating, onRemoveFromPlaylist, onClearPlaylist, onNavigateItem, onNavigatePlaylistItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged, attributeRevision = 0 }: MediaViewerProps) {
+  const manager = useContext(AttributeManagerContext);
+  const previousAttributeRevision = useRef(attributeRevision);
   const viewerRef = useRef<HTMLElement>(null);
   const comicScrollRef = useRef<HTMLDivElement>(null);
   const comicStageRef = useRef<HTMLDivElement>(null);
@@ -55,6 +60,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [comicFullscreen, setComicFullscreen] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showRename, setShowRename] = useState(false);
   const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [seriesIds, setSeriesIds] = useState<number[]>([]);
   const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => window.localStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
@@ -86,7 +92,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     const focusViewer = () => viewerRef.current?.focus({ preventScroll: true });
     const frame = window.requestAnimationFrame(focusViewer);
     const keepFocusInside = (event: FocusEvent) => {
-      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu")) return;
+      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .dialog-backdrop")) return;
       if (viewerRef.current && event.target instanceof Node && !viewerRef.current.contains(event.target)) focusViewer();
     };
     document.addEventListener("focusin", keepFocusInside);
@@ -105,6 +111,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   useEffect(() => {
     let active = true;
     setItem(null);
+    setShowRename(false);
     setPages([]);
     setArchive(false);
     setPage(0);
@@ -140,6 +147,17 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load series and sets."); });
     return () => { active = false; };
   }, [itemId, galleryContext]);
+
+  // Refresh assignments and renamed attributes without replacing the mounted reader/player.
+  useEffect(() => {
+    if (previousAttributeRevision.current === attributeRevision) return;
+    previousAttributeRevision.current = attributeRevision;
+    const controller = new AbortController();
+    api<MediaDetail>(`/api/items/${itemId}`, { signal: controller.signal })
+      .then((detail) => { if (!controller.signal.aborted) setItem((current) => current?.id === itemId ? detail : current); })
+      .catch((requestError) => { if (!controller.signal.aborted) setError(requestError instanceof Error ? requestError.message : "Could not refresh attributes."); });
+    return () => controller.abort();
+  }, [attributeRevision, itemId]);
 
   const changeComicZoom = (delta: number) => {
     setComicZoom((value) => Math.max(25, Math.min(400, value + delta)));
@@ -181,6 +199,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (manager?.isOpen) return;
       if (event.key === "Tab" && viewerRef.current) {
         const focusable = Array.from(viewerRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"));
         if (!focusable.length) { event.preventDefault(); viewerRef.current.focus(); return; }
@@ -223,44 +242,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [item, page, pages.length, navigationItems, previousItem, nextItem, onClose, onNavigateItem]);
-
-  const rename = async () => {
-    if (!item) return;
-    const title = window.prompt("Item title", item.title)?.trim();
-    if (!title || title === item.title) return;
-    setSaving(true);
-    setError("");
-    try {
-      await api(`/api/items/${item.id}`, { method: "PATCH", body: JSON.stringify({ title }) });
-      setItem({ ...item, title });
-      onChanged();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not rename item.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const renameFile = async () => {
-    if (!item) return;
-    const fileName = window.prompt(item.file_extension ? "File name (keep the extension)" : "Folder name", item.filename)?.trim();
-    if (!fileName || fileName === item.filename) return;
-    setSaving(true);
-    setError("");
-    try {
-      const renamed = await api<Pick<MediaDetail, "title" | "filename" | "file_extension" | "relative_path">>(`/api/items/${item.id}/rename`, {
-        method: "POST",
-        body: JSON.stringify({ fileName }),
-      });
-      setItem((current) => current ? { ...current, ...renamed } : current);
-      onChanged();
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not rename the file.");
-    } finally {
-      setSaving(false);
-    }
-  };
+  }, [item, page, pages.length, navigationItems, previousItem, nextItem, onClose, onNavigateItem, manager?.isOpen]);
 
   const toggleFavorite = async () => {
     if (!item) return;
@@ -354,6 +336,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
         <header className="viewer-header">
           <div className="viewer-title"><strong>{item?.title || "Opening media…"}</strong><span>{galleryContext && seriesIndex >= 0 ? `Gallery page ${galleryContext.page + 1} · ${seriesIndex + 1} / ${galleryContext.videos.length}` : playlistIndex >= 0 ? `Temporary playlist · ${playlistIndex + 1} / ${playlist.length}` : seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
           <div className="viewer-header-actions">
+            {manager && <button type="button" onClick={() => manager.open("tags")} title="Manage attributes without leaving this media" aria-label="Manage attributes"><SlidersHorizontal size={17} /><span className="viewer-manage-label">Attributes</span></button>}
             {item && <button className={item.favorite ? "is-favorite" : ""} type="button" onClick={() => void toggleFavorite()} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} title={item.favorite ? "Remove from favorites" : "Add to favorites"}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>}
             {navigationItems && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file"><ChevronLeft size={17} /> Previous</button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file">Next <ChevronRight size={17} /></button></>}
             {item?.media_type === "video" && <button type="button" onClick={onToggleFloating} title={floating ? "Return to full player" : "Keep playing while browsing"}>{floating ? <Maximize2 size={17} /> : <PictureInPicture2 size={17} />}{floating ? "Full view" : "Float"}</button>}
@@ -365,7 +348,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {!item && !error && <div className="viewer-loading"><LoaderCircle className="spin" size={30} /> Loading…</div>}
           {item?.media_type === "video" && (
             <div className="video-stage">
-              <VideoPlayer key={item.id} src={`/api/items/${item.id}/file`} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
+              <VideoPlayer key={item.id} itemId={item.id} fileExtension={item.file_extension} src={`/api/items/${item.id}/file`} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
           {item?.media_type === "story" && (
@@ -429,8 +412,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
               {item.media_type === "video" && <p className="detail-hint">Arrow keys seek 5 seconds by default. Shift + Arrow seeks 1 minute. Mouse wheel changes volume by 5%; all shortcuts and seek durations can be changed in Settings.</p>}
               {(item.media_type === "story" || item.media_type === "comic") && <p className="detail-hint">Page, scroll, zoom, and fit shortcuts can be assigned in Settings.</p>}
               {seriesContext && <p className="detail-hint">Alt + ←/→ moves to the previous or next file in this set.</p>}
-              <button className="secondary-button" type="button" onClick={rename} disabled={saving}><Pencil size={16} /> Edit title</button>
-              <button className="secondary-button" type="button" onClick={() => void renameFile()} disabled={saving}><Pencil size={16} /> Rename {item.file_extension ? "file" : "folder"}</button>
+              <button className="secondary-button" type="button" onClick={() => setShowRename(true)} disabled={saving}><Pencil size={16} /> Rename title</button>
               <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
               {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
               <h3>Categories</h3>
@@ -438,10 +420,8 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
               <TagCombobox attributeKind="category" label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />
               <h3>Tags</h3>
               <TagCombobox attributeKind="tag" label="Item tags" tags={tags} selectedIds={item.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={saving} placeholder="Search or create tags" />
-              <h3>Cast</h3>
-              <TagCombobox attributeKind="cast" label="Cast" tags={people} selectedIds={item.cast.map((person) => person.id)} onChange={(ids) => void updatePeople("cast", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add people" />
-              <h3>Artists</h3>
-              <TagCombobox attributeKind="artist" label="Artists" tags={people} selectedIds={item.artists.map((person) => person.id)} onChange={(ids) => void updatePeople("artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder="Search or add artists" />
+              <h3>{item.media_type === "video" ? "Cast" : "Artists"}</h3>
+              <TagCombobox attributeKind={item.media_type === "video" ? "cast" : "artist"} label={item.media_type === "video" ? "Cast" : "Artists"} tags={people} selectedIds={(item.media_type === "video" ? item.cast : item.artists).map((person) => person.id)} onChange={(ids) => void updatePeople(item.media_type === "video" ? "cast" : "artist", ids)} onCreate={onPersonCreated} disabled={saving} placeholder={item.media_type === "video" ? "Search or add cast" : "Search or add artists"} />
               <h3>Series & sets</h3>
               <TagCombobox attributeKind="series" label="In series & sets" tags={seriesOptions} selectedIds={seriesIds} onChange={(ids) => void updateSeries(ids)} onCreate={createSeries} disabled={saving} placeholder="Search or create a set" />
               {seriesIds.length > 0 && <div className="viewer-series-links">{seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) =>
@@ -449,6 +429,10 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
             </div></AttributeMediaContext.Provider>}
           </>}
         </aside>
+        {showRename && item && <RenameMediaDialog key={item.id} item={item} onClose={() => setShowRename(false)} onSaved={(renamed) => {
+          setItem((current) => current?.id === renamed.id ? { ...current, ...renamed } : current);
+          onChanged();
+        }} />}
       </section>
     </div>
   );

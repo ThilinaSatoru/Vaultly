@@ -1,13 +1,17 @@
 import { AttributePatterns } from "./AttributePatterns";
+import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
+import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { AttributeBadge } from "./AttributeBadge";
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, formatCount, type Person } from "./media";
 
-export function PeopleView({ people, onChanged }: { people: Person[]; onChanged: () => void }) {
+export function PeopleView({ people, onChanged, allowBrowse = true }: { people: Person[]; onChanged: () => void; allowBrowse?: boolean }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const [renaming, setRenaming] = useState<Person | null>(null);
+  const { filtered, tools } = useAttributeList(people, (person) => (person.cast_count ?? 0) + (person.artist_count ?? 0));
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -20,14 +24,6 @@ export function PeopleView({ people, onChanged }: { people: Person[]; onChanged:
     finally { setWorking(false); }
   };
 
-  const rename = async (person: Person) => {
-    const nextName = window.prompt("Person name", person.name)?.trim();
-    if (!nextName || nextName === person.name) return;
-    setError("");
-    try { await api(`/api/people/${person.id}`, { method: "PATCH", body: JSON.stringify({ name: nextName }) }); onChanged(); }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not rename person."); }
-  };
-
   const remove = async (person: Person) => {
     if (!window.confirm(`Delete “${person.name}” from metadata? Media files will not be deleted.`)) return;
     setError("");
@@ -36,13 +32,15 @@ export function PeopleView({ people, onChanged }: { people: Person[]; onChanged:
   };
 
   return <section className="categories-view">
-    <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>People</h1><p>Use people as cast or artists on any video, comic, or story.</p></div></div>
+    <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>Cast & artists</h1><p>One shared list of people: Cast for videos, Artists for comics and stories. Search names and patterns, or customize matching below.</p></div></div>
     <form className="category-form" onSubmit={add}><label htmlFor="new-person">New person</label><div><input id="new-person" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" maxLength={100} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div></form>
     {error && <p className="page-error" role="alert">{error}</p>}
-    <div className="category-list">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : people.map((person) =>
-      <div className="category-row" key={person.id}><div className="category-symbol"><Users size={20} /></div><div><div className="attribute-badges"><AttributeBadge kind="cast" {...person}>Cast: {person.name}</AttributeBadge><AttributeBadge kind="artist" {...person}>Artist: {person.name}</AttributeBadge></div><span>{formatCount(person.cast_count ?? 0)} cast · {formatCount(person.artist_count ?? 0)} artist credits</span></div>
+    {tools}
+    <div className="category-list">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : filtered.map((person) =>
+      <div className="category-row" key={person.id}><div className="category-symbol"><Users size={20} /></div><div><div className="attribute-badges">{allowBrowse ? <AttributeBadge kind="artist" {...person} /> : <span className="tag-badge">{person.name}</span>}</div><span>{formatCount(person.cast_count ?? 0)} cast · {formatCount(person.artist_count ?? 0)} artist credits</span><AttributePatternSummary patterns={person.patterns} /></div>
         <AttributePatterns kind="people" attribute={person} onChanged={onChanged} />
-            <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${person.name}`} onClick={() => void rename(person)}><Pencil size={17} /></button>
+            <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${person.name}`} onClick={() => setRenaming(person)}><Pencil size={17} /></button>
         <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${person.name}`} onClick={() => void remove(person)}><Trash2 size={17} /></button></div>)}</div>
+    {renaming && <RenameAttributeDialog kind="people" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
   </section>;
 }

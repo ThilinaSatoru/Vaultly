@@ -3,11 +3,13 @@ import { opendir, stat } from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToRequests } from "node:timers/promises";
 import { database } from "./database.js";
-import { FilenameMetadataMatcher, normalizeMetadataFilename } from "./filename-metadata.js";
+import { AttributeNameMatcher, FilenameMetadataMatcher, normalizeMetadataFilename, normalizeMetadataPhrase } from "./filename-metadata.js";
+import { readComicMetadata, type ComicMetadata } from "./comic-metadata.js";
 import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail } from "./thumbnails.js";
 
 const videoExtensions = new Set([
-  ".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg",
+  ".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg", ".ts",
+  ".mts", ".m2ts", ".vob", ".ogv", ".3gp", ".3g2", ".asf", ".mxf",
 ]);
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
 const storyExtensions = new Set([".pdf"]);
@@ -22,6 +24,7 @@ interface ScannedItem {
   sizeBytes: number;
   modifiedAtMs: number;
   fileCount: number;
+  comicMetadata?: ComicMetadata;
 }
 
 interface ExistingItem extends ScannedItem {
@@ -100,6 +103,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
     let imageCount = 0;
     let totalSize = 0;
     let latestModification = 0;
+    let metadataPath: string | undefined;
     let pending: Array<{ name: string; extension: string; absolutePath: string }> = [];
     const flush = async () => {
       signal?.throwIfAborted();
@@ -142,6 +146,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
         directories.push(absolutePath);
         if (progress) progress.directoriesFound++;
       } else if (entry.isFile()) {
+        if (entry.name.toLowerCase() === "meta.json") metadataPath = absolutePath;
         const extension = path.extname(entry.name).toLowerCase();
         if (!videoExtensions.has(extension) && !storyExtensions.has(extension) && !comicArchiveExtensions.has(extension) && !imageExtensions.has(extension)) {
           if (progress) progress.filesChecked++;
@@ -154,6 +159,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
     await flush();
 
     if (imageCount > 0) {
+      const comicMetadata = metadataPath ? await readComicMetadata(metadataPath, signal) : undefined;
       if (progress) { progress.comicsFound++; progress.itemsTotal++; }
       const relativeDirectory = path.relative(rootPath, currentDirectory) || ".";
       items.push({
@@ -165,6 +171,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
         sizeBytes: totalSize,
         modifiedAtMs: Math.round(latestModification),
         fileCount: imageCount,
+        ...(comicMetadata ? { comicMetadata } : {}),
       });
     }
     if (progress) progress.directoriesScanned++;
@@ -247,15 +254,16 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
       try {
         const categories = database.prepare("SELECT id, name FROM categories").all() as Array<{ id: number; name: string }>;
         const tags = database.prepare("SELECT id, name FROM tags").all() as Array<{ id: number; name: string }>;
-        const people = database.prepare(`
-          SELECT p.id, p.name,
-            MAX(CASE WHEN ip.role = 'cast' THEN 1 ELSE 0 END) AS is_cast,
-            MAX(CASE WHEN ip.role = 'artist' THEN 1 ELSE 0 END) AS is_artist
-          FROM people p LEFT JOIN item_people ip ON ip.person_id = p.id GROUP BY p.id
-        `).all() as Array<{ id: number; name: string; is_cast: number; is_artist: number }>;
+        const people = database.prepare("SELECT id, name FROM people").all() as Array<{ id: number; name: string }>;
         const categoryMatcher = new FilenameMetadataMatcher(withAttributePatterns("categories", categories));
-        const tagMatcher = new FilenameMetadataMatcher(withAttributePatterns("tags", tags));
-        const peopleMatcher = new FilenameMetadataMatcher(withAttributePatterns("people", people.filter((person) => person.is_cast || person.is_artist)));
+        const patternedTags = withAttributePatterns("tags", tags);
+        const patternedPeople = withAttributePatterns("people", people);
+        const tagMatcher = new FilenameMetadataMatcher(patternedTags);
+        const peopleMatcher = new FilenameMetadataMatcher(patternedPeople);
+        const metadataTagMatcher = new AttributeNameMatcher(patternedTags);
+        const metadataArtistMatcher = new AttributeNameMatcher(patternedPeople);
+        const createArtist = database.prepare("INSERT OR IGNORE INTO people(name) VALUES (?)");
+        const findArtist = database.prepare("SELECT id, name FROM people WHERE name = ? COLLATE NOCASE");
         const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) SELECT ?, id FROM categories WHERE id = ?");
         const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) SELECT ?, id FROM tags WHERE id = ?");
         const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) SELECT ?, id, ? FROM people WHERE id = ?");
@@ -349,8 +357,23 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
             addTag.run(row.id, tag.id);
           }
           for (const person of peopleMatcher.matchNormalized(normalizedFilename)) {
-            if (person.is_cast) addPerson.run(row.id, "cast", person.id);
-            if (person.is_artist) addPerson.run(row.id, "artist", person.id);
+            addPerson.run(row.id, item.mediaType === "video" ? "cast" : "artist", person.id);
+          }
+          if (item.comicMetadata) {
+            for (const name of item.comicMetadata.tags) {
+              for (const tag of metadataTagMatcher.match(name)) addTag.run(row.id, tag.id);
+            }
+            for (const name of item.comicMetadata.artists) {
+              if (name.length > 100 || !normalizeMetadataPhrase(name)) continue;
+              let artists = metadataArtistMatcher.match(name);
+              if (!artists.length) {
+                createArtist.run(name);
+                const artist = findArtist.get(name) as { id: number; name: string };
+                metadataArtistMatcher.add({ ...artist, patterns: [] });
+                artists = [{ ...artist, patterns: [] }];
+              }
+              for (const artist of artists) addPerson.run(row.id, "artist", artist.id);
+            }
           }
           progress.itemsProcessed = itemIndex + 1;
           progress.currentPath = item.relativePath;

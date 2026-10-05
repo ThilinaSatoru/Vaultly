@@ -41,6 +41,50 @@ test("classifies mixed and nested media without indexing individual comic pages"
   expect(items.find((item) => item.title === "My Story")?.fileExtension).toBe("pdf");
 });
 
+test("scans the root and every branch at arbitrary depth, including children of comic folders", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-recursive-scan-"));
+  temporaryDirectories.push(root);
+  await writeFile(path.join(root, "Root.pdf"), "root story");
+  await writeFile(path.join(root, "Cover.jpg"), "root comic page");
+
+  // More siblings than the directory batch size catches accidentally dropped branches.
+  const branches = Array.from({ length: 9 }, (_, index) => `Branch ${index}`);
+  await Promise.all(branches.map(async (branch) => {
+    const nestedDirectory = path.join(root, branch, "Comic", "Volume", "Chapter", "Extras");
+    await mkdir(nestedDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(path.join(root, branch, "Story.pdf"), "story"),
+      writeFile(path.join(root, branch, "Comic", "001.jpg"), "comic page"),
+      writeFile(path.join(nestedDirectory, "Movie.mp4"), "video"),
+      writeFile(path.join(nestedDirectory, "Archive.cbz"), "comic archive"),
+    ]);
+  }));
+  await mkdir(path.join(root, "Empty", "Nested"), { recursive: true });
+
+  const items = await collectItems(root);
+  const expectedPaths = [".", "Root.pdf", ...branches.flatMap((branch) => [
+    path.join(branch, "Story.pdf"),
+    path.join(branch, "Comic"),
+    path.join(branch, "Comic", "Volume", "Chapter", "Extras", "Movie.mp4"),
+    path.join(branch, "Comic", "Volume", "Chapter", "Extras", "Archive.cbz"),
+  ])];
+
+  expect(items.map((item) => item.relativePath).sort()).toEqual(expectedPaths.sort());
+  expect(items.filter((item) => item.mediaType === "video")).toHaveLength(branches.length);
+  expect(items.filter((item) => item.mediaType === "story")).toHaveLength(branches.length + 1);
+  expect(items.filter((item) => item.mediaType === "comic")).toHaveLength(branches.length * 2 + 1);
+});
+
+test("indexes additional transport, disc, mobile and legacy video extensions", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-video-formats-"));
+  temporaryDirectories.push(root);
+  const filenames = ["Movie.mts", "Movie.M2TS", "Movie.vob", "Movie.ogv", "Movie.3gp", "Movie.3g2", "Movie.asf", "Movie.mxf"];
+  await Promise.all(filenames.map((name) => writeFile(path.join(root, name), "video fixture")));
+  const items = await collectItems(root);
+  expect(items.map((item) => item.filename).sort()).toEqual([...filenames].sort());
+  expect(items.every((item) => item.mediaType === "video")).toBe(true);
+});
+
 test("recognizes conservative sequel filename patterns", () => {
   expect(inferCollectionPattern("Northern Lights S02E04 1080p.mkv")).toEqual({ title: "Northern Lights", order: 20004 });
   expect(inferCollectionPattern("Northern.Lights - Vol 03.pdf")).toEqual({ title: "Northern Lights", order: 3 });

@@ -54,11 +54,15 @@ function distributedPreviewPoints(duration: number): number[] {
 }
 
 function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDuration: number | null }) {
+  const [source, setSource] = useState(`/api/items/${itemId}/file`);
+  const [failed, setFailed] = useState(false);
+  const activeRef = useRef(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pointsRef = useRef<number[]>([]);
   const pointIndexRef = useRef(0);
   const segmentEndRef = useRef(0);
   const changingSegmentRef = useRef(false);
+  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
 
   const playPoint = (index: number) => {
     const video = videoRef.current;
@@ -82,9 +86,10 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
     playPoint(pointIndexRef.current + 1);
   };
 
+  if (failed) return <img src={`/api/items/${itemId}/thumbnail`} alt="" />;
   return <video
     ref={videoRef}
-    src={`/api/items/${itemId}/file`}
+    src={source}
     muted
     playsInline
     preload="metadata"
@@ -102,6 +107,15 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
       if (event.currentTarget.currentTime >= segmentEndRef.current - 0.04) advance();
     }}
     onEnded={advance}
+    onError={() => {
+      if (source.endsWith("/playback/file")) { setFailed(true); return; }
+      // Hovering can reuse a prepared video without starting a full conversion.
+      void api<{ state: string }>(`/api/items/${itemId}/playback`).then((status) => {
+        if (!activeRef.current) return;
+        if (status.state === "ready") setSource(`/api/items/${itemId}/playback/file`);
+        else setFailed(true);
+      }).catch(() => { if (activeRef.current) setFailed(true); });
+    }}
   />;
 }
 
@@ -350,8 +364,8 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     if (untagged) params.set("untagged", "1");
     if (selectedCategoryIds.length) params.set("categories", selectedCategoryIds.join(","));
     if (selectedTagIds.length) params.set("tags", selectedTagIds.join(","));
-    if (selectedCastIds.length) params.set("cast", selectedCastIds.join(","));
-    if (selectedArtistIds.length) params.set("artists", selectedArtistIds.join(","));
+    const personIds = [...new Set([...selectedCastIds, ...selectedArtistIds])];
+    if (personIds.length) params.set("people", personIds.join(","));
     setLoading(true);
     api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
       .then((data) => { setResult(data); setError(""); })
@@ -454,8 +468,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
         <label className="gallery-filter-field"><span>Maximum size (MB)</span><input type="number" min="0" step="0.1" value={maxMb} onChange={(event) => setMaxMb(event.target.value)} placeholder="No maximum" /></label>
         <label className="gallery-filter-field"><span>Modified from</span><input type="date" value={modifiedFrom} max={modifiedTo || undefined} onChange={(event) => setModifiedFrom(event.target.value)} /></label>
         <label className="gallery-filter-field"><span>Modified through</span><input type="date" value={modifiedTo} min={modifiedFrom || undefined} onChange={(event) => setModifiedTo(event.target.value)} /></label>
-        <TagCombobox attributeKind="cast" label="Cast (match all)" tags={people} selectedIds={selectedCastIds} onChange={setSelectedCastIds} placeholder="Any cast" />
-        <TagCombobox attributeKind="artist" label="Artists (match all)" tags={people} selectedIds={selectedArtistIds} onChange={setSelectedArtistIds} placeholder="Any artist" />
+        <TagCombobox attributeKind={type === "video" ? "cast" : "artist"} label={`${type === "video" ? "Cast" : type ? "Artists" : "Cast & artists"} (match all)`} tags={people} selectedIds={[...new Set([...selectedCastIds, ...selectedArtistIds])]} onChange={(ids) => { if (type && type !== "video") { setSelectedArtistIds(ids); setSelectedCastIds([]); } else { setSelectedCastIds(ids); setSelectedArtistIds([]); } }} placeholder={type === "video" ? "Any cast" : type ? "Any artist" : "Any person"} />
         <label className="gallery-filter-check"><input type="checkbox" checked={uncategorized} onChange={(event) => { setUncategorized(event.target.checked); if (event.target.checked) setSelectedCategoryIds([]); }} /> Uncategorized only</label>
         <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
       </div>}
@@ -482,7 +495,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
           {!search && !hasFilters && <button className="primary-button" type="button" onClick={onAddSource}>Add source</button>}
         </div>
       )}
-      {bulkOpen && <BulkActionDialog itemIds={selectedItemIds} tags={tags} categories={categories} people={people} series={seriesOptions} onTagCreated={onTagCreated} onCategoryCreated={onCategoryCreated} onPersonCreated={onPersonCreated} onSeriesCreated={createSeries} onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); setSelectedItemIds([]); onChanged(); }} />}
+      {bulkOpen && <BulkActionDialog itemIds={selectedItemIds} mediaType={type} tags={tags} categories={categories} people={people} series={seriesOptions} onTagCreated={onTagCreated} onCategoryCreated={onCategoryCreated} onPersonCreated={onPersonCreated} onSeriesCreated={createSeries} onClose={() => setBulkOpen(false)} onDone={() => { setBulkOpen(false); setSelectedItemIds([]); onChanged(); }} />}
     </section></AttributeMediaContext.Provider>
   );
 }

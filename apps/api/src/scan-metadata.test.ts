@@ -19,18 +19,12 @@ test("rescan adds filename metadata without replacing manually assigned tags", a
   try {
     await mkdir(path.join(root, parentName));
     await writeFile(path.join(root, parentName, filename), "pdf fixture");
+    await writeFile(path.join(root, `${personName}.mp4`), "video fixture");
     created.source = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)")
       .run(`Test ${token}`, root, process.platform === "win32" ? root.toLowerCase() : root).lastInsertRowid);
     created.category = Number(database.prepare("INSERT INTO categories(name) VALUES (?)").run(categoryName).lastInsertRowid);
     created.parentCategory = Number(database.prepare("INSERT INTO categories(name) VALUES (?)").run(parentName).lastInsertRowid);
     created.person = Number(database.prepare("INSERT INTO people(name) VALUES (?)").run(personName).lastInsertRowid);
-
-    // A prior cast credit establishes the person's role; a bare name alone must not guess one.
-    const seed = Number(database.prepare(`
-      INSERT INTO media_items(source_id, media_type, title, filename, file_extension, relative_path)
-      VALUES (?, 'video', 'role seed', 'role-seed.mp4', 'mp4', 'role-seed.mp4')
-    `).run(created.source).lastInsertRowid);
-    database.prepare("INSERT INTO item_people(item_id, person_id, role) VALUES (?, ?, 'cast')").run(seed, created.person);
 
     await scanSource(created.source, root);
     expect((database.prepare("SELECT status FROM sources WHERE id = ?").get(created.source) as { status: string }).status).toBe("ready");
@@ -39,6 +33,9 @@ test("rescan adds filename metadata without replacing manually assigned tags", a
     expect(database.prepare("SELECT category_id FROM item_categories WHERE item_id = ?").all(item.id))
       .toEqual([{ category_id: created.category }]);
     expect(database.prepare("SELECT role FROM item_people WHERE item_id = ?").all(item.id))
+      .toEqual([{ role: "artist" }]);
+    const video = database.prepare("SELECT id FROM media_items WHERE source_id = ? AND media_type = 'video'").get(created.source) as { id: number };
+    expect(database.prepare("SELECT role FROM item_people WHERE item_id = ?").all(video.id))
       .toEqual([{ role: "cast" }]);
 
     created.manualTag = Number(database.prepare("INSERT INTO tags(name) VALUES (?)").run(`Manual ${token}`).lastInsertRowid);
