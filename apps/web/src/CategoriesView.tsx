@@ -1,4 +1,4 @@
-import { AttributePatterns } from "./AttributePatterns";
+import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { AttributeBadge } from "./AttributeBadge";
@@ -17,6 +17,7 @@ export function CategoriesView({ categories, onChanged, allowBrowse = true }: Ca
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
   const [renaming, setRenaming] = useState<Category | null>(null);
+  const [patternEntry, setPatternEntry] = useState<Category | null>(null);
   const { filtered, tools } = useAttributeList(categories, (category) => category.item_count);
 
   const add = async (event: FormEvent) => {
@@ -60,13 +61,14 @@ export function CategoriesView({ categories, onChanged, allowBrowse = true }: Ca
           <div className="category-row" key={category.id}>
             <div className="category-symbol"><Folder size={20} /></div>
             <div><strong>{allowBrowse ? <AttributeBadge kind="category" {...category} /> : <span className="tag-badge">{category.name}</span>}</strong><span>{formatCount(category.item_count)} items</span><AttributePatternSummary patterns={category.patterns} /></div>
-            <AttributePatterns kind="categories" attribute={category} onChanged={onChanged} />
+            <AttributePatternButton name={category.name} onClick={() => setPatternEntry(category)} />
             <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${category.name}`} onClick={() => setRenaming(category)}><Pencil size={17} /></button>
             <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${category.name}`} onClick={() => remove(category)}><Trash2 size={17} /></button>
           </div>
         ))}
       </div>
       {renaming && <RenameAttributeDialog kind="categories" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
+      {patternEntry && <AttributePatterns key={patternEntry.id} kind="categories" attribute={patternEntry} onChanged={onChanged} editorOnly onClose={() => setPatternEntry(null)} />}
     </section>
   );
 }

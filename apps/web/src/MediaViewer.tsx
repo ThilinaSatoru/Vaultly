@@ -199,7 +199,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (manager?.isOpen) return;
+      if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".management-drawer, .management-editor-window, .management-dock")) return;
       if (event.key === "Tab" && viewerRef.current) {
         const focusable = Array.from(viewerRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"));
         if (!focusable.length) { event.preventDefault(); viewerRef.current.focus(); return; }

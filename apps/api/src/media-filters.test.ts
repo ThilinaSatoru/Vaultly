@@ -46,7 +46,8 @@ test("TS videos scan at the root and in nested folders, remain searchable on res
 });
 
 test("nested scan results combine text, metadata, source, format, range and membership filters", async () => {
-  const token = randomUUID();
+  // This suffix is searchable through source and attribute names; keep it from matching the "be" case.
+  const token = randomUUID().replace(/be/gi, "xx");
   const root = await mkdtemp(path.join(tmpdir(), "vaultly-filters-"));
   const app = await buildVaultlyServer();
   app.log.level = "silent";

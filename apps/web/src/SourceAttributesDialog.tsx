@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { useEffect, useState, type FormEvent } from "react";
 import { TagCombobox } from "./TagCombobox";
 import { api, type Category, type Tag } from "./media";
@@ -52,10 +52,8 @@ export function SourceAttributesDialog({ source, onClose, onSaved, ...options }:
     } catch (error) { setError(error instanceof Error ? error.message : "Could not save common attributes."); }
     finally { setSaving(false); }
   };
-  return <div className="dialog-backdrop" role="presentation" onMouseDown={() => { if (!saving) onClose(); }}>
-    <section className="dialog" role="dialog" aria-modal="true" aria-label={`Common attributes for ${source.name}`} onMouseDown={(event) => event.stopPropagation()}>
-      <button className="icon-button dialog-close" type="button" onClick={onClose} aria-label="Close common attributes" disabled={saving}><X size={20} /></button>
-      <h2>Common attributes</h2><p className="dialog-intro">{source.name}</p>
+  return <AttributeEditorDialog title={`Common attributes for ${source.name}`} onClose={onClose} busy={saving} focusReady={loaded && !loading}>
+      <p className="dialog-intro">{source.name}</p>
       <form onSubmit={save}>
         <SourceAttributeFields {...options} tagIds={tagIds} categoryIds={categoryIds} onTagsChange={setTagIds} onCategoriesChange={setCategoryIds} disabled={!loaded || loading || saving} />
         {loading && <p>Loading attributes…</p>}
@@ -63,6 +61,5 @@ export function SourceAttributesDialog({ source, onClose, onSaved, ...options }:
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="dialog-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={!loaded || loading || saving}>{saving ? "Saving…" : "Save attributes"}</button></div>
       </form>
-    </section>
-  </div>;
+  </AttributeEditorDialog>;
 }

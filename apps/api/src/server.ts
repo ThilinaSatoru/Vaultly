@@ -17,6 +17,7 @@ import { registerCircleRoutes } from "./circle-routes.js";
 import { registerBackupRoutes } from "./backup-routes.js";
 import type { ProfileImageFetch } from "./profile-images.js";
 import { registerPeopleProfileScanRoutes, type PeopleProfileBrowserFactory } from "./people-profile-scan.js";
+import { getBackgroundActivity } from "./background-activity.js";
 
 export interface VaultlyServerOptions {
   host?: string;
@@ -74,6 +75,7 @@ const sourceSummaryQuery = `
 `;
 
 app.get("/api/health", async () => ({ ok: true }));
+app.get("/api/activity", async () => getBackgroundActivity());
 
 app.get("/api/sources", async () => {
   const sources = database.prepare("SELECT * FROM sources ORDER BY created_at DESC").all() as unknown as SourceRow[];

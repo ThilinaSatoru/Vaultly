@@ -1,11 +1,11 @@
-import { ArrowLeft, BookOpen, Check, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Play, Search, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useContext, type Dispatch, type SetStateAction } from "react";
 import { NavigationContext, useNavigationField } from "./navigation";
 import { TagCombobox } from "./TagCombobox";
 import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { BulkActionDialog } from "./BulkActionDialog";
-import { api, formatCount, formatDuration, formatSize, type Category, type CircleSummary, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
+import { api, formatCount, formatDuration, formatSize, formatVideoQuality, type Category, type CircleSummary, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
 import type { LibraryView } from "./App";
 import { galleryVideoContext, type GalleryVideoContext } from "./video-playlist";
 
@@ -157,7 +157,6 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
     <article className={`media-card media-card-selectable${selected ? " is-selected" : ""}`}>
       <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
       <button className={`media-card-favorite${item.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>
-      {item.media_type === "video" && <button className={`media-card-queue${queued ? " is-queued" : ""}`} type="button" onClick={onQueue} aria-label={queued ? `${item.title} is in temporary playlist` : `Add ${item.title} to temporary playlist`} title={queued ? "In temporary playlist" : "Add to temporary playlist"}>{queued ? <Check size={17} /> : <ListPlus size={17} />}</button>}
       <button
       className="media-card-open"
       type="button"
@@ -184,7 +183,6 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
           item.media_type === "video" ? <Clapperboard size={42} /> : item.media_type === "story" ? <BookOpen size={42} /> : <Image size={42} />
         )}
         <span className="media-type-badge">{item.media_type === "video" ? formatDuration(duration) : item.media_type}</span>
-        {item.media_type === "video" && <span className="play-overlay"><Play size={19} fill="currentColor" /></span>}
       </div>
       </button>
       <div className="media-card-body">
@@ -196,7 +194,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
           {item.cast.map((person) => <AttributeBadge key={`cast-${person.id}`} kind="cast" {...person} mediaType={item.media_type}>Cast: {person.name}</AttributeBadge>)}
           {item.artists.map((person) => <AttributeBadge key={`artist-${person.id}`} kind="artist" {...person} mediaType={item.media_type}>Artist: {person.name}</AttributeBadge>)}
         </div>
-        <div className="media-card-meta"><span>{formatSize(item.size_bytes)}</span><span>{item.media_type === "comic" ? `${item.file_count} ${item.file_count === 1 ? "file" : "pages"}` : item.categories.length ? "" : "Uncategorized"}</span></div>
+        <div className="media-card-meta"><span className="media-card-file-info">{formatSize(item.size_bytes)}{item.media_type === "video" && formatVideoQuality(item.video_width, item.video_height) && <span className="media-quality-badge" title={`Video resolution: ${item.video_width} × ${item.video_height}`}>{formatVideoQuality(item.video_width, item.video_height)}</span>}</span><div className="media-card-footer-actions"><span>{item.media_type === "comic" ? `${item.file_count} ${item.file_count === 1 ? "file" : "pages"}` : item.categories.length ? "" : "Uncategorized"}</span>{item.media_type === "video" && <button className={`media-card-queue${queued ? " is-queued" : ""}`} type="button" onClick={onQueue} aria-label={queued ? `${item.title} is in temporary playlist` : `Add ${item.title} to temporary playlist`} title={queued ? "In temporary playlist" : "Add to temporary playlist"}>{queued ? <Check size={17} /> : <ListPlus size={17} />}</button>}</div></div>
       </div>
     </article>
   );
@@ -212,7 +210,7 @@ function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; 
   const cover = series.has_cover ? `/api/series/${series.id}/cover` : fallback;
   return <article className="media-card collection-media-card">
     <button className="media-card-open" type="button" onClick={onOpen} aria-label={`Open collection ${series.title}`}>
-      <div className="media-art collection-art"><Layers3 size={44} />{cover && <img src={cover} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
+      <div className={`media-art collection-art${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={cover} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
     </button>
     <div className="media-card-body"><h3 title={series.title}><button className="card-title-open" type="button" onClick={onOpen}>{series.title}</button></h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{series.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{series.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
   </article>;

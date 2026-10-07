@@ -1,6 +1,11 @@
 import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
 import { AttributeBadge, AttributeBrowseProvider } from "./AttributeBadge";
-import { AttributeManagerDialog } from "./AttributeManagerDialog";
+import { ManagementDrawer, type ManagementTab } from "./ManagementDrawer";
+import { BackgroundStatus } from "./BackgroundStatus";
+import { AttributeEditorDialog } from "./AttributeEditorDialog";
+import { CategoriesView } from "./CategoriesView";
+import { TagsView } from "./TagsView";
+import { PeopleView } from "./PeopleView";
 import { AttributeManagerContext, type AttributeManagerKind } from "./attribute-manager";
 import { NavigationContext, useNavigation, useNavigationField } from "./navigation";
 import type { GalleryVideoContext } from "./video-playlist";
@@ -28,10 +33,8 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Settings,
   Tag as TagIcon,
   Trash2,
-  Users,
   X,
 } from "lucide-react";
 import { type FormEvent, type ReactNode, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -134,13 +137,8 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
   };
 
   return (
-    <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
-      <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="add-source-title" onMouseDown={(e) => e.stopPropagation()}>
-        <button className="icon-button dialog-close" type="button" onClick={onClose} aria-label="Close">
-          <X size={20} />
-        </button>
+    <AttributeEditorDialog title="Add a library source" onClose={onClose} busy={saving || picking}>
         <div className="dialog-icon"><FolderOpen size={24} /></div>
-        <h2 id="add-source-title">Add a library source</h2>
         <p className="dialog-intro">Choose a root folder. Vaultly will find comics, videos, and PDFs inside it without moving your files.</p>
 
         <form onSubmit={submit}>
@@ -184,8 +182,7 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
             </button>
           </div>
         </form>
-      </section>
-    </div>
+    </AttributeEditorDialog>
   );
 }
 
@@ -383,13 +380,20 @@ function LibraryApp() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
-  const [showAttributeManager, setShowAttributeManager] = useState(false);
-  const [attributeManagerKind, setAttributeManagerKind] = useState<AttributeManagerKind>("tags");
+  const [managementOpen, setManagementOpen] = useState(false);
+  const [managementMinimized, setManagementMinimized] = useState(false);
+  const [managementExpanded, setManagementExpanded] = useState(false);
+  const [managementTab, setManagementTab] = useState<ManagementTab>("tags");
+  const [managementVisited, setManagementVisited] = useState<ManagementTab[]>([]);
   const [attributeRevision, setAttributeRevision] = useState(0);
-  const openAttributeManager = useCallback((kind: AttributeManagerKind) => {
-    setAttributeManagerKind(kind);
-    setShowAttributeManager(true);
+  const openManagement = useCallback((kind: ManagementTab) => {
+    setManagementTab(kind);
+    setManagementVisited((current) => current.includes(kind) ? current : [...current, kind]);
+    setManagementMinimized(false);
+    setManagementOpen(true);
   }, []);
+  const openAttributeManager = useCallback((kind: AttributeManagerKind) => openManagement(kind), [openManagement]);
+  const addSource = () => { openManagement("sources"); setShowAddSource(true); };
   const [selectedItemId] = useNavigationField<number | null>("selectedItemId", null);
   const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
   const [viewerFloating, setViewerFloating] = useNavigationField("viewerFloating", false);
@@ -454,11 +458,11 @@ function LibraryApp() {
 
   // Older history entries may still point to the former standalone management pages.
   useEffect(() => {
-    if (section === "tags" || section === "categories" || section === "people") {
-      openAttributeManager(section);
+    if (section === "tags" || section === "categories" || section === "people" || section === "sources" || section === "settings") {
+      openManagement(section);
       navigation.update({ section: "home" }, "Home");
     }
-  }, [section, openAttributeManager]);
+  }, [section, openManagement]);
 
   const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
   const scanningSourceKey = useMemo(() => sources.filter((source) => source.status === "scanning").map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
@@ -556,8 +560,42 @@ function LibraryApp() {
     } finally { setRescanningAll(false); }
   };
 
+  const sourcesPanel = <>
+    <div className="page-heading">
+      <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Each scan includes the source folder and all its subfolders. Scans detect media and add missing metadata when existing category, tag, or cast/artist names appear in filenames. Existing sources only rescan when you choose to; opening the app does not rescan them.</p></div>
+      <div className="page-heading-actions">{isScanning
+        ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
+        : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
+    </div>
+
+    <section className="summary-strip" aria-label="Source summary">
+      <div><span>Folders</span><strong>{formatCount(sources.length)}</strong></div>
+      <div><span>Indexed items</span><strong>{formatCount(totalItems)}</strong></div>
+      <div><span>Storage</span><strong>Local</strong></div>
+      <div className="summary-message"><span className="pulse-dot" /> Your media stays on this computer</div>
+    </section>
+
+    {error && <div className="page-error" role="alert">{error}<button type="button" onClick={() => loadSources()}>Try again</button></div>}
+
+    {loading && sources.length === 0 ? (
+      <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading sources…</span></div>
+    ) : sources.length > 0 ? (
+      <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} {...attributeOptions} onChanged={() => { void loadSources(true); refreshMedia(); }} />)}</div>
+    ) : (
+      <section className="empty-state">
+        <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
+        <h2>Connect your media folders</h2>
+        <p>Add one or more folders. Each can contain a mix of comics, videos, and PDFs.</p>
+        <button className="primary-button" type="button" onClick={() => setShowAddSource(true)}>Choose a folder <ChevronRight size={18} /></button>
+        <span>Nothing is uploaded or moved.</span>
+      </section>
+    )}
+
+    {showAddSource && <AddSourceDialog {...attributeOptions} onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); refreshMedia(); }} />}
+  </>;
+
   return (
-    <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: showAttributeManager }}><AttributeBrowseProvider onNavigate={() => { setShowAddSource(false); setShowAttributeManager(false); }}><div className="app-shell">
+    <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: managementOpen && !managementMinimized }}><AttributeBrowseProvider><div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
         <nav aria-label="Main navigation">
@@ -566,13 +604,8 @@ function LibraryApp() {
           <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
           <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
           <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="Stories" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
-          <p>Manage</p>
-          <button className={showAttributeManager && attributeManagerKind === "categories" ? "nav-active" : "nav-link"} type="button" onClick={() => openAttributeManager("categories")}><Folder size={19} /> Categories</button>
-          <button className={showAttributeManager && attributeManagerKind === "tags" ? "nav-active" : "nav-link"} type="button" onClick={() => openAttributeManager("tags")}><TagIcon size={19} /> Tags</button>
-          <button className={showAttributeManager && attributeManagerKind === "people" ? "nav-active" : "nav-link"} type="button" onClick={() => openAttributeManager("people")}><Users size={19} /> Cast & artists</button>
-          <button className={section === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("sources")}><HardDrive size={19} /> Sources</button>
-          <button className={section === "settings" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("settings")}><Settings size={19} /> Settings</button>
         </nav>
+        <BackgroundStatus onOpen={openManagement} />
       </aside>
 
       <main>
@@ -595,40 +628,8 @@ function LibraryApp() {
             <strong aria-current="page">{navigation.entry.label}</strong>
           </nav>
           {section === "home" ? (
-            <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={() => { selectSection("sources"); setShowAddSource(true); }} />
-          ) : section === "sources" ? <>
-          <div className="page-heading">
-            <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Each scan includes the source folder and all its subfolders. Scans detect media and add missing metadata when existing category, tag, or cast/artist names appear in filenames. Existing sources only rescan when you choose to; opening the app does not rescan them.</p></div>
-            <div className="page-heading-actions">{isScanning
-              ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
-              : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
-          </div>
-
-          <section className="summary-strip" aria-label="Source summary">
-            <div><span>Folders</span><strong>{formatCount(sources.length)}</strong></div>
-            <div><span>Indexed items</span><strong>{formatCount(totalItems)}</strong></div>
-            <div><span>Storage</span><strong>Local</strong></div>
-            <div className="summary-message"><span className="pulse-dot" /> Your media stays on this computer</div>
-          </section>
-
-          {error && <div className="page-error" role="alert">{error}<button type="button" onClick={() => loadSources()}>Try again</button></div>}
-
-          {loading ? (
-            <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading sources…</span></div>
-          ) : sources.length > 0 ? (
-            <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} {...attributeOptions} onChanged={() => { void loadSources(true); refreshMedia(); }} />)}</div>
-          ) : (
-            <section className="empty-state">
-              <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
-              <h2>Connect your media folders</h2>
-              <p>Add one or more folders. Each can contain a mix of comics, videos, and PDFs.</p>
-              <button className="primary-button" type="button" onClick={() => setShowAddSource(true)}>Choose a folder <ChevronRight size={18} /></button>
-              <span>Nothing is uploaded or moved.</span>
-            </section>
-          )}
-          </> : section === "settings" ? (
-            <SettingsView />
-          ) : section === "categories" || section === "tags" || section === "people" ? null
+            <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={addSource} />
+          ) : section === "categories" || section === "tags" || section === "people" || section === "sources" || section === "settings" ? null
           : libraryView === "series" || libraryView === "circles" ? (
             <SeriesView key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}-${selectedSeriesId ?? "list"}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
           ) : (
@@ -649,16 +650,22 @@ function LibraryApp() {
               onQueueVideo={queueVideo}
               queuedVideoIds={temporaryPlaylist.map((item) => item.id)}
               onOpenSeries={openSeries}
-              onAddSource={() => { selectSection("sources"); setShowAddSource(true); }}
+              onAddSource={addSource}
               refreshKey={refreshKey}
             />
           )}
         </div>
       </main>
 
-      {showAddSource && <AddSourceDialog {...attributeOptions} onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); setRefreshKey((value) => value + 1); }} />}
+
       {selectedItemId !== null && <MediaViewer attributeRevision={attributeRevision} itemId={selectedItemId} seriesContext={viewerSeriesContext} galleryContext={viewerGalleryContext} onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, temporaryPlaylist.find((item) => item.id === id)?.title ?? `File ${id}`)} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={openSeries} onClose={closeViewer} onChanged={refreshMedia} />}
-      <AttributeManagerDialog open={showAttributeManager} kind={attributeManagerKind} onKindChange={setAttributeManagerKind} onClose={() => setShowAttributeManager(false)} tags={tags} categories={categories} people={people} onChanged={attributesChanged} />
+      <ManagementDrawer open={managementOpen} minimized={managementMinimized} expanded={managementExpanded} active={managementTab} visited={managementVisited} onOpen={openManagement} onClose={() => setManagementOpen(false)} onMinimize={() => setManagementMinimized((value) => !value)} onExpand={() => setManagementExpanded((value) => !value)} panels={{
+        tags: <TagsView tags={tags} onChanged={attributesChanged} />,
+        categories: <CategoriesView categories={categories} onChanged={attributesChanged} />,
+        people: <PeopleView people={people} onChanged={attributesChanged} />,
+        sources: sourcesPanel,
+        settings: <SettingsView />,
+      }} />
     </div></AttributeBrowseProvider></AttributeManagerContext.Provider>
   );
 }

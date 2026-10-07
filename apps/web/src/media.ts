@@ -12,6 +12,8 @@ export interface MediaItem {
   size_bytes: number;
   modified_at_ms: number;
   duration_seconds: number | null;
+  video_width?: number | null;
+  video_height?: number | null;
   file_count: number;
   category_names: string;
   favorite: number;
@@ -25,6 +27,11 @@ export interface MediaItem {
 export interface MediaDetail extends MediaItem {
   category_ids: number[];
   source_attributes?: { tags: Tag[]; categories: Array<{ id: number; name: string }> };
+}
+
+export function formatVideoQuality(width?: number | null, height?: number | null): string | null {
+  if (!width || !height || !Number.isFinite(width) || !Number.isFinite(height) || width < 1 || height < 1) return null;
+  return `${Math.min(width, height)}p`;
 }
 
 export interface SimilarVideo {

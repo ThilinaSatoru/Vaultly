@@ -5,6 +5,7 @@ const hooks = vi.hoisted(() => ({
   states: [] as unknown[], cursor: 0, effectCursor: 0,
   effects: [] as Array<{ deps: unknown[]; cleanup?: () => void }>, jobs: [] as Array<() => void>,
   dialog: null as unknown,
+  management: null as { visible: boolean } | null,
 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -15,6 +16,7 @@ vi.mock("react", async (original) => ({
   },
   useRef: () => ({ current: hooks.dialog }),
   useId: () => "editor-title",
+  useContext: () => hooks.management,
   useEffect: (effect: () => (() => void) | undefined, deps: unknown[]) => {
     const index = hooks.effectCursor++;
     const previous = hooks.effects[index];
@@ -54,7 +56,7 @@ function deferred<T>() {
 const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 const attribute = { id: 7, name: "Travel" };
 
-beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effectCursor = 0; hooks.effects = []; hooks.jobs = []; vi.mocked(api).mockReset(); });
+beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effectCursor = 0; hooks.effects = []; hooks.jobs = []; hooks.management = null; vi.mocked(api).mockReset(); });
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("attribute editors", () => {
@@ -130,5 +132,39 @@ describe("attribute editors", () => {
     hooks.effects[0].cleanup?.();
     expect(previous.focus).toHaveBeenCalledWith({ preventScroll: true });
     expect(document.body.style.overflow).toBe("auto");
+  });
+
+  it("management editors do not lock library scrolling or close on outside clicks", () => {
+    hooks.management = { visible: true };
+    vi.stubGlobal("document", { body: { style: { overflow: "auto" } }, activeElement: null });
+    vi.stubGlobal("HTMLElement", class {});
+    hooks.dialog = { focus: vi.fn(), querySelector: () => null };
+    const onClose = vi.fn();
+    const node = render(() => AttributeEditorDialog({ title: "Patterns", children: null, onClose }));
+    expect(document.body.style.overflow).toBe("auto");
+    const dialog = find(node, (element) => element.props.role === "dialog");
+    expect(dialog.props["aria-modal"]).toBeUndefined();
+    const outside = {};
+    find(node, (element) => element.props.role === "presentation").props.onClick({ target: outside, currentTarget: outside });
+    expect(onClose).not.toHaveBeenCalled();
+    const preventDefault = vi.fn();
+    dialog.props.onKeyDown({ key: "Tab", stopPropagation: vi.fn(), preventDefault });
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("hides a management editor when its tab is inactive, without closing it", () => {
+    hooks.management = { visible: false };
+    vi.stubGlobal("document", { body: { style: { overflow: "auto" } }, activeElement: null });
+    const onClose = vi.fn();
+    let node = render(() => AttributeEditorDialog({ title: "Patterns", children: "draft", onClose }));
+    expect(find(node, (element) => element.props.role === "presentation").props).toMatchObject({ hidden: true, inert: true });
+    expect(onClose).not.toHaveBeenCalled();
+    hooks.management = { visible: true };
+    vi.stubGlobal("document", { body: { style: { overflow: "auto" } }, activeElement: null });
+    vi.stubGlobal("HTMLElement", class {});
+    hooks.dialog = { focus: vi.fn(), querySelector: () => null };
+    node = render(() => AttributeEditorDialog({ title: "Patterns", children: "draft", onClose }));
+    expect(find(node, (element) => element.props.role === "presentation").props.hidden).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

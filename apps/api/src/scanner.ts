@@ -5,7 +5,7 @@ import { setImmediate as yieldToRequests } from "node:timers/promises";
 import { database } from "./database.js";
 import { AttributeNameMatcher, FilenameMetadataMatcher, normalizeMetadataFilename, normalizeMetadataPhrase } from "./filename-metadata.js";
 import { readComicMetadata, type ComicMetadata } from "./comic-metadata.js";
-import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail } from "./thumbnails.js";
+import { clearThumbnailCache, getPdfThumbnail, getVideoMetadata, getVideoThumbnail } from "./thumbnails.js";
 
 const videoExtensions = new Set([
   ".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg", ".ts",
@@ -36,7 +36,7 @@ interface ExistingItem extends ScannedItem {
 }
 
 export interface ScanProgress {
-  phase: "discovering" | "indexing" | "collections" | "thumbnails";
+  phase: "discovering" | "indexing" | "collections" | "metadata" | "thumbnails";
   startedAt: number;
   directoriesScanned: number;
   directoriesFound: number;
@@ -52,6 +52,8 @@ export interface ScanProgress {
   thumbnailsProcessed: number;
   thumbnailsTotal: number;
   thumbnailErrors: number;
+  videoMetadataProcessed: number;
+  videoMetadataTotal: number;
   currentPath: string;
 }
 
@@ -60,6 +62,7 @@ const newProgress = (): ScanProgress => ({
   filesChecked: 0, comicPages: 0, comicsFound: 0, videosFound: 0, pdfsFound: 0,
   itemsProcessed: 0, itemsTotal: 0, collectionsProcessed: 0, collectionsTotal: 0,
   thumbnailsProcessed: 0, thumbnailsTotal: 0, thumbnailErrors: 0, currentPath: ".",
+  videoMetadataProcessed: 0, videoMetadataTotal: 0,
 });
 
 const titleFromFilename = (filename: string) =>
@@ -432,6 +435,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
             updated_at = CURRENT_TIMESTAMP
           RETURNING id
         `);
+        const invalidateVideoMetadata = database.prepare(`UPDATE media_items SET video_width = NULL, video_height = NULL,
+          video_metadata_signature = NULL WHERE id = ? AND video_metadata_signature IS NOT NULL AND video_metadata_signature <> ?`);
         for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
           const item = items[itemIndex];
           const previous = previousByPath.get(pathKey(item));
@@ -470,6 +475,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
               item.relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount) as { id: number };
           }
           reconciledIds.add(row.id);
+          if (item.mediaType === "video") invalidateVideoMetadata.run(row.id, `${item.sizeBytes}:${item.modifiedAtMs}`);
           indexedItems.push({ id: row.id, item });
           const normalizedFilename = normalizeMetadataFilename(item.filename, item.fileExtension);
           for (const category of categoryMatcher.matchNormalized(normalizedFilename)) {
@@ -553,6 +559,33 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
       } catch (transactionError) {
         if (transactionOpen) database.exec("ROLLBACK");
         throw transactionError;
+      }
+      // Probe outside indexing transactions so library requests and cancellation stay responsive.
+      const videoSignatures = new Map((database.prepare("SELECT id, video_metadata_signature AS signature FROM media_items WHERE source_id = ? AND media_type = 'video'")
+        .all(sourceId) as Array<{ id: number; signature: string | null }>).map((row) => [row.id, row.signature]));
+      const videos = indexedItems.filter(({ id, item }) => item.mediaType === "video"
+        && videoSignatures.get(id) !== `${item.sizeBytes}:${item.modifiedAtMs}`);
+      if (videos.length) {
+        signal.throwIfAborted();
+        progress.phase = "metadata";
+        progress.videoMetadataTotal = videos.length;
+        const saveMetadata = database.prepare(`UPDATE media_items SET video_width = ?, video_height = ?,
+          duration_seconds = COALESCE(?, duration_seconds), video_metadata_signature = ?
+          WHERE id = ? AND size_bytes = ? AND modified_at_ms = ?`);
+        let nextVideo = 0;
+        const results = await Promise.allSettled(Array.from({ length: Math.min(2, videos.length) }, async () => {
+          while (nextVideo < videos.length) {
+            signal.throwIfAborted();
+            const { id, item } = videos[nextVideo++];
+            progress.currentPath = item.relativePath;
+            const metadata = await getVideoMetadata(path.resolve(rootPath, item.relativePath), signal);
+            signal.throwIfAborted();
+            saveMetadata.run(metadata.width, metadata.height, metadata.durationSeconds, `${item.sizeBytes}:${item.modifiedAtMs}`,
+              id, item.sizeBytes, item.modifiedAtMs);
+            progress.videoMetadataProcessed++;
+          }
+        }));
+        for (const result of results) if (result.status === "rejected") throw result.reason;
       }
       if (options.generateThumbnails || options.regenerateThumbnails) {
         signal.throwIfAborted();

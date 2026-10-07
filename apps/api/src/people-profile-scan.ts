@@ -25,7 +25,14 @@ export interface PeopleProfileScanReport {
   startedAt?: string; finishedAt?: string; error?: string; results: ScanRow[];
 }
 
+const activeProfileScans = new Map<string, PeopleProfileScanReport>();
+let nextProfileScanId = 0;
+export function getProfileScanActivity() {
+  return [...activeProfileScans].map(([id, report]) => ({ id, processed: report.processed, total: report.total, currentName: report.currentName }));
+}
+
 export function createPeopleProfileScanner(options: { createBrowser?: PeopleProfileBrowserFactory; fetchProfileImage?: ProfileImageFetch }) {
+  const activityId = `profile-${++nextProfileScanId}`;
   const reportPath = path.join(runtimeDirectory, "people-profile-scan.json");
   let report: PeopleProfileScanReport = { status: "idle", total: 0, processed: 0, updated: 0, currentName: null, results: [] };
   let controller: AbortController | null = null;
@@ -93,6 +100,7 @@ export function createPeopleProfileScanner(options: { createBrowser?: PeopleProf
       report.currentName = null; report.finishedAt = new Date().toISOString();
       await persist().catch(() => undefined);
       controller = null;
+      activeProfileScans.delete(activityId);
     }
   };
   const start = async () => {
@@ -102,6 +110,7 @@ export function createPeopleProfileScanner(options: { createBrowser?: PeopleProf
     const people = database.prepare("SELECT id, name, profile_image FROM people ORDER BY name COLLATE NOCASE").all() as Array<{ id: number; name: string; profile_image: string | null }>;
     report = { status: "running", total: people.length, processed: 0, updated: 0, currentName: null, startedAt: new Date().toISOString(), results: [] };
     controller = new AbortController();
+    activeProfileScans.set(activityId, report);
     task = run(people, controller.signal);
     return status();
   };

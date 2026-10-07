@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { writeFile } from "node:fs/promises";
 import { getEventListeners } from "node:events";
-import { getPdfThumbnail, getVideoThumbnail } from "./thumbnails.js";
+import { getPdfThumbnail, getVideoThumbnail, getThumbnailActivity } from "./thumbnails.js";
 
 const { workers, probes } = vi.hoisted(() => ({
   workers: [] as Array<{ outputPath: string; terminate: ReturnType<typeof vi.fn>; emit: (event: string, ...args: unknown[]) => boolean }>,
@@ -38,12 +38,14 @@ test("PDF cancellation terminates active workers, removes queued jobs, and allow
   await vi.waitFor(() => expect(workers).toHaveLength(2));
   const queued = getPdfThumbnail(900003, "third.pdf", 1, stamp, controllers[2].signal).catch((error: unknown) => error);
   await vi.waitFor(() => expect(getEventListeners(controllers[2].signal, "abort")).toHaveLength(1));
+  expect(getThumbnailActivity()).toMatchObject({ thumbnails: 3, running: 2 });
   controllers[2].abort();
   expect(await queued).toMatchObject({ name: "AbortError" });
   controllers[0].abort();
   controllers[1].abort();
   for (const result of await Promise.all([first, second])) expect(result).toMatchObject({ name: "AbortError" });
   expect(workers).toHaveLength(2);
+  expect(getThumbnailActivity()).toMatchObject({ thumbnails: 0, running: 0 });
   for (const worker of workers) expect(worker.terminate).toHaveBeenCalledOnce();
 
   const retry = getPdfThumbnail(900001, "first.pdf", 1, stamp);
@@ -62,7 +64,9 @@ test("video cancellation aborts the duration probe and does not launch fallback 
   const thumbnail = getVideoThumbnail(900004, "video.mp4", 1, Date.now(), controller.signal).catch((error: unknown) => error);
   await vi.waitFor(() => expect(probes).toHaveLength(1));
   expect(probes[0].signal).toBe(controller.signal);
+  expect(getThumbnailActivity()).toMatchObject({ thumbnails: 1, metadata: 1 });
   controller.abort();
   expect(await thumbnail).toMatchObject({ name: "AbortError" });
   expect(probes).toHaveLength(1);
+  expect(getThumbnailActivity()).toMatchObject({ thumbnails: 0, metadata: 0 });
 });

@@ -48,7 +48,7 @@ export function useContinuousReaderScroll(scrollRef: RefObject<HTMLElement | nul
 
     const onKeyDown = (event: KeyboardEvent) => {
       const eventTarget = event.target instanceof HTMLElement ? event.target : null;
-      if (eventTarget?.closest("input, textarea, select, [contenteditable], .dialog-backdrop")) return;
+      if (eventTarget?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
       const nextDirection = matchesShortcut(event, "reader.scrollUp") ? -1
         : matchesShortcut(event, "reader.scrollDown") ? 1 : 0;
       if (!nextDirection) return;

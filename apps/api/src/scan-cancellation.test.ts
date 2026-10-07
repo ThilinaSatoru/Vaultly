@@ -6,13 +6,15 @@ import path from "node:path";
 import { database } from "./database.js";
 import { cancelAllSourceScans, cancelSourceScan, collectItems, getScanProgress, scanSource } from "./scanner.js";
 import { buildVaultlyServer } from "./server.js";
-import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail } from "./thumbnails.js";
+import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail, getVideoMetadata } from "./thumbnails.js";
 
 vi.mock("./thumbnails.js", () => ({
   clearThumbnailCache: vi.fn().mockResolvedValue(undefined),
   getPdfThumbnail: vi.fn().mockResolvedValue("thumbnail.jpg"),
   getVideoThumbnail: vi.fn().mockResolvedValue("thumbnail.jpg"),
   getVideoDuration: vi.fn().mockResolvedValue(null),
+  getVideoMetadata: vi.fn().mockResolvedValue({ durationSeconds: 12, width: 1920, height: 1080 }),
+  getThumbnailActivity: vi.fn().mockReturnValue({ thumbnails: 0, running: 0, metadata: 0 }),
 }));
 
 const fixtures: Array<{ id: number; root: string }> = [];
@@ -35,6 +37,45 @@ afterEach(async () => {
   vi.mocked(getPdfThumbnail).mockReset().mockResolvedValue("thumbnail.jpg");
   vi.mocked(getVideoThumbnail).mockReset().mockResolvedValue("thumbnail.jpg");
   vi.mocked(clearThumbnailCache).mockClear();
+  vi.mocked(getVideoMetadata).mockReset().mockResolvedValue({ durationSeconds: 12, width: 1920, height: 1080 });
+});
+
+test("scans index video quality without thumbnails, cache unchanged files and refresh changed files", async () => {
+  const { id, root } = await source();
+  const file = path.join(root, "quality.mp4");
+  await writeFile(file, "video");
+  vi.mocked(getVideoMetadata).mockClear();
+  await scanSource(id, root);
+  expect(database.prepare("SELECT video_width, video_height, duration_seconds FROM media_items WHERE source_id = ?").get(id))
+    .toMatchObject({ video_width: 1920, video_height: 1080, duration_seconds: 12 });
+  await scanSource(id, root);
+  expect(getVideoMetadata).toHaveBeenCalledOnce();
+  vi.mocked(getVideoMetadata).mockResolvedValue({ width: 720, height: 480, durationSeconds: 6 });
+  await writeFile(file, "changed video");
+  await scanSource(id, root);
+  expect(getVideoMetadata).toHaveBeenCalledTimes(2);
+  const app = await buildVaultlyServer();
+  try {
+    const response = (await app.inject(`/api/items?type=video&source=${id}`)).json();
+    expect(response.items.find((item: { source_id: number }) => item.source_id === id))
+      .toMatchObject({ video_width: 720, video_height: 480 });
+  } finally { await app.close(); }
+});
+
+test("cancelling a video quality read leaves it eligible for retry", async () => {
+  const { id, root } = await source();
+  await writeFile(path.join(root, "cancel.mp4"), "video");
+  vi.mocked(getVideoMetadata).mockImplementationOnce((_file, signal) => new Promise((_resolve, reject) => {
+    signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+  }));
+  const scan = scanSource(id, root);
+  await vi.waitFor(() => expect(getScanProgress(id)?.phase).toBe("metadata"));
+  cancelSourceScan(id);
+  await scan;
+  expect(database.prepare("SELECT video_metadata_signature FROM media_items WHERE source_id = ?").get(id))
+    .toMatchObject({ video_metadata_signature: null });
+  await scanSource(id, root);
+  expect(database.prepare("SELECT video_height FROM media_items WHERE source_id = ?").get(id)).toMatchObject({ video_height: 1080 });
 });
 
 test("progress reports real discovery counts and thumbnail completion through the lightweight API", async () => {
@@ -61,13 +102,16 @@ test("progress reports real discovery counts and thumbnail completion through th
       thumbnailsProcessed: 0, thumbnailsTotal: 3, thumbnailErrors: 0 });
     expect(progress.elapsedMs).toBeGreaterThanOrEqual(0);
     expect(initial.phase).toBe("discovering");
+    expect((await app.inject("/api/activity")).json()).toContainEqual({ id: `source-${id}`, label: "Cancel fixture", detail: "Preparing thumbnails", processed: 0, total: 3, target: "sources" });
     pending[0].resolve("first.jpg");
     pending[1].resolve("second.jpg");
     await vi.waitFor(() => expect(pending).toHaveLength(3));
     expect(getScanProgress(id)).toMatchObject({ thumbnailsProcessed: 2, thumbnailsTotal: 3 });
+    expect((await app.inject("/api/activity")).json().find((task: { id: string }) => task.id === `source-${id}`)).toMatchObject({ processed: 2, total: 3 });
     pending[2].reject(new Error("Unreadable preview"));
     await scan;
     expect(getScanProgress(id)).toBeNull();
+    expect((await app.inject("/api/activity")).json().some((task: { id: string }) => task.id === `source-${id}`)).toBe(false);
     expect((await app.inject("/api/sources/scan/progress")).json().find((source: { id: number }) => source.id === id))
       .toMatchObject({ status: "ready", scan_progress: null });
     expect(clearThumbnailCache).not.toHaveBeenCalled();

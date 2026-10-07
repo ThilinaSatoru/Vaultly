@@ -214,7 +214,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.closest("input, textarea, select, [contenteditable], .dialog-backdrop")) return;
+      if (target?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
       const activatingControl = Boolean(target?.closest("button, a"));
       if (matchesShortcut(event, "video.playPause")) {
         if (activatingControl && (event.code === "Space" || event.code === "Enter")) return;

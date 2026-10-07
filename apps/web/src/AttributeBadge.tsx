@@ -56,8 +56,8 @@ export function AttributeBrowseProvider({ children, onNavigate }: { children: Re
     navigation.push(attributeGalleryFields(attribute, mediaType), `${mediaLabels[mediaType]} · ${attribute.name}`);
   };
   const browse = (attribute: BrowseAttribute, mediaType?: MediaType) => {
-    // Close the manager before opening the media chooser so modal focus and
-    // body-scroll cleanup finish before the next dialog takes ownership.
+    // Management remains independent of library browsing; callers may still
+    // handle navigation without closing the drawer or discarding its drafts.
     onNavigate?.();
     const section = navigation.current.current.fields.section;
     const type = mediaType ?? (section === "video" || section === "comic" || section === "story" ? section : undefined);

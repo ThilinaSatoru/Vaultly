@@ -10,12 +10,17 @@ import { runtimeDirectory } from "./database.js";
 const execFileAsync = promisify(execFile);
 const thumbnailDirectory = path.join(runtimeDirectory, "thumbnails");
 const inFlight = new Map<string, Promise<string>>();
-const durationInFlight = new Map<string, Promise<number | null>>();
+export interface VideoMetadata { durationSeconds: number | null; width: number | null; height: number | null }
+const metadataInFlight = new Map<string, Promise<VideoMetadata>>();
 const failedPdfUntil = new Map<string, number>();
 const waiting: Array<() => void> = [];
 const probeWaiting: Array<() => void> = [];
 let running = 0;
 let probesRunning = 0;
+
+export function getThumbnailActivity() {
+  return { thumbnails: inFlight.size, running, metadata: metadataInFlight.size };
+}
 
 export async function clearThumbnailCache(itemIds: number[]): Promise<void> {
   if (!itemIds.length) return;
@@ -92,13 +97,26 @@ async function captureFrame(inputPath: string, outputPath: string, seekSeconds: 
   if (!(await exists(outputPath))) throw new Error("FFmpeg did not produce a frame.");
 }
 
-export function getVideoDuration(inputPath: string, signal?: AbortSignal): Promise<number | null> {
-  const pending = durationInFlight.get(inputPath);
+export function parseVideoMetadata(diagnostic: string): VideoMetadata {
+  const duration = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(diagnostic);
+  const seconds = duration ? Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3]) : null;
+  const streams = diagnostic.split(/\r?\n/).filter((line) => /Stream .*Video:/.test(line) && !line.includes("attached pic"));
+  const stream = streams.find((line) => line.includes("(default)")) ?? streams[0] ?? "";
+  const dimensions = /(?:^|[,\s])([1-9]\d{1,5})x([1-9]\d{1,5})(?=[,\s]|$)/.exec(stream);
+  return {
+    durationSeconds: seconds !== null && Number.isFinite(seconds) && seconds > 0 ? seconds : null,
+    width: dimensions ? Number(dimensions[1]) : null,
+    height: dimensions ? Number(dimensions[2]) : null,
+  };
+}
+
+export function getVideoMetadata(inputPath: string, signal?: AbortSignal): Promise<VideoMetadata> {
+  const pending = metadataInFlight.get(inputPath);
   if (pending) return waitForTask(pending, signal);
   const task = withProbe(async () => {
     let diagnostic = "";
     try {
-      const result = await execFileAsync(ffmpegInstaller.path, ["-hide_banner", "-i", inputPath], {
+      const result = await execFileAsync(ffmpegInstaller.path, ["-hide_banner", "-nostdin", "-i", inputPath], {
         windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024, signal,
       });
       diagnostic = result.stderr;
@@ -106,13 +124,14 @@ export function getVideoDuration(inputPath: string, signal?: AbortSignal): Promi
       signal?.throwIfAborted();
       diagnostic = typeof error === "object" && error !== null && "stderr" in error ? String(error.stderr) : "";
     }
-    const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(diagnostic);
-    if (!match) return null;
-    const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
-    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
-  }, signal).finally(() => durationInFlight.delete(inputPath));
-  durationInFlight.set(inputPath, task);
+    return parseVideoMetadata(diagnostic);
+  }, signal).finally(() => metadataInFlight.delete(inputPath));
+  metadataInFlight.set(inputPath, task);
   return task;
+}
+
+export async function getVideoDuration(inputPath: string, signal?: AbortSignal): Promise<number | null> {
+  return (await getVideoMetadata(inputPath, signal)).durationSeconds;
 }
 
 function renderPdfInWorker(inputPath: string, outputPath: string, signal?: AbortSignal): Promise<void> {

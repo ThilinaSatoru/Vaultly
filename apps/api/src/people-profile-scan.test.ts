@@ -15,7 +15,7 @@ vi.mock("./database.js", async (original) => {
   finally { if (previous === undefined) delete process.env.VAULTLY_RUNTIME_DIR; else process.env.VAULTLY_RUNTIME_DIR = previous; }
 });
 import { database } from "./database.js";
-import { createPeopleProfileScanner, matchingProfiles, type ProfileCandidate } from "./people-profile-scan.js";
+import { createPeopleProfileScanner, matchingProfiles, getProfileScanActivity, type ProfileCandidate } from "./people-profile-scan.js";
 import { profileImageDirectory, storeProfileImage } from "./profile-images.js";
 
 afterAll(() => { database.close(); rmSync(isolated.directory, { recursive: true, force: true }); });
@@ -67,7 +67,9 @@ test("cancelling an in-flight lookup closes the browser and leaves unmatched peo
   }) });
   await scanner.start();
   await vi.waitFor(() => expect(entered).toHaveBeenCalled());
+  expect(getProfileScanActivity()).toEqual([expect.objectContaining({ total: 7, currentName: expect.any(String) })]);
   await expect(scanner.start()).rejects.toThrow("already running");
   expect((await scanner.cancel()).status).toBe("cancelled");
+  expect(getProfileScanActivity()).toEqual([]);
   expect(close).toHaveBeenCalledOnce();
 });

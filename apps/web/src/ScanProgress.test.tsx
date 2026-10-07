@@ -6,6 +6,7 @@ const progress: SourceScanProgress = {
   phase: "discovering", elapsedMs: 64000, directoriesScanned: 20, directoriesFound: 50,
   filesChecked: 2400, comicPages: 2200, comicsFound: 25, pdfsFound: 10, videosFound: 5,
   itemsProcessed: 0, itemsTotal: 40, collectionsProcessed: 0, collectionsTotal: 0,
+  videoMetadataProcessed: 0, videoMetadataTotal: 0,
   thumbnailsProcessed: 0, thumbnailsTotal: 0, thumbnailErrors: 0, currentPath: "Comics/Issue 01",
 };
 
@@ -22,6 +23,7 @@ test("discovery shows counters, comic pages and elapsed time without a guessed p
 test.each([
   ["indexing", "Categorizing media", { itemsProcessed: 10, itemsTotal: 40 }],
   ["collections", "Grouping collections", { collectionsProcessed: 10, collectionsTotal: 40 }],
+  ["metadata", "Reading video quality", { videoMetadataProcessed: 10, videoMetadataTotal: 40 }],
   ["thumbnails", "Preparing thumbnails", { thumbnailsProcessed: 10, thumbnailsTotal: 40 }],
 ] as const)("%s shows progress for that stage", (phase, label, counts) => {
   const html = renderToStaticMarkup(<ScanProgress progress={{ ...progress, ...counts, phase }} />);

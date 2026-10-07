@@ -21,7 +21,7 @@ function setup(section: string) {
 beforeEach(() => { hooks.contexts.clear(); hooks.pending = null; hooks.setPending.mockReset(); });
 
 describe("attribute badge browsing", () => {
-  it("closes the attribute manager before showing an unscoped media chooser", () => {
+  it("runs the optional navigation callback before showing an unscoped media chooser", () => {
     hooks.contexts.set(NavigationContext, { entry: { id: "page" }, current: { current: { fields: { section: "home" } } }, push: vi.fn() });
     const onNavigate = vi.fn();
     const provider = AttributeBrowseProvider({ children: null, onNavigate });

@@ -221,6 +221,9 @@ if (needsFilename) database.exec("ALTER TABLE media_items ADD COLUMN filename TE
 if (needsExtension) database.exec("ALTER TABLE media_items ADD COLUMN file_extension TEXT NOT NULL DEFAULT ''");
 if (needsFavorite) database.exec("ALTER TABLE media_items ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0");
 if (needsDuration) database.exec("ALTER TABLE media_items ADD COLUMN duration_seconds REAL");
+if (!mediaColumns.includes("video_width")) database.exec("ALTER TABLE media_items ADD COLUMN video_width INTEGER");
+if (!mediaColumns.includes("video_height")) database.exec("ALTER TABLE media_items ADD COLUMN video_height INTEGER");
+if (!mediaColumns.includes("video_metadata_signature")) database.exec("ALTER TABLE media_items ADD COLUMN video_metadata_signature TEXT");
 if (needsIndexed) {
   database.exec("ALTER TABLE media_items ADD COLUMN indexed INTEGER NOT NULL DEFAULT 1");
   database.exec("UPDATE media_items SET indexed = available");

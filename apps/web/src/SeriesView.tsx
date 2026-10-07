@@ -40,11 +40,11 @@ function PreviewImage({ src, retry }: { src: string; retry: boolean }) {
   }} />;
 }
 
-function Cover({ series, version = 0 }: { series: SeriesSummary; version?: number }) {
+function Cover({ series, version = 0, mediaType }: { series: SeriesSummary; version?: number; mediaType?: MediaType }) {
   const fallback = series.cover_item_id === null || !series.cover_item_type ? null
     : itemArtwork(series.cover_item_id, series.cover_item_type, series.cover_item_path ?? "");
   const cover = series.has_cover ? `/api/series/${series.id}/cover?v=${version}` : fallback;
-  return <div className="series-cover">
+  return <div className={`series-cover${(mediaType ?? setType(series)) === "video" ? " series-cover-video" : ""}`}>
     <Layers3 size={48} />
     {cover && <PreviewImage src={cover} retry={!series.has_cover && series.cover_item_type === "story"} />}
   </div>;
@@ -72,7 +72,7 @@ function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: 
   const badgeType = mediaType ?? (setType(entry) === "mixed" ? undefined : setType(entry) as MediaType);
   return <article className="series-card-wrap">
     <div className="series-card">
-      <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} /></button>
+      <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} mediaType={mediaType} /></button>
       <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{entry.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div></div>
     </div>
     <button className={`series-card-favorite${entry.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={entry.favorite ? `Remove ${entry.title} from favorites` : `Add ${entry.title} to favorites`}><Heart size={17} fill={entry.favorite ? "currentColor" : "none"} /></button>
@@ -294,7 +294,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     {error && <p className="page-error" role="alert">{error}</p>}
     {!detail || detail.id !== selectedId ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading set…</div> : <>
       <div className="series-hero">
-        <Cover series={detail} version={coverVersion} />
+        <Cover series={detail} version={coverVersion} mediaType={mediaType} />
         <div className="series-hero-body">
           <p className="eyebrow">{setSections.find((section) => section.type === setType(detail))?.title} · {detail.item_count} items</p>
           {editing ? <form className="series-edit" onSubmit={updateDetails}>

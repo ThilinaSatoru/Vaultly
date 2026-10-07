@@ -1,4 +1,4 @@
-import { AttributePatterns } from "./AttributePatterns";
+import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
 import { AttributeBadge } from "./AttributeBadge";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
@@ -11,6 +11,7 @@ export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[];
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
   const [renaming, setRenaming] = useState<Tag | null>(null);
+  const [patternEntry, setPatternEntry] = useState<Tag | null>(null);
   const { filtered, tools } = useAttributeList(tags, (tag) => tag.item_count ?? 0);
 
   const add = async (event: FormEvent) => {
@@ -54,13 +55,14 @@ export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[];
           <div className="category-row" key={tag.id}>
             <div className="category-symbol"><TagIcon size={20} /></div>
             <div><strong>{allowBrowse ? <AttributeBadge kind="tag" {...tag} /> : <span className="tag-badge">{tag.name}</span>}</strong><span>{formatCount(tag.item_count ?? 0)} items</span><AttributePatternSummary patterns={tag.patterns} /></div>
-            <AttributePatterns kind="tags" attribute={tag} onChanged={onChanged} />
+            <AttributePatternButton name={tag.name} onClick={() => setPatternEntry(tag)} />
             <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${tag.name}`} onClick={() => setRenaming(tag)}><Pencil size={17} /></button>
             <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${tag.name}`} onClick={() => remove(tag)}><Trash2 size={17} /></button>
           </div>
         ))}
       </div>
       {renaming && <RenameAttributeDialog kind="tags" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
+      {patternEntry && <AttributePatterns key={patternEntry.id} kind="tags" attribute={patternEntry} onChanged={onChanged} editorOnly onClose={() => setPatternEntry(null)} />}
     </section>
   );
 }
