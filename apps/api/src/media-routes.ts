@@ -8,9 +8,9 @@ import { z } from "zod";
 import { database } from "./database.js";
 import { substringFilter } from "./search-index.js";
 import { gallerySearchFilters } from "./gallery-search.js";
-import { getScanProgress } from "./scanner.js";
+import { getScanProgress, isVideoFile } from "./scanner.js";
 import { getPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
-import { cancelVideoPlayback, getVideoPlaybackFile, getVideoPlaybackStatus, prepareVideoPlayback, stopVideoPlaybacks } from "./video-playback.js";
+import { openVideoInDefaultPlayer } from "./open-video.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const pageInput = z.object({
@@ -123,7 +123,6 @@ async function sendLocalFile(
   reply: FastifyReply,
   filePath: string,
   rangeHeader: string | undefined,
-  cacheControl = "private, max-age=3600",
 ) {
   const fileStat = await stat(filePath);
   if (!fileStat.isFile()) return reply.code(400).send({ message: "This item is a folder, not a file." });
@@ -131,7 +130,7 @@ async function sendLocalFile(
   const mimeType = mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream";
   reply.header("Content-Type", mimeType);
   reply.header("Accept-Ranges", "bytes");
-  reply.header("Cache-Control", cacheControl);
+  reply.header("Cache-Control", "private, max-age=3600");
   reply.header("Content-Disposition", "inline");
 
   if (rangeHeader) {
@@ -226,9 +225,8 @@ function creditsByItem(itemIds: number[]) {
 
 export async function registerMediaRoutes(
   app: FastifyInstance,
-  options: { revealPath?: (itemPath: string) => Promise<void> } = {},
+  options: { revealPath?: (itemPath: string) => Promise<void>; openVideo?: (itemPath: string) => Promise<void> } = {},
 ) {
-  app.addHook("onClose", async () => { await stopVideoPlaybacks(); });
   app.get("/api/items/formats", async (request) => {
     const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
     return database.prepare(`
@@ -482,40 +480,27 @@ export async function registerMediaRoutes(
     return sendLocalFile(reply, filePath, request.headers.range);
   });
 
-  const playbackInput = async (request: FastifyRequest) => {
+  app.post("/api/items/:id/open", async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin && !["http://127.0.0.1:5173", "http://localhost:5173", `http://${request.headers.host}`].includes(origin)) {
+      return reply.code(403).send({ message: "Open videos from the Vaultly application." });
+    }
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
-    if (!item || item.media_type !== "video") return null;
-    const inputPath = await resolveItemPath(item);
-    const fileStat = await stat(inputPath);
-    return { id, inputPath, sizeBytes: fileStat.size, modifiedAtMs: fileStat.mtimeMs };
-  };
-  app.post("/api/items/:id/playback", async (request, reply) => {
-    const input = await playbackInput(request);
-    if (!input) return reply.code(404).send({ message: "Video not found." });
-    const { retry, session } = z.object({ retry: z.boolean().default(false), session: z.string().uuid().optional() }).parse(request.body ?? {});
-    const status = await prepareVideoPlayback(input, retry, session);
-    return reply.code(status.state === "queued" || status.state === "preparing" ? 202 : 200)
-      .header("Cache-Control", "no-store").send(status);
-  });
-  app.get("/api/items/:id/playback", async (request, reply) => {
-    const input = await playbackInput(request);
-    if (!input) return reply.code(404).send({ message: "Video not found." });
-    return reply.header("Cache-Control", "no-store").send(await getVideoPlaybackStatus(input));
-  });
-  app.delete("/api/items/:id/playback", async (request, reply) => {
-    const input = await playbackInput(request);
-    if (!input) return reply.code(404).send({ message: "Video not found." });
-    const { session } = z.object({ session: z.string().uuid().optional() }).parse(request.body ?? {});
-    await cancelVideoPlayback(input, session);
+    if (!item || item.media_type !== "video") return reply.code(404).send({ message: "Video not found." });
+    const filePath = await resolveItemPath(item);
+    if (!(await stat(filePath)).isFile() || !isVideoFile(filePath)) {
+      return reply.code(400).send({ message: "Only supported video files can be opened in the default player." });
+    }
+    if (!options.openVideo && process.platform !== "win32") {
+      return reply.code(501).send({ message: "Opening the default player requires Windows or the Vaultly desktop app." });
+    }
+    try { await (options.openVideo ?? openVideoInDefaultPlayer)(filePath); }
+    catch (error) {
+      app.log.warn({ err: error, id }, "Could not open the default video player");
+      return reply.code(502).send({ message: "Could not open the default player. Check that a video player is assigned to this file format in your system settings." });
+    }
     return reply.code(204).send();
-  });
-  app.get("/api/items/:id/playback/file", async (request, reply) => {
-    const input = await playbackInput(request);
-    if (!input) return reply.code(404).send({ message: "Video not found." });
-    const filePath = await getVideoPlaybackFile(input);
-    if (!filePath) return reply.code(409).send({ message: "Video is still being prepared for playback." });
-    return sendLocalFile(reply, filePath, request.headers.range, "private, no-cache");
   });
 
   app.post("/api/items/:id/reveal", async (request, reply) => {

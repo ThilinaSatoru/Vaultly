@@ -348,7 +348,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {!item && !error && <div className="viewer-loading"><LoaderCircle className="spin" size={30} /> Loading…</div>}
           {item?.media_type === "video" && (
             <div className="video-stage">
-              <VideoPlayer key={item.id} itemId={item.id} fileExtension={item.file_extension} src={`/api/items/${item.id}/file`} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
+              <VideoPlayer key={item.id} itemId={item.id} src={`/api/items/${item.id}/file`} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
           {item?.media_type === "story" && (

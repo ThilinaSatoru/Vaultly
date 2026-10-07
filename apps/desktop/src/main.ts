@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, shell } from "electron";
+import { app, BrowserWindow, dialog, net, shell } from "electron";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
 
@@ -12,6 +12,7 @@ async function createWindow() {
   if (!serverAddress) {
     process.env.VAULTLY_RUNTIME_DIR = app.getPath("userData");
     process.env.VAULTLY_PDF_WORKER_PATH = path.join(currentDirectory, "pdf-thumbnail-worker.mjs");
+    const { createPeopleProfileBrowser } = await import("./people-profile-browser.js");
 
     const { startVaultlyServer } = await import("../../api/src/server.js");
     const staticRoot = developmentUrl
@@ -20,6 +21,8 @@ async function createWindow() {
     const { app: server, address } = await startVaultlyServer({
       port: developmentUrl ? Number.parseInt(process.env.VAULTLY_API_PORT ?? "4400", 10) : 0,
       staticRoot,
+      fetchProfileImage: (url, options) => net.fetch(url, options),
+      createPeopleProfileBrowser,
       pickDirectory: async () => {
         const dialogOptions = {
         title: "Choose a media library folder",
@@ -31,6 +34,10 @@ async function createWindow() {
         return result.canceled ? null : result.filePaths[0] ?? null;
       },
       revealPath: async (itemPath) => shell.showItemInFolder(itemPath),
+      openVideo: async (itemPath) => {
+        const error = await shell.openPath(itemPath);
+        if (error) throw new Error(error);
+      },
     });
     serverAddress = address;
     closeServer = () => server.close();

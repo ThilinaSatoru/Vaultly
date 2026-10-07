@@ -53,10 +53,12 @@ export function AttributeBrowseProvider({ children, onNavigate }: { children: Re
   useEffect(() => { setPending(null); }, [navigation.entry.id]);
   const open = (attribute: BrowseAttribute, mediaType: AttributeMediaType) => {
     setPending(null);
-    onNavigate?.();
     navigation.push(attributeGalleryFields(attribute, mediaType), `${mediaLabels[mediaType]} · ${attribute.name}`);
   };
   const browse = (attribute: BrowseAttribute, mediaType?: MediaType) => {
+    // Close the manager before opening the media chooser so modal focus and
+    // body-scroll cleanup finish before the next dialog takes ownership.
+    onNavigate?.();
     const section = navigation.current.current.fields.section;
     const type = mediaType ?? (section === "video" || section === "comic" || section === "story" ? section : undefined);
     if (type) open(attribute, type);

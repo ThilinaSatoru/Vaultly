@@ -6,6 +6,7 @@ import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { database, type SourceRow } from "./database.js";
+import { removeLegacyPlaybackCache } from "./playback-cache.js";
 import { pickDirectory } from "./folder-picker.js";
 import { cancelAllSourceScans, cancelSourceScan, getScanProgress, scanSource } from "./scanner.js";
 import { registerMediaRoutes } from "./media-routes.js";
@@ -14,6 +15,8 @@ import { registerPeopleRoutes } from "./people-routes.js";
 import { registerBulkRoutes } from "./bulk-routes.js";
 import { registerCircleRoutes } from "./circle-routes.js";
 import { registerBackupRoutes } from "./backup-routes.js";
+import type { ProfileImageFetch } from "./profile-images.js";
+import { registerPeopleProfileScanRoutes, type PeopleProfileBrowserFactory } from "./people-profile-scan.js";
 
 export interface VaultlyServerOptions {
   host?: string;
@@ -21,9 +24,13 @@ export interface VaultlyServerOptions {
   staticRoot?: string;
   pickDirectory?: () => Promise<string | null>;
   revealPath?: (itemPath: string) => Promise<void>;
+  openVideo?: (itemPath: string) => Promise<void>;
+  fetchProfileImage?: ProfileImageFetch;
+  createPeopleProfileBrowser?: PeopleProfileBrowserFactory;
 }
 
 export async function buildVaultlyServer(options: VaultlyServerOptions = {}) {
+await removeLegacyPlaybackCache().catch(() => undefined);
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
 app.setErrorHandler((error, _request, reply) => {
@@ -37,9 +44,10 @@ app.setErrorHandler((error, _request, reply) => {
   return reply.code(500).send({ message: "Something went wrong while updating the library." });
 });
 
-await app.register(registerMediaRoutes, { revealPath: options.revealPath });
+await app.register(registerMediaRoutes, { revealPath: options.revealPath, openVideo: options.openVideo });
 await app.register(registerSeriesRoutes);
-await app.register(registerPeopleRoutes);
+await app.register(registerPeopleRoutes, { fetchProfileImage: options.fetchProfileImage });
+await app.register(registerPeopleProfileScanRoutes, { createBrowser: options.createPeopleProfileBrowser, fetchProfileImage: options.fetchProfileImage });
 await app.register(registerBulkRoutes);
 await app.register(registerCircleRoutes);
 await app.register(registerBackupRoutes);

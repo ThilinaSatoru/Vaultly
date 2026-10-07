@@ -21,6 +21,15 @@ function setup(section: string) {
 beforeEach(() => { hooks.contexts.clear(); hooks.pending = null; hooks.setPending.mockReset(); });
 
 describe("attribute badge browsing", () => {
+  it("closes the attribute manager before showing an unscoped media chooser", () => {
+    hooks.contexts.set(NavigationContext, { entry: { id: "page" }, current: { current: { fields: { section: "home" } } }, push: vi.fn() });
+    const onNavigate = vi.fn();
+    const provider = AttributeBrowseProvider({ children: null, onNavigate });
+    provider.props.value(attribute);
+    expect(onNavigate).toHaveBeenCalledOnce();
+    expect(hooks.setPending).toHaveBeenCalledWith(attribute);
+    expect(onNavigate.mock.invocationCallOrder[0]).toBeLessThan(hooks.setPending.mock.invocationCallOrder[0]);
+  });
   it("uses the clicked item's media type even when browsing a different library", () => {
     const { browse, push } = setup("comic");
     hooks.contexts.set(AttributeBrowseContext, browse);

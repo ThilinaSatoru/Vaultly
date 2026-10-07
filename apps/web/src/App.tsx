@@ -557,7 +557,7 @@ function LibraryApp() {
   };
 
   return (
-    <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: showAttributeManager }}><AttributeBrowseProvider onNavigate={() => setShowAddSource(false)}><div className="app-shell">
+    <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: showAttributeManager }}><AttributeBrowseProvider onNavigate={() => { setShowAddSource(false); setShowAttributeManager(false); }}><div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
         <nav aria-label="Main navigation">

@@ -6,6 +6,7 @@ import path from "node:path";
 import { database } from "./database.js";
 import { buildVaultlyServer } from "./server.js";
 import { scanSource } from "./scanner.js";
+import { normalizeMetadataPhrase } from "./filename-metadata.js";
 
 test("patterns and inherited source attributes work across scans, queries, edits and backups", async () => {
   const token = randomUUID();
@@ -35,7 +36,8 @@ test("patterns and inherited source attributes work across scans, queries, edits
       expect(listed.patterns.map((pattern: string) => pattern.toLowerCase()))
         .toEqual(expect.arrayContaining([alias.toLowerCase(), `${alias} extra`.toLowerCase()]));
     }
-    const firstName = `${aliases.tag} - ${aliases.category} - ${aliases.person}.pdf`;
+    const reversed = (alias: string, separator: string) => normalizeMetadataPhrase(alias).split(" ").reverse().join(separator);
+    const firstName = `${reversed(aliases.tag, " ")} - ${reversed(aliases.category, "")} - ${reversed(aliases.person, "")}.pdf`;
     await writeFile(path.join(root, firstName), "fixture");
     await scanSource(sourceId, root);
     const item = database.prepare("SELECT id FROM media_items WHERE source_id = ? AND filename = ?").get(sourceId, firstName) as { id: number };

@@ -36,13 +36,13 @@ export function AttributeManagerDialog({ open, kind, onKindChange, onClose, tags
       }}><Icon size={17} />{label}</button>)}
     </div>
     <div role="tabpanel" id={`${id}-panel-tags`} aria-labelledby={`${id}-tab-tags`} hidden={kind !== "tags"}>
-      <TagsView tags={tags} onChanged={onChanged} allowBrowse={false} />
+      <TagsView tags={tags} onChanged={onChanged} />
     </div>
     <div role="tabpanel" id={`${id}-panel-categories`} aria-labelledby={`${id}-tab-categories`} hidden={kind !== "categories"}>
-      <CategoriesView categories={categories} onChanged={onChanged} allowBrowse={false} />
+      <CategoriesView categories={categories} onChanged={onChanged} />
     </div>
     <div role="tabpanel" id={`${id}-panel-people`} aria-labelledby={`${id}-tab-people`} hidden={kind !== "people"}>
-      <PeopleView people={people} onChanged={onChanged} allowBrowse={false} />
+      <PeopleView people={people} onChanged={onChanged} />
     </div>
   </AttributeEditorDialog>;
 }

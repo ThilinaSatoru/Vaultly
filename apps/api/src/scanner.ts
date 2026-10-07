@@ -1,5 +1,5 @@
 import { withAttributePatterns } from "./attribute-routes.js";
-import { opendir, stat } from "node:fs/promises";
+import { lstat, opendir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToRequests } from "node:timers/promises";
 import { database } from "./database.js";
@@ -14,6 +14,8 @@ const videoExtensions = new Set([
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
 const storyExtensions = new Set([".pdf"]);
 const comicArchiveExtensions = new Set([".cbz", ".zip"]);
+
+export const isVideoFile = (filename: string) => videoExtensions.has(path.extname(filename).toLowerCase());
 
 interface ScannedItem {
   mediaType: "comic" | "video" | "story";
@@ -67,6 +69,124 @@ const strictIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "mod
   `${item.mediaType}|${item.sizeBytes}|${item.modifiedAtMs}|${item.fileCount}`;
 const looseIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "fileCount">) =>
   `${item.mediaType}|${item.sizeBytes}|${item.fileCount}`;
+
+const stripHashes = (value: string) => value.replace(/#/g, "").replace(/\s+/g, " ").trim();
+const scanPathKey = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
+
+/** Commit each rename with its index update before honoring cancellation again. */
+async function normalizeHashMarkers(sourceId: number, rootPath: string, items: ScannedItem[], signal: AbortSignal) {
+  const existing = database.prepare(`SELECT id, media_type AS mediaType, title, filename,
+    file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
+    modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
+    FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[];
+  if (!items.some((item) => item.filename.includes("#")) && !existing.some((item) => item.title.includes("#"))) return;
+  const byPath = new Map(existing.map((item) => [`${item.mediaType}|${scanPathKey(item.relativePath)}`, item]));
+  const incomingPaths = new Set(items.map((item) => `${item.mediaType}|${scanPathKey(item.relativePath)}`));
+  const strictMatches = new Map<string, ExistingItem[]>();
+  for (const item of existing) {
+    if (incomingPaths.has(`${item.mediaType}|${scanPathKey(item.relativePath)}`)) continue;
+    const matches = strictMatches.get(strictIdentity(item)) ?? [];
+    matches.push(item);
+    strictMatches.set(strictIdentity(item), matches);
+  }
+  const incomingCounts = new Map<string, number>();
+  for (const item of items) incomingCounts.set(strictIdentity(item), (incomingCounts.get(strictIdentity(item)) ?? 0) + 1);
+  const consumedIds = new Set<number>();
+  const update = database.prepare(`UPDATE media_items SET title = ?, filename = ?, relative_path = ?,
+    favorite = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`);
+  const insert = database.prepare(`INSERT INTO media_items(source_id, media_type, title, filename, file_extension,
+    relative_path, size_bytes, modified_at_ms, file_count, favorite) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`);
+  const updateChild = database.prepare("UPDATE media_items SET relative_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+  const indexedPath = database.prepare("SELECT id FROM media_items WHERE source_id = ? AND relative_path = ? COLLATE NOCASE");
+  let lastYield = performance.now();
+
+  // Children are normalized first so later folder moves carry their final filenames.
+  for (const item of [...items].sort((a, b) => b.relativePath.split(path.sep).length - a.relativePath.split(path.sep).length)) {
+    if (performance.now() - lastYield >= 25) {
+      await yieldToRequests();
+      lastYield = performance.now();
+    }
+    signal.throwIfAborted();
+    let previous = byPath.get(`${item.mediaType}|${scanPathKey(item.relativePath)}`);
+    if (!previous) {
+      const candidates = strictMatches.get(strictIdentity(item))?.filter((entry) => !consumedIds.has(entry.id));
+      if (candidates?.length === 1 && incomingCounts.get(strictIdentity(item)) === 1) previous = candidates[0];
+    }
+    const rootMarkerHandled = item.relativePath === "." && previous && !previous.title.includes("#");
+    if ((!item.filename.includes("#") || rootMarkerHandled) && !previous?.title.includes("#")) continue;
+    const oldRelativePath = item.relativePath;
+    const oldPath = path.resolve(rootPath, oldRelativePath);
+    const isFolder = !item.fileExtension;
+    const extension = isFolder ? "" : path.extname(item.filename);
+    const rawStem = extension ? item.filename.slice(0, -extension.length) : item.filename;
+    const stem = stripHashes(rawStem).replace(/[. ]+$/g, "") || "Untitled";
+    let filename = item.filename;
+    let relativePath = oldRelativePath;
+    if (item.filename.includes("#") && oldRelativePath !== ".") {
+      for (let suffix = 0; ; suffix++) {
+        signal.throwIfAborted();
+        filename = `${stem}${suffix ? ` (${suffix + 1})` : ""}${extension}`;
+        relativePath = path.join(path.dirname(oldRelativePath), filename);
+        if (indexedPath.get(sourceId, relativePath)) continue;
+        try { await lstat(path.resolve(rootPath, relativePath)); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") break;
+          throw error;
+        }
+      }
+    }
+    signal.throwIfAborted();
+    const nextPath = path.resolve(rootPath, relativePath);
+    const changedPath = relativePath !== oldRelativePath;
+    const previousDefaultTitle = previous && (previous.fileExtension ? titleFromFilename(previous.filename) : previous.filename);
+    const title = stripHashes(previous && previous.title !== previousDefaultTitle ? previous.title : item.title) || "Untitled";
+    const descendants = isFolder && changedPath ? existing.filter((child) => {
+      const suffix = path.relative(oldPath, path.resolve(rootPath, child.relativePath));
+      return suffix && suffix !== ".." && !suffix.startsWith(`..${path.sep}`) && !path.isAbsolute(suffix);
+    }) : [];
+    if (changedPath) await rename(oldPath, nextPath);
+    try {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        if (previous) {
+          update.run(title, filename, relativePath, previous.id);
+          consumedIds.add(previous.id);
+        } else {
+          const id = Number(insert.run(sourceId, item.mediaType, title, filename, item.fileExtension,
+            relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount).lastInsertRowid);
+          previous = { ...item, id, indexed: 1, available: 1 };
+          existing.push(previous);
+        }
+        for (const child of descendants) updateChild.run(path.join(relativePath, path.relative(oldPath, path.resolve(rootPath, child.relativePath))), child.id);
+        database.exec("COMMIT");
+      } catch (error) { database.exec("ROLLBACK"); throw error; }
+    } catch (error) {
+      if (changedPath) await rename(nextPath, oldPath);
+      throw error;
+    }
+    if (isFolder && changedPath) {
+      for (const child of [...items, ...descendants]) {
+        if (child === item) continue;
+        const suffix = path.relative(oldPath, path.resolve(rootPath, child.relativePath));
+        if (suffix && suffix !== ".." && !suffix.startsWith(`..${path.sep}`) && !path.isAbsolute(suffix)) {
+          child.relativePath = path.join(relativePath, suffix);
+        }
+      }
+    }
+    if (previous) byPath.delete(`${item.mediaType}|${scanPathKey(previous.relativePath)}`);
+    item.filename = filename;
+    item.relativePath = relativePath;
+    item.title = title;
+    Object.assign(previous, { filename, relativePath, title });
+    // Rebuild path keys after folder moves; the underlying IDs stay unchanged.
+    if (isFolder && changedPath) {
+      byPath.clear();
+      for (const entry of existing) byPath.set(`${entry.mediaType}|${scanPathKey(entry.relativePath)}`, entry);
+    } else {
+      byPath.set(`${item.mediaType}|${scanPathKey(relativePath)}`, previous!);
+    }
+  }
+}
 
 export function inferCollectionPattern(filename: string): { title: string; order: number } | null {
   const stem = path.basename(filename, path.extname(filename));
@@ -226,12 +346,14 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
     ).run(sourceId);
 
     try {
+      const items = await collectItems(rootPath, signal, progress);
+      progress.phase = "indexing";
+      await normalizeHashMarkers(sourceId, rootPath, items, signal);
       const previousItems = (database.prepare(`SELECT id, media_type AS mediaType, title, filename,
         file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
         modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
         FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[]);
       const previousItemIds = previousItems.map((row) => row.id);
-      const items = await collectItems(rootPath, signal, progress);
       signal.throwIfAborted();
       progress.phase = "indexing";
       progress.itemsTotal = items.length;

@@ -1,12 +1,11 @@
-import { LoaderCircle, Maximize, Minimize, Pause, Play, RefreshCw, Volume1, Volume2, VolumeX } from "lucide-react";
+import { ExternalLink, LoaderCircle, Maximize, Minimize, Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { matchesShortcut, readNumberPreference } from "./preferences";
-import { useVideoPlayback } from "./useVideoPlayback";
+import { api } from "./media";
 
 interface VideoPlayerProps {
   src: string;
   itemId?: number;
-  fileExtension?: string;
   autoPlay: boolean;
   compact?: boolean;
   onEnded?: () => void;
@@ -43,10 +42,7 @@ function formatTime(seconds: number) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = false, onEnded, onError }: VideoPlayerProps) {
-  const playback = useVideoPlayback(src, itemId, fileExtension);
-  const resumeTime = useRef(0);
-  const resumePlaying = useRef(false);
+export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, onError }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
@@ -65,13 +61,26 @@ export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = fa
   const [seeking, setSeeking] = useState(false);
   const [seekPreview, setSeekPreview] = useState<number | null>(null);
   const [volumeFeedback, setVolumeFeedback] = useState<number | null>(null);
+  const [unsupported, setUnsupported] = useState(false);
+  const [openingPlayer, setOpeningPlayer] = useState(false);
+  const [launchMessage, setLaunchMessage] = useState("");
 
-  const requestCompatiblePlayback = () => {
-    resumeTime.current = videoRef.current?.currentTime ?? 0;
-    resumePlaying.current = playing;
+  const handleUnsupported = () => {
     videoRef.current?.pause();
+    setUnsupported(true);
     onError("");
-    playback.fallback();
+  };
+  const openDefaultPlayer = async () => {
+    if (!itemId) return;
+    videoRef.current?.pause();
+    setOpeningPlayer(true);
+    setLaunchMessage("");
+    try {
+      await api(`/api/items/${itemId}/open`, { method: "POST" });
+      setLaunchMessage("Opened in your default player.");
+    } catch (error) {
+      setLaunchMessage(error instanceof Error ? error.message : "Could not open the default player.");
+    } finally { setOpeningPlayer(false); }
   };
 
   const showVolumeFeedback = (value: number) => {
@@ -117,8 +126,8 @@ export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = fa
 
   useEffect(() => {
     const video = videoRef.current;
-    if (playback.src && (autoPlay || resumePlaying.current) && video?.paused) void video.play().catch(() => undefined);
-  }, [autoPlay, playback.src]);
+    if (!unsupported && autoPlay && video?.paused) void video.play().catch(() => undefined);
+  }, [autoPlay, src, unsupported]);
 
   useEffect(() => {
     const onFsChange = () => setFullscreen(document.fullscreenElement === containerRef.current);
@@ -266,11 +275,11 @@ export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = fa
     >
       <video
         ref={videoRef}
-        src={playback.src}
-        autoPlay={autoPlay}
+        src={src}
+        autoPlay={autoPlay && !unsupported}
         preload="auto"
         playsInline
-        onCanPlay={() => { if (autoPlay && videoRef.current?.paused) void videoRef.current.play().catch(() => undefined); }}
+        onCanPlay={() => { if (!unsupported && autoPlay && videoRef.current?.paused) void videoRef.current.play().catch(() => undefined); }}
         onEnded={onEnded}
         onClick={() => {
           togglePlay();
@@ -279,31 +288,28 @@ export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = fa
         onLoadedMetadata={(event) => {
           // Some browsers play the audio track of an unsupported MP4 while
           // silently dropping its video, so no media-error event is emitted.
-          if (itemId && !playback.compatible && event.currentTarget.videoWidth === 0) {
-            requestCompatiblePlayback();
-            return;
-          }
-          if (resumeTime.current > 0) {
-            event.currentTarget.currentTime = Math.min(resumeTime.current, event.currentTarget.duration || resumeTime.current);
-            resumeTime.current = 0;
-          }
+          if (event.currentTarget.videoWidth === 0) handleUnsupported();
         }}
         onError={() => {
-          if (playback.preparing || playback.error) return;
-          if (itemId && !playback.compatible) {
-            requestCompatiblePlayback();
-          } else onError("This video could not be played. Try downloading the original file.");
+          handleUnsupported();
         }}
       />
 
-      {(playback.preparing || playback.error) && <div className="video-preparing" role="status" aria-live="polite">
-        {playback.preparing ? <><LoaderCircle className="spin" size={28} /><strong>{playback.queued ? "Waiting to prepare this video…" : "Preparing this video for playback…"}</strong>{playback.percent > 0 && <span>{playback.percent}%</span>}<small>Larger videos take longer to prepare. The prepared copy is saved for next time.</small></>
-          : <><p>{playback.error}</p><button className="secondary-button" type="button" onClick={playback.retry}>Retry playback</button>{itemId && <a className="secondary-button" href={`/api/items/${itemId}/file`} download>Download original</a>}</>}
+      {unsupported && <div className="video-external-fallback" role="status" aria-live="polite">
+        <ExternalLink size={28} /><strong>This video needs another player</strong>
+        <small>Open the original file in your default player. No video copy is created.</small>
+        {itemId && <button className="secondary-button" type="button" onClick={() => void openDefaultPlayer()} disabled={openingPlayer}>
+          {openingPlayer ? <LoaderCircle className="spin" size={17} /> : <ExternalLink size={17} />}{openingPlayer ? "Opening…" : "Open in default player"}
+        </button>}
+        {launchMessage && <small>{launchMessage}</small>}
+        <a className="secondary-button" href={src} download>Download original</a>
       </div>}
+
+      {!unsupported && launchMessage && <div className="video-launch-status" role="status">{launchMessage}</div>}
 
       {volumeFeedback !== null && <div className="video-volume-feedback" role="status" aria-live="polite">Volume {volumeFeedback}%</div>}
 
-      <div className="video-controls">
+      <div className="video-controls" hidden={unsupported}>
         <div className="video-progress">
           <div className="video-progress-track">
             <div className="video-progress-buffered" style={{ width: `${bufferedPct}%` }} />
@@ -355,7 +361,7 @@ export function VideoPlayer({ src, itemId, fileExtension, autoPlay, compact = fa
             />
           </div>
           <div className="video-controls-spacer" />
-          {itemId && !playback.compatible && <button type="button" className="icon-button" title="Use compatibility mode if video or audio does not play correctly" aria-label="Use compatibility mode" onClick={requestCompatiblePlayback}><RefreshCw size={19} /></button>}
+          {itemId && <button type="button" className="icon-button" title="Open the original video in your default player" aria-label="Open in default player" disabled={openingPlayer} onClick={() => void openDefaultPlayer()}><ExternalLink size={19} /></button>}
           <button type="button" className="icon-button" onClick={toggleFullscreen} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}>
             {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
           </button>

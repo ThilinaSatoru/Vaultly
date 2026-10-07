@@ -43,6 +43,7 @@ export function AttributePatterns({ kind, attribute, onChanged }: {
     <button className="secondary-button attribute-pattern-button" type="button" title="Edit matching patterns" aria-label={`Patterns for ${attribute.name}`} onClick={openEditor}><ListFilter size={16} /> Patterns</button>
     {open && <AttributeEditorDialog title={`Patterns for ${attribute.name}`} onClose={() => setOpen(false)} busy={saving} focusReady={loaded && !loading && !saving}>
         <p className="dialog-intro">Add alternative spellings, names, or synonyms, one per line. Any matching phrase in a filename assigns “{attribute.name}”. Its original name also matches.</p>
+        <p className="dialog-intro">Names and patterns with multiple words automatically match in any word order, with the words separated or joined together (for example, “Jane Doe”, “Doe Jane”, “JaneDoe”, or “DoeJane”). Rescan to apply matches to existing media.</p>
         <form onSubmit={save}>
           <label htmlFor={`patterns-${kind}-${attribute.id}`}>Alternative words or phrases (optional)</label>
           <textarea id={`patterns-${kind}-${attribute.id}`} className="attribute-pattern-input" rows={7} value={text} onChange={(event) => setText(event.target.value)} placeholder={"One synonym per line"} disabled={!loaded || loading || saving} maxLength={10100} />

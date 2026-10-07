@@ -1,18 +1,23 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 
-const { video, playback } = vi.hoisted(() => ({
+const { video, hooks } = vi.hoisted(() => ({
   video: { currentTime: 42, pause: vi.fn() },
-  playback: { src: "/api/items/1/file", preparing: false, queued: false, percent: 0, error: "", compatible: false, fallback: vi.fn(), retry: vi.fn() },
+  hooks: { states: [] as unknown[], cursor: 0 },
 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
-  useState: (initial: unknown) => [typeof initial === "function" ? initial() : initial, vi.fn()],
+  useState: (initial: unknown) => {
+    const index = hooks.cursor++;
+    if (!(index in hooks.states)) hooks.states[index] = typeof initial === "function" ? initial() : initial;
+    return [hooks.states[index], (value: unknown) => { hooks.states[index] = typeof value === "function" ? value(hooks.states[index]) : value; }];
+  },
   useRef: (initial: unknown) => ({ current: initial === null ? video : initial }),
   useEffect: vi.fn(),
 }));
-vi.mock("./useVideoPlayback", () => ({ useVideoPlayback: () => playback }));
+vi.mock("./media", () => ({ api: vi.fn() }));
 vi.mock("./preferences", () => ({ readNumberPreference: (_key: string, fallback: number) => fallback, matchesShortcut: () => false }));
+import { api } from "./media";
 import { VideoPlayer } from "./VideoPlayer";
 
 function find(node: ReactNode, predicate: (element: ReactElement<any>) => boolean): ReactElement<any> {
@@ -25,34 +30,44 @@ function find(node: ReactNode, predicate: (element: ReactElement<any>) => boolea
   }
   throw new Error("Control not found");
 }
+function render() {
+  hooks.cursor = 0;
+  return VideoPlayer({ itemId: 1, src: "/api/items/1/file", autoPlay: true, onError: vi.fn() });
+}
 beforeEach(() => {
-  vi.clearAllMocks(); playback.compatible = false;
+  vi.clearAllMocks(); hooks.states = [];
   vi.stubGlobal("window", { localStorage: { getItem: () => null } });
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-test("native errors and audio-only decoding automatically request compatible playback", () => {
-  const onError = vi.fn();
-  const view = VideoPlayer({ itemId: 1, fileExtension: "mp4", src: playback.src, autoPlay: true, onError });
-  const element = find(view, (node) => node.type === "video");
-  element.props.onLoadedMetadata({ currentTarget: { videoWidth: 320 } });
-  expect(playback.fallback).not.toHaveBeenCalled();
+test("unsupported video and audio-only decoding show a launch action without converting or opening anything automatically", () => {
+  const element = find(render(), (node) => node.type === "video");
+  expect(element.props.src).toBe("/api/items/1/file");
   element.props.onLoadedMetadata({ currentTarget: { videoWidth: 0 } });
-  expect(playback.fallback).toHaveBeenCalledOnce();
+  const fallback = find(render(), (node) => node.props.className === "video-external-fallback");
+  expect(find(fallback, (node) => node.type === "button").props.children).toContain("Open in default player");
+  expect(vi.mocked(api)).not.toHaveBeenCalled();
   expect(video.pause).toHaveBeenCalledOnce();
-  expect(onError).toHaveBeenCalledWith("");
-  element.props.onError();
-  expect(playback.fallback).toHaveBeenCalledTimes(2);
+  expect(find(render(), (node) => node.type === "video").props.autoPlay).toBe(false);
 });
 
-test("manual compatibility mode handles missing audio, and a failed compatible stream does not retry endlessly", () => {
-  const onError = vi.fn();
-  const view = VideoPlayer({ itemId: 1, src: playback.src, autoPlay: false, onError });
-  find(view, (node) => node.props["aria-label"] === "Use compatibility mode").props.onClick();
-  expect(playback.fallback).toHaveBeenCalledOnce();
-  playback.compatible = true;
-  const compatible = VideoPlayer({ itemId: 1, src: playback.src, autoPlay: false, onError });
-  find(compatible, (node) => node.type === "video").props.onError();
-  expect(playback.fallback).toHaveBeenCalledOnce();
-  expect(onError).toHaveBeenLastCalledWith("This video could not be played. Try downloading the original file.");
+test("explicit player actions open the original item and report launch errors", async () => {
+  vi.mocked(api).mockResolvedValueOnce(undefined);
+  const view = render();
+  const open = find(view, (node) => node.props["aria-label"] === "Open in default player");
+  open.props.onClick();
+  await Promise.resolve();
+  expect(api).toHaveBeenCalledWith("/api/items/1/open", { method: "POST" });
+  expect(find(render(), (node) => node.props.className === "video-launch-status").props.children).toBe("Opened in your default player.");
+  vi.mocked(api).mockRejectedValueOnce(new Error("No video player is assigned"));
+  open.props.onClick();
+  await Promise.resolve();
+  expect(find(render(), (node) => node.props.className === "video-launch-status").props.children).toBe("No video player is assigned");
+});
+
+test("a native playback error offers the original download and default player", () => {
+  find(render(), (node) => node.type === "video").props.onError();
+  const fallback = find(render(), (node) => node.props.className === "video-external-fallback");
+  expect(find(fallback, (node) => node.type === "a").props.href).toBe("/api/items/1/file");
+  expect(api).not.toHaveBeenCalled();
 });

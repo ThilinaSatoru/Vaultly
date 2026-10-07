@@ -205,6 +205,8 @@ database.exec(`
 `);
 
 const sourceColumns = (database.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>).map((column) => column.name);
+const peopleColumns = (database.prepare("PRAGMA table_info(people)").all() as Array<{ name: string }>).map((column) => column.name);
+if (!peopleColumns.includes("profile_image")) database.exec("ALTER TABLE people ADD COLUMN profile_image TEXT");
 if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD COLUMN connected INTEGER NOT NULL DEFAULT 1");
 
 // Filename and format are stored separately from the relative path so a filename

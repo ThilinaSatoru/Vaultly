@@ -31,6 +31,14 @@ await Promise.all([
   }),
   build({
     ...shared,
+    entryPoints: ["src/profile-scan-cli.ts"],
+    outfile: "dist/profile-scan.cjs",
+    format: "cjs",
+    define: { "import.meta.url": "undefined" },
+    external: ["electron", "@napi-rs/canvas"],
+  }),
+  build({
+    ...shared,
     entryPoints: ["../api/pdf-thumbnail-worker.mjs"],
     outfile: "dist/pdf-thumbnail-worker.mjs",
     external: ["@napi-rs/canvas"],

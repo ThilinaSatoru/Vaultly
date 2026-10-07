@@ -54,13 +54,13 @@ export function SettingsView() {
   const createBackup = async () => {
     setBackupBusy(true); setBackupMessage("");
     try {
-      const backup = await api<Record<string, unknown>>("/api/backup");
-      const payload = { ...backup, preferences: preferences() };
-      const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+      const response = await fetch("/api/backup/archive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferences: preferences() }) });
+      if (!response.ok) throw new Error((await response.json()).message || "Could not create the backup.");
+      const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `vaultly-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      link.download = `vaultly-backup-${new Date().toISOString().slice(0, 10)}.json.gz`;
       link.click();
       URL.revokeObjectURL(url);
       setBackupMessage("Backup created successfully.");
@@ -75,14 +75,15 @@ export function SettingsView() {
     if (!file || !window.confirm("Restore this backup? Current Vaultly metadata and preferences will be replaced.")) return;
     setBackupBusy(true); setBackupMessage("");
     try {
-      const payload = JSON.parse(await file.text()) as { preferences?: Record<string, unknown> } & Record<string, unknown>;
-      await api("/api/backup/restore", { method: "POST", body: JSON.stringify(payload) });
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const compressed = bytes[0] === 0x1f && bytes[1] === 0x8b;
+      const restored = await api<{ preferences?: Record<string, unknown> }>("/api/backup/restore", { method: "POST", headers: { "Content-Type": compressed ? "application/gzip" : "application/json" }, body: compressed ? file : new TextDecoder().decode(bytes) });
       for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
         const key = window.localStorage.key(index);
         if (key?.startsWith("vaultly.")) window.localStorage.removeItem(key);
       }
-      if (payload.preferences && typeof payload.preferences === "object") {
-        for (const [key, value] of Object.entries(payload.preferences)) {
+      if (restored.preferences && typeof restored.preferences === "object") {
+        for (const [key, value] of Object.entries(restored.preferences)) {
           if (key.startsWith("vaultly.") && typeof value === "string") window.localStorage.setItem(key, value);
         }
       }
@@ -107,8 +108,8 @@ export function SettingsView() {
 
   return <section className="settings-view">
     <div className="page-heading"><div><p className="eyebrow">Vaultly preferences</p><h1>Settings & controls</h1><p>Preferences stay on this computer and remain active until you change them.</p></div></div>
-    <section className="settings-panel"><div className="settings-panel-heading"><Download size={20} /><div><h2>Backup and migration</h2><p>Save the complete index, metadata, collections, source definitions, and preferences to one portable file.</p></div></div>
-      <div className="backup-actions"><button className="primary-button" type="button" disabled={backupBusy} onClick={() => void createBackup()}><Download size={17} /> Create backup</button><button className="secondary-button" type="button" disabled={backupBusy} onClick={() => restoreInput.current?.click()}><Upload size={17} /> Restore backup</button><input ref={restoreInput} className="visually-hidden" type="file" accept="application/json,.json" onChange={(event) => void restoreBackup(event)} /></div>
+    <section className="settings-panel"><div className="settings-panel-heading"><Download size={20} /><div><h2>Backup and migration</h2><p>Save the complete index, metadata, collections, profile images, source definitions, and preferences to one compressed archive.</p></div></div>
+      <div className="backup-actions"><button className="primary-button" type="button" disabled={backupBusy} onClick={() => void createBackup()}><Download size={17} /> Create backup</button><button className="secondary-button" type="button" disabled={backupBusy} onClick={() => restoreInput.current?.click()}><Upload size={17} /> Restore backup</button><input ref={restoreInput} className="visually-hidden" type="file" accept="application/gzip,application/json,.gz,.json" onChange={(event) => void restoreBackup(event)} /></div>
       <p className="backup-note">After moving to another computer, restore the backup and use <strong>Sources → Relocate source</strong> for any drive or folder paths that changed. Rescanning preserves matched metadata.</p>
       {backupMessage && <p className="backup-message" role="status">{backupMessage}</p>}
     </section>

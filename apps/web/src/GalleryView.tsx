@@ -54,15 +54,12 @@ function distributedPreviewPoints(duration: number): number[] {
 }
 
 function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDuration: number | null }) {
-  const [source, setSource] = useState(`/api/items/${itemId}/file`);
   const [failed, setFailed] = useState(false);
-  const activeRef = useRef(true);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pointsRef = useRef<number[]>([]);
   const pointIndexRef = useRef(0);
   const segmentEndRef = useRef(0);
   const changingSegmentRef = useRef(false);
-  useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
 
   const playPoint = (index: number) => {
     const video = videoRef.current;
@@ -89,7 +86,7 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
   if (failed) return <img src={`/api/items/${itemId}/thumbnail`} alt="" />;
   return <video
     ref={videoRef}
-    src={source}
+    src={`/api/items/${itemId}/file`}
     muted
     playsInline
     preload="metadata"
@@ -107,15 +104,7 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
       if (event.currentTarget.currentTime >= segmentEndRef.current - 0.04) advance();
     }}
     onEnded={advance}
-    onError={() => {
-      if (source.endsWith("/playback/file")) { setFailed(true); return; }
-      // Hovering can reuse a prepared video without starting a full conversion.
-      void api<{ state: string }>(`/api/items/${itemId}/playback`).then((status) => {
-        if (!activeRef.current) return;
-        if (status.state === "ready") setSource(`/api/items/${itemId}/playback/file`);
-        else setFailed(true);
-      }).catch(() => { if (activeRef.current) setFailed(true); });
-    }}
+    onError={() => setFailed(true)}
   />;
 }
 

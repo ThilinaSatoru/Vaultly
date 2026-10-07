@@ -54,6 +54,7 @@ export interface Tag {
 export interface Person {
   id: number;
   name: string;
+  profile_image?: string | null;
   cast_count?: number;
   artist_count?: number;
   patterns?: string[];

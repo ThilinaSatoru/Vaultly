@@ -6,6 +6,7 @@
   "main": "dist/main.cjs",
   "scripts": {
     "build:main": "node build.mjs",
+    "profiles:scan": "pnpm build:main && electron dist/profile-scan.cjs",
     "build": "pnpm build:main",
     "dev": "pnpm build:main && concurrently -k -n web,electron -c magenta,cyan \"pnpm --filter @vaultly/web dev\" \"wait-on http://127.0.0.1:5173 && cross-env VAULTLY_DEV_SERVER_URL=http://127.0.0.1:5173 electron dist/main.cjs\"",
     "dist": "pnpm --filter @vaultly/web build && pnpm build && electron-builder",
