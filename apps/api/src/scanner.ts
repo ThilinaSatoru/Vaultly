@@ -1,4 +1,6 @@
 import { withAttributePatterns } from "./attribute-routes.js";
+import { isSourceConverting } from "./source-conversion.js";
+import { withSourceScan } from "./process-resources.js";
 import { lstat, opendir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToRequests } from "node:timers/promises";
@@ -36,6 +38,8 @@ interface ExistingItem extends ScannedItem {
 }
 
 export interface ScanProgress {
+  logs: string[];
+  waitingForResources: boolean;
   phase: "discovering" | "indexing" | "collections" | "metadata" | "thumbnails";
   startedAt: number;
   directoriesScanned: number;
@@ -58,6 +62,8 @@ export interface ScanProgress {
 }
 
 const newProgress = (): ScanProgress => ({
+  logs: ["Scan queued; waiting for available resources"],
+  waitingForResources: true,
   phase: "discovering", startedAt: Date.now(), directoriesScanned: 0, directoriesFound: 1,
   filesChecked: 0, comicPages: 0, comicsFound: 0, videosFound: 0, pdfsFound: 0,
   itemsProcessed: 0, itemsTotal: 0, collectionsProcessed: 0, collectionsTotal: 0,
@@ -315,6 +321,13 @@ const scans = new Map<number, { promise: Promise<void>; controller: AbortControl
 
 export function getScanProgress(sourceId: number): (ScanProgress & { elapsedMs: number }) | null {
   const progress = scans.get(sourceId)?.progress;
+  if (progress) {
+    const line = progress.waitingForResources ? "Scan queued; waiting for available resources" : `${progress.phase}: ${progress.currentPath || "processing source"}`;
+    if (progress.logs[progress.logs.length - 1] !== line) {
+      progress.logs.push(line);
+      if (progress.logs.length > 100) progress.logs.shift();
+    }
+  }
   return progress ? { ...progress, elapsedMs: Date.now() - progress.startedAt } : null;
 }
 
@@ -334,6 +347,7 @@ export async function cancelAllSourceScans(): Promise<number> {
 }
 
 export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean } = {}): Promise<void> {
+  if (isSourceConverting(sourceId)) return Promise.resolve();
   const existingScan = scans.get(sourceId);
   if (existingScan) return existingScan.promise;
 
@@ -343,11 +357,11 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
   const previousSource = database.prepare("SELECT status, last_error FROM sources WHERE id = ?")
     .get(sourceId) as { status: string; last_error: string | null } | undefined;
 
-  const scan = (async () => {
-    database.prepare(
+  database.prepare(
       "UPDATE sources SET status = 'scanning', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     ).run(sourceId);
-
+  const scan = withSourceScan(async () => {
+    progress.waitingForResources = false;
     try {
       const items = await collectItems(rootPath, signal, progress);
       progress.phase = "indexing";
@@ -632,7 +646,11 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         UPDATE sources SET status = 'error', last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
       `).run(message, sourceId);
     }
-  })().finally(() => scans.delete(sourceId));
+  }, signal).catch((error) => {
+    if (!signal.aborted) throw error;
+    database.prepare("UPDATE sources SET status = ?, last_error = ? WHERE id = ?")
+      .run(previousSource?.status === "scanning" ? "idle" : previousSource?.status ?? "idle", previousSource?.last_error ?? null, sourceId);
+  }).finally(() => scans.delete(sourceId));
 
   scans.set(sourceId, { promise: scan, controller, progress });
   return scan;

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./media";
+import { LogView } from "./LogView";
 
 interface ProfileScan {
   available: boolean; status: "idle" | "running" | "completed" | "cancelled" | "failed";
@@ -45,6 +46,6 @@ export function PeopleProfileScan({ onChanged }: { onChanged: () => void }) {
     {report && !report.available && <p>Open the desktop app to run the browser scraper.</p>}
     {report && report.status !== "idle" && <div role="status"><p>{report.status === "running" ? `Checking ${report.currentName ?? "directories"}…` : `Scan ${report.status}.`} {report.processed} / {report.total} people checked · {report.updated} photos saved.</p><progress value={report.processed} max={Math.max(1, report.total)} aria-label="Profile scan progress" /></div>}
     {(error || report?.error) && <p className="page-error" role="alert">{error || report?.error}</p>}
-    {Boolean(report?.results.length) && <details><summary>View scan results</summary><ul>{report!.results.map((row) => <li key={row.id}><strong>{row.name}</strong> — {outcomeLabels[row.outcome] ?? row.outcome}{row.message && <p>{row.message}</p>}</li>)}</ul></details>}
+    {Boolean(report?.results.length) && <details><summary>View scan results</summary><LogView revision={report!.processed} label="Profile scan results"><ul>{report!.results.map((row) => <li key={row.id}><strong>{row.name}</strong> — {outcomeLabels[row.outcome] ?? row.outcome}{row.message && <p>{row.message}</p>}</li>)}</ul></LogView></details>}
   </section>;
 }

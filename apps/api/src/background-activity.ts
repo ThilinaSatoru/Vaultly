@@ -1,4 +1,5 @@
 import { database } from "./database.js";
+import { getConversionActivity } from "./source-conversion.js";
 import { getScanProgress } from "./scanner.js";
 import { getThumbnailActivity } from "./thumbnails.js";
 import { getProfileScanActivity } from "./people-profile-scan.js";
@@ -9,7 +10,7 @@ export interface BackgroundTask {
 }
 
 export function getBackgroundActivity(): BackgroundTask[] {
-  const tasks: BackgroundTask[] = [];
+  const tasks: BackgroundTask[] = getConversionActivity();
   const sources = database.prepare("SELECT id, name FROM sources WHERE status = 'scanning'").all() as Array<{ id: number; name: string }>;
   for (const source of sources) {
     const progress = getScanProgress(source.id);
@@ -20,7 +21,7 @@ export function getBackgroundActivity(): BackgroundTask[] {
             : [progress.thumbnailsProcessed, progress.thumbnailsTotal];
     const phase = progress?.phase ?? "discovering";
     const labels = { discovering: "Reading folders", indexing: "Categorizing media", collections: "Grouping collections", metadata: "Reading video quality", thumbnails: "Preparing thumbnails" };
-    tasks.push({ id: `source-${source.id}`, label: source.name, detail: labels[phase], processed: counts?.[0] ?? null, total: counts?.[1] ?? null, target: "sources" });
+    tasks.push({ id: `source-${source.id}`, label: source.name, detail: progress?.waitingForResources ? "Waiting for scan slot / resources" : labels[phase], processed: counts?.[0] ?? null, total: counts?.[1] ?? null, target: "sources" });
   }
   for (const profile of getProfileScanActivity()) {
     tasks.push({ id: profile.id, label: "Profile photos", detail: profile.currentName ?? "Checking directories", processed: profile.processed, total: profile.total, target: "people" });

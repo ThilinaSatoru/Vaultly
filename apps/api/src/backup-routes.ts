@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { getConversionActivity } from "./source-conversion.js";
 import { z } from "zod";
 import { database } from "./database.js";
 import { gzip, gunzip } from "node:zlib";
@@ -89,6 +90,7 @@ export async function registerBackupRoutes(app: FastifyInstance) {
   });
 
   app.post("/api/backup/restore", { bodyLimit: maxBackupBytes }, async (request, reply) => {
+    if (getConversionActivity().length) return reply.code(409).send({ message: "Cancel video conversion before restoring a backup." });
     let payload = request.body;
     if (Buffer.isBuffer(payload)) {
       try { payload = JSON.parse((await decompress(payload, { maxOutputLength: maxBackupBytes })).toString("utf8")); }

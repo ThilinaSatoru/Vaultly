@@ -8,27 +8,28 @@ const { workers, probes } = vi.hoisted(() => ({
   probes: [] as Array<{ args: string[]; signal: AbortSignal }>,
 }));
 
-vi.mock("node:worker_threads", async () => {
+vi.mock("node:child_process", async () => {
   const { EventEmitter } = await import("node:events");
-  return { Worker: class extends EventEmitter {
+  const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+  class PdfProcess extends EventEmitter {
     outputPath: string;
     terminate = vi.fn(async () => { this.emit("exit", 1); return 1; });
-    constructor(_url: URL, options: { workerData: { outputPath: string } }) {
+    kill = this.terminate;
+    constructor(args: string[]) {
       super();
-      this.outputPath = options.workerData.outputPath;
+      this.outputPath = args[1];
       workers.push(this);
     }
-  } };
-});
-
-vi.mock("node:child_process", () => ({
+  }
+  return { ...actual, fork: (_url: URL, args: string[]) => new PdfProcess(args),
   execFile: (_file: string, args: string[], options: { signal: AbortSignal }, callback: (error: Error) => void) => {
     probes.push({ args, signal: options.signal });
     const abort = () => callback(Object.assign(new Error("Cancelled"), { name: "AbortError" }));
     options.signal.addEventListener("abort", abort, { once: true });
     if (options.signal.aborted) abort();
   },
-}));
+  };
+});
 
 test("PDF cancellation terminates active workers, removes queued jobs, and allows an immediate retry", async () => {
   const controllers = Array.from({ length: 3 }, () => new AbortController());

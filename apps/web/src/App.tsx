@@ -1,4 +1,6 @@
 import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
+import { SourceConversion } from "./SourceConversion";
+import { SourcesBrowser } from "./SourcesBrowser";
 import { AttributeBadge, AttributeBrowseProvider } from "./AttributeBadge";
 import { ManagementDrawer, type ManagementTab } from "./ManagementDrawer";
 import { BackgroundStatus } from "./BackgroundStatus";
@@ -186,12 +188,13 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
   );
 }
 
-function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeOptions & { source: LibrarySource; onChanged: () => void }) {
+function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions }: SourceAttributeOptions & { source: LibrarySource; onChanged: () => void; expanded: boolean; onToggle: () => void }) {
+  const [converting, setConverting] = useState(false);
   const [attributesOpen, setAttributesOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState("");
-  const displayStatus = source.path_available ? source.status : "unavailable";
+  const displayStatus = source.path_available ? converting ? "converting" : source.status : "unavailable";
 
   const rescan = async () => {
     setWorking(true);
@@ -253,14 +256,15 @@ function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeO
   };
 
   return (
-    <article className="source-card">
+    <article className={`source-card${expanded ? " is-expanded" : ""}`}>
       <div className="source-card-top">
-        <div className="drive-icon"><HardDrive size={23} /></div>
+        <button className="source-expand" type="button" aria-expanded={expanded} aria-controls={`source-details-${source.id}`} aria-label={`${expanded ? "Collapse" : "Expand"} ${source.name}`} onClick={onToggle}><ChevronRight size={17} /></button>
+        <div className="drive-icon"><HardDrive size={19} /></div>
         <div className="source-heading">
           <div className="source-title-line">
-            <h3>{source.name}</h3>
+            <h3><button className="source-name-toggle" type="button" aria-expanded={expanded} aria-controls={`source-details-${source.id}`} onClick={onToggle}>{source.name}</button></h3>
             <span className={`status status-${displayStatus}`}>
-              {displayStatus === "scanning" ? <LoaderCircle className="spin" size={13} /> : displayStatus === "ready" ? <Check size={13} /> : displayStatus === "unavailable" ? <AlertTriangle size={13} /> : null}
+              {displayStatus === "scanning" || displayStatus === "converting" ? <LoaderCircle className="spin" size={13} /> : displayStatus === "ready" ? <Check size={13} /> : displayStatus === "unavailable" ? <AlertTriangle size={13} /> : null}
               {displayStatus}
             </span>
           </div>
@@ -273,11 +277,11 @@ function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeO
           {menuOpen && (
             <div className="source-menu">
               <button type="button" onClick={() => { setMenuOpen(false); setAttributesOpen(true); }}><TagIcon size={16} /> Common attributes</button>
-              <button type="button" onClick={() => void relocate()} disabled={source.status === "scanning"}><FolderOpen size={16} /> Relocate source</button>
+              <button type="button" onClick={() => void relocate()} disabled={converting || source.status === "scanning"}><FolderOpen size={16} /> Relocate source</button>
               {source.status === "scanning"
                 ? <button type="button" onClick={() => void cancelScan()}><X size={16} /> Cancel scan</button>
-                : <button type="button" onClick={rescan} disabled={!source.path_available}><RefreshCw size={16} /> Scan again</button>}
-              <button className="danger" type="button" onClick={remove} disabled={source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
+                : <button type="button" onClick={rescan} disabled={converting || !source.path_available}><RefreshCw size={16} /> Scan again</button>}
+              <button className="danger" type="button" onClick={remove} disabled={converting || source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
             </div>
           )}
         </div>
@@ -289,12 +293,15 @@ function SourceCard({ source, onChanged, ...attributeOptions }: SourceAttributeO
         <div><BookOpen size={17} /><span>Stories</span><strong>{formatCount(source.story_count)}</strong></div>
       </div>
 
+      <div id={`source-details-${source.id}`} className="source-details" hidden={!expanded}>
       <div className="source-common-attributes">
         <div className="attribute-badges">{(source.tags ?? []).map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{(source.categories ?? []).map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>
         <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
       </div>
-      {attributesOpen && <SourceAttributesDialog source={source} {...attributeOptions} onClose={() => setAttributesOpen(false)} onSaved={onChanged} />}
       {source.status === "scanning" && source.scan_progress && <ScanProgress progress={source.scan_progress} />}
+      {source.video_count > 0 && <SourceConversion sourceId={source.id} enabled={source.path_available && source.status !== "scanning" && Boolean(source.last_scanned_at)} onChanged={onChanged} onRunning={setConverting} />}
+      </div>
+      {attributesOpen && <SourceAttributesDialog source={source} {...attributeOptions} onClose={() => setAttributesOpen(false)} onSaved={onChanged} />}
       <footer>
         <span>{source.status === "scanning" ? "Scan in progress…" : formatScanDate(source.last_scanned_at)}</span>
         {source.status === "scanning"
@@ -560,9 +567,9 @@ function LibraryApp() {
     } finally { setRescanningAll(false); }
   };
 
-  const sourcesPanel = <>
+  const sourcesPanel = <div className="sources-page">
     <div className="page-heading">
-      <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Add folders from this computer. Each scan includes the source folder and all its subfolders. Scans detect media and add missing metadata when existing category, tag, or cast/artist names appear in filenames. Existing sources only rescan when you choose to; opening the app does not rescan them.</p></div>
+      <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Manage local folders by media type. Expand a source for attributes, scanning, and conversion. Scans include subfolders and run when you choose.</p></div>
       <div className="page-heading-actions">{isScanning
         ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
         : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
@@ -580,7 +587,7 @@ function LibraryApp() {
     {loading && sources.length === 0 ? (
       <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading sources…</span></div>
     ) : sources.length > 0 ? (
-      <div className="source-grid">{sources.map((source) => <SourceCard key={source.id} source={source} {...attributeOptions} onChanged={() => { void loadSources(true); refreshMedia(); }} />)}</div>
+      <SourcesBrowser sources={sources} renderSource={(source, expanded, toggle) => <SourceCard key={source.id} source={source} expanded={expanded} onToggle={toggle} {...attributeOptions} onChanged={() => { void loadSources(true); refreshMedia(); }} />} />
     ) : (
       <section className="empty-state">
         <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
@@ -592,7 +599,7 @@ function LibraryApp() {
     )}
 
     {showAddSource && <AddSourceDialog {...attributeOptions} onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); refreshMedia(); }} />}
-  </>;
+  </div>;
 
   return (
     <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: managementOpen && !managementMinimized }}><AttributeBrowseProvider><div className="app-shell">

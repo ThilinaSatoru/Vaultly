@@ -18,6 +18,8 @@ import { registerBackupRoutes } from "./backup-routes.js";
 import type { ProfileImageFetch } from "./profile-images.js";
 import { registerPeopleProfileScanRoutes, type PeopleProfileBrowserFactory } from "./people-profile-scan.js";
 import { getBackgroundActivity } from "./background-activity.js";
+import { getSystemResources } from "./process-resources.js";
+import { cancelSourceConversion, checkConversionRuntime, getConversionProgress, isSourceConverting, startSourceConversion } from "./source-conversion.js";
 
 export interface VaultlyServerOptions {
   host?: string;
@@ -62,6 +64,36 @@ const sourceCreateInput = sourceInput.merge(sourceAttributesInput);
 
 const sourceIdInput = z.object({ id: z.coerce.number().int().positive() });
 
+app.get("/api/sources/:id/conversion", async (request, reply) => {
+  const { id } = sourceIdInput.parse(request.params);
+  if (!database.prepare("SELECT id FROM sources WHERE id = ?").get(id)) return reply.code(404).send({ message: "Library source not found." });
+  return getConversionProgress(id);
+});
+app.post("/api/sources/:id/conversion", async (request, reply) => {
+  const origin = request.headers.origin;
+  if (origin && !["http://127.0.0.1:5173", "http://localhost:5173", `http://${request.headers.host}`].includes(origin)) return reply.code(403).send({ message: "Conversion must be started from Vaultly." });
+  const { id } = sourceIdInput.parse(request.params);
+  const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+  if (!source) return reply.code(404).send({ message: "Library source not found." });
+  if (source.status === "scanning" || !source.last_scanned_at) return reply.code(409).send({ message: "Finish scanning this source before converting videos." });
+  if (isSourceConverting(id)) return reply.code(202).send(getConversionProgress(id));
+  try { await checkConversionRuntime(); }
+  catch { return reply.code(503).send({ message: "Conversion requires Python, ffmpeg and ffprobe on PATH. Set VAULTLY_PYTHON if Python uses a different executable." }); }
+  // A scan may have started while checking the external tools.
+  const current = database.prepare("SELECT status, root_path FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+  if (!current || current.status === "scanning" || current.root_path !== source.root_path) return reply.code(409).send({ message: "Source changed; try conversion after scanning finishes." });
+  return reply.code(202).send(startSourceConversion(id, source.root_path));
+});
+app.post("/api/sources/:id/conversion/cancel", async (request) => {
+  const { id } = sourceIdInput.parse(request.params);
+  return cancelSourceConversion(id);
+});
+app.addHook("onClose", async () => {
+  await cancelAllSourceScans();
+  const sources = database.prepare("SELECT id FROM sources").all() as Array<{ id: number }>;
+  await Promise.all(sources.map(({ id }) => cancelSourceConversion(id)));
+});
+
 const sourceSummaryQuery = `
   SELECT
     s.*,
@@ -76,6 +108,7 @@ const sourceSummaryQuery = `
 
 app.get("/api/health", async () => ({ ok: true }));
 app.get("/api/activity", async () => getBackgroundActivity());
+app.get("/api/system/resources", async () => getSystemResources());
 
 app.get("/api/sources", async () => {
   const sources = database.prepare("SELECT * FROM sources ORDER BY created_at DESC").all() as unknown as SourceRow[];
@@ -142,7 +175,7 @@ app.post("/api/sources", async (request, reply) => {
       setSourceAttributes(sourceId, input);
       database.exec("COMMIT");
     } catch (error) { database.exec("ROLLBACK"); throw error; }
-    void scanSource(sourceId, resolvedPath);
+    void scanSource(sourceId, resolvedPath).catch((error) => app.log.error(error, "Source scan failed"));
     const source = database.prepare(`${sourceSummaryQuery} HAVING s.id = ?`).get(sourceId);
     return reply.code(201).send({ ...(source as Record<string, unknown>), ...sourceAttributes(sourceId) });
   } catch (error) {
@@ -155,7 +188,8 @@ app.post("/api/sources", async (request, reply) => {
 
 app.post("/api/sources/scan", async (_request, reply) => {
   const sources = database.prepare("SELECT * FROM sources ORDER BY id").all() as unknown as SourceRow[];
-  for (const source of sources) void scanSource(source.id, source.root_path, { generateThumbnails: true });
+  if (sources.some((source) => isSourceConverting(source.id))) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
+  for (const source of sources) void scanSource(source.id, source.root_path, { generateThumbnails: true }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning", count: sources.length });
 });
 
@@ -163,7 +197,8 @@ app.post("/api/sources/:id/scan", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
-  void scanSource(source.id, source.root_path, { generateThumbnails: true });
+  if (isSourceConverting(id)) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
+  void scanSource(source.id, source.root_path, { generateThumbnails: true }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning" });
 });
 
@@ -179,6 +214,7 @@ app.post("/api/sources/:id/scan/cancel", async (request, reply) => {
 
 app.patch("/api/sources/:id", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
+  if (isSourceConverting(id)) return reply.code(409).send({ message: "Cancel video conversion before relocating this source." });
   const input = sourceInput.parse(request.body);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
@@ -198,11 +234,13 @@ app.patch("/api/sources/:id", async (request, reply) => {
     }
     throw error;
   }
-  void scanSource(id, resolvedPath);
+  void scanSource(id, resolvedPath).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ id, name, root_path: resolvedPath, status: "scanning" });
 });
 
 app.delete("/api/sources/:id", async (request, reply) => {
+  const sourceId = sourceIdInput.parse(request.params).id;
+  if (isSourceConverting(sourceId)) return reply.code(409).send({ message: "Cancel video conversion before removing this source." });
   const { id } = sourceIdInput.parse(request.params);
   await cancelSourceScan(id);
   const result = database.prepare("DELETE FROM sources WHERE id = ?").run(id);

@@ -1,11 +1,11 @@
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
-import { execFile } from "node:child_process";
+import { execFile, fork } from "node:child_process";
 import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { Worker } from "node:worker_threads";
 import { pathToFileURL } from "node:url";
 import { runtimeDirectory } from "./database.js";
+import { withMediaProcess } from "./process-resources.js";
 
 const execFileAsync = promisify(execFile);
 const thumbnailDirectory = path.join(runtimeDirectory, "thumbnails");
@@ -89,11 +89,11 @@ async function withProbe<T>(task: () => Promise<T>, signal?: AbortSignal): Promi
 
 async function captureFrame(inputPath: string, outputPath: string, seekSeconds: string, signal?: AbortSignal) {
   signal?.throwIfAborted();
-  await execFileAsync(ffmpegInstaller.path, [
-    "-hide_banner", "-loglevel", "error", "-nostdin", "-ss", seekSeconds,
+  await withMediaProcess(() => execFileAsync(ffmpegInstaller.path, [
+    "-hide_banner", "-loglevel", "error", "-nostdin", "-threads", "2", "-filter_threads", "1", "-ss", seekSeconds,
     "-i", inputPath, "-frames:v", "1", "-vf", "scale=480:-2",
-    "-q:v", "5", "-y", outputPath,
-  ], { windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024, signal });
+    "-q:v", "5", "-threads", "2", "-y", outputPath,
+  ], { windowsHide: true, timeout: 20_000, maxBuffer: 1024 * 1024, signal }), signal);
   if (!(await exists(outputPath))) throw new Error("FFmpeg did not produce a frame.");
 }
 
@@ -116,9 +116,9 @@ export function getVideoMetadata(inputPath: string, signal?: AbortSignal): Promi
   const task = withProbe(async () => {
     let diagnostic = "";
     try {
-      const result = await execFileAsync(ffmpegInstaller.path, ["-hide_banner", "-nostdin", "-i", inputPath], {
+      const result = await withMediaProcess(() => execFileAsync(ffmpegInstaller.path, ["-hide_banner", "-nostdin", "-threads", "2", "-i", inputPath], {
         windowsHide: true, timeout: 10_000, maxBuffer: 1024 * 1024, signal,
-      });
+      }), signal);
       diagnostic = result.stderr;
     } catch (error) {
       signal?.throwIfAborted();
@@ -139,10 +139,13 @@ function renderPdfInWorker(inputPath: string, outputPath: string, signal?: Abort
   const workerUrl = process.env.VAULTLY_PDF_WORKER_PATH
     ? pathToFileURL(path.resolve(process.env.VAULTLY_PDF_WORKER_PATH))
     : new URL("../pdf-thumbnail-worker.mjs", import.meta.url);
-  const worker = new Worker(workerUrl, {
-    workerData: { inputPath, outputPath },
-    execArgv: [],
-  });
+  // Native canvas/PDF failures must not terminate the desktop's main process.
+  const processOptions = {
+    execArgv: ["--max-old-space-size=256"], windowsHide: true,
+    stdio: ["ignore", "ignore", "ignore", "ipc"] as ("ignore" | "ipc")[],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+  };
+  const worker = fork(workerUrl, [inputPath, outputPath], processOptions);
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const finish = (error?: Error) => {
@@ -150,13 +153,13 @@ function renderPdfInWorker(inputPath: string, outputPath: string, signal?: Abort
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", abort);
+      worker.kill();
       if (error) reject(error); else resolve();
     };
     const timer = setTimeout(() => {
-      void worker.terminate();
       finish(new Error("PDF thumbnail rendering timed out."));
     }, 8_000);
-    const abort = () => { void worker.terminate().then(() => finish(signal?.reason)); };
+    const abort = () => finish(signal?.reason);
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort();
     worker.once("message", (message: { ok: boolean; error?: string }) => {
@@ -165,7 +168,7 @@ function renderPdfInWorker(inputPath: string, outputPath: string, signal?: Abort
     worker.once("error", (error) => finish(error));
     worker.once("exit", (code) => {
       if (signal?.aborted) finish(signal.reason);
-      else if (code !== 0) finish(new Error(`PDF thumbnail worker exited with code ${code}.`));
+      else finish(new Error(`PDF thumbnail worker exited before producing a thumbnail (code ${code}).`));
     });
   });
 }
@@ -237,7 +240,7 @@ export function getPdfThumbnail(
       await mkdir(thumbnailDirectory, { recursive: true });
       const temporaryPath = path.join(thumbnailDirectory, `${cacheKey}-${process.pid}-${Date.now()}.tmp.jpg`);
       try {
-        await renderPdfInWorker(inputPath, temporaryPath, signal);
+        await withMediaProcess(() => renderPdfInWorker(inputPath, temporaryPath, signal), signal);
         signal?.throwIfAborted();
         await rename(temporaryPath, targetPath);
         return targetPath;

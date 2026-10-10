@@ -1,6 +1,9 @@
 import { formatCount } from "./media";
+import { LogView } from "./LogView";
 
 export interface SourceScanProgress {
+  logs?: string[];
+  waitingForResources?: boolean;
   phase: "discovering" | "indexing" | "collections" | "metadata" | "thumbnails";
   elapsedMs: number;
   directoriesScanned: number;
@@ -28,7 +31,7 @@ const phaseLabels = {
 };
 
 export function ScanProgress({ progress }: { progress: SourceScanProgress }) {
-  const label = phaseLabels[progress.phase];
+  const label = progress.waitingForResources ? "Waiting for scan slot / resources" : phaseLabels[progress.phase];
   const [processed, total] = progress.phase === "indexing" ? [progress.itemsProcessed, progress.itemsTotal]
     : progress.phase === "collections" ? [progress.collectionsProcessed, progress.collectionsTotal]
       : progress.phase === "metadata" ? [progress.videoMetadataProcessed, progress.videoMetadataTotal]
@@ -49,5 +52,6 @@ export function ScanProgress({ progress }: { progress: SourceScanProgress }) {
     <p className="scan-progress-media">{formatCount(progress.comicsFound)} comics · {formatCount(progress.pdfsFound)} PDFs · {formatCount(progress.videosFound)} videos{progress.comicPages > 0 && ` · ${formatCount(progress.comicPages)} comic pages`}</p>
     {progress.currentPath && <p className="scan-progress-path" title={progress.currentPath}>{progress.currentPath === "." ? "Source folder" : progress.currentPath}</p>}
     {progress.thumbnailErrors > 0 && <p className="scan-progress-warning">{formatCount(progress.thumbnailErrors)} thumbnails could not be generated.</p>}
+    {!!progress.logs?.length && <LogView revision={progress.logs.join("\n")} label="Source scan log">{progress.logs.map((line, index) => <p key={index}>{line}</p>)}</LogView>}
   </section>;
 }

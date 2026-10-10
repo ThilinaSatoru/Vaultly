@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, net, shell } from "electron";
-import { writeFileSync } from "node:fs";
+import { appendFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const currentDirectory = __dirname;
@@ -7,6 +8,14 @@ const developmentUrl = process.env.VAULTLY_DEV_SERVER_URL;
 let mainWindow: BrowserWindow | null = null;
 let closeServer: (() => Promise<void>) | null = null;
 let serverAddress: string | null = null;
+let shuttingDown = false;
+function recordCrash(details: string) {
+  const snapshot = `RSS=${Math.round(process.memoryUsage().rss / 1024 ** 2)}MB free=${Math.round(os.freemem() / 1024 ** 2)}MB`;
+  try { appendFileSync(path.join(app.getPath("userData"), "crash-error.log"), `${new Date().toISOString()} ${snapshot}\n${details}\n`, "utf8"); }
+  catch { console.error(details); }
+}
+process.on("uncaughtExceptionMonitor", (error) => recordCrash(error.stack ?? error.message));
+app.on("child-process-gone", (_event, details) => recordCrash(`Child process: ${JSON.stringify(details)}`));
 
 async function createWindow() {
   if (!serverAddress) {
@@ -55,6 +64,7 @@ async function createWindow() {
   });
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
+  mainWindow.webContents.on("render-process-gone", (_event, details) => recordCrash(`Renderer: ${JSON.stringify(details)}`));
   mainWindow.on("closed", () => { mainWindow = null; });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
@@ -103,6 +113,9 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-app.on("before-quit", () => {
-  if (closeServer) void closeServer();
+app.on("before-quit", (event) => {
+  if (closeServer && !shuttingDown) {
+    event.preventDefault(); shuttingDown = true;
+    void closeServer().catch((error) => recordCrash(String(error))).finally(() => app.quit());
+  }
 });
