@@ -1,3 +1,4 @@
+import { vaultUrl, vaultFetch } from "./vault-session";
 import { useContext } from "react";
 import { NavigationContext, useNavigationField } from "./navigation";
 import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Clapperboard, Heart, Image, Layers3, LoaderCircle, Pencil, Plus, Search, Trash2, Upload, X } from "lucide-react";
@@ -33,7 +34,7 @@ function PreviewImage({ src, retry }: { src: string; retry: boolean }) {
   }, [src]);
   if (hidden) return null;
   const url = retry ? `${src}${src.includes("?") ? "&" : "?"}attempt=${attempt}` : src;
-  return <img key={url} src={url} alt="" onError={() => {
+  return <img key={url} src={vaultUrl(url)} alt="" onError={() => {
     if (!retry || attempt >= 8) { setHidden(true); return; }
     setHidden(true);
     timer.current = window.setTimeout(() => { timer.current = null; setAttempt((value) => value + 1); setHidden(false); }, 3000);
@@ -244,7 +245,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     if (file.size > 5 * 1024 * 1024) { setError("Cover image must be under 5 MB."); return; }
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/series/${detail.id}/cover`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file });
+      const response = await vaultFetch(`/api/series/${detail.id}/cover`, { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: file });
       if (!response.ok) throw new Error((await response.json()).message || "Could not save cover.");
       setCoverVersion(Date.now());
       await Promise.all([loadDetail(detail.id), loadList()]);

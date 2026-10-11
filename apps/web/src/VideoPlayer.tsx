@@ -1,3 +1,4 @@
+import { vaultStorage } from "./vault-session";
 import { ExternalLink, LoaderCircle, Maximize, Minimize, Pause, Play, Volume1, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { matchesShortcut, readNumberPreference } from "./preferences";
@@ -16,9 +17,9 @@ const readStoredVolume = () => {
   return readNumberPreference("vaultly.video.volume", 1, 0, 1);
 };
 
-const readStoredMuted = () => window.localStorage.getItem("vaultly.video.muted") === "true";
+const readStoredMuted = () => vaultStorage.getItem("vaultly.video.muted") === "true";
 const readSeekSeconds = (large = false) => {
-  const storedUnit = window.localStorage.getItem(large ? "vaultly.video.seekLargeUnit" : "vaultly.video.seekUnit");
+  const storedUnit = vaultStorage.getItem(large ? "vaultly.video.seekLargeUnit" : "vaultly.video.seekUnit");
   const unit = storedUnit === "minutes" || storedUnit === "seconds"
     ? storedUnit
     : large ? "minutes" : "seconds";
@@ -105,8 +106,8 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     const onVolume = () => {
       setVolume(video.volume);
       setMuted(video.muted);
-      window.localStorage.setItem("vaultly.video.volume", String(video.volume));
-      window.localStorage.setItem("vaultly.video.muted", String(video.muted));
+      vaultStorage.setItem("vaultly.video.volume", String(video.volume));
+      vaultStorage.setItem("vaultly.video.muted", String(video.muted));
     };
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("loadedmetadata", onLoadedMeta);

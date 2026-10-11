@@ -1,3 +1,4 @@
+import { vaultUrl } from "./vault-session";
 import { useState, type ChangeEvent, type FormEvent } from "react";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { api, type Person } from "./media";
@@ -41,7 +42,7 @@ export function PersonImageDialog({ person, onClose, onSaved }: { person: Person
     finally { setBusy(false); }
   };
   return <AttributeEditorDialog title={`Profile image · ${person.name}`} onClose={onClose} busy={busy}>
-    {person.profile_image && <img className="person-image-preview" src={`/api/people/${person.id}/image?v=${person.profile_image}`} alt={person.name} />}
+    {person.profile_image && <img className="person-image-preview" src={vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`)} alt={person.name} />}
     <p className="dialog-intro">Upload an image or download one from a URL. Images are saved on this computer and included in backups.</p>
     <label className="person-image-upload">Upload image<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={(event) => void upload(event)} /></label>
     <form className="category-form" onSubmit={(event) => void fromUrl(event)}><label htmlFor="person-image-url">Image URL</label><div><input id="person-image-url" type="url" placeholder="https://example.com/photo.jpg" value={url} onChange={(event) => setUrl(event.target.value)} disabled={busy} required /></div><label htmlFor="person-image-referrer">Source page URL (optional)</label><div><input id="person-image-referrer" type="url" placeholder="Page where you found the image" value={referrer} onChange={(event) => setReferrer(event.target.value)} disabled={busy} /></div><p className="dialog-intro">Some sites require the gallery or page URL to allow image downloads.</p><button className="primary-button" type="submit" disabled={busy || !url.trim()}>Save image</button></form>

@@ -2,6 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { getConversionActivity } from "./source-conversion.js";
 import { z } from "zod";
 import { database } from "./database.js";
+import { getActiveVaultProfile } from "./vault-profiles.js";
+import { getBackgroundActivity } from "./background-activity.js";
 import { gzip, gunzip } from "node:zlib";
 import { promisify } from "node:util";
 import { normalizeProfileImage, readProfileImage, removeProfileImage, storeProfileImage } from "./profile-images.js";
@@ -76,7 +78,7 @@ export async function registerBackupRoutes(app: FastifyInstance) {
     for (const person of data.people!) {
       if (typeof person.profile_image === "string") profileImages[person.profile_image] = (await readProfileImage(person.profile_image)).toString("base64");
     }
-    return { format: "vaultly-backup", version: 2, createdAt: new Date().toISOString(), data, profileImages };
+    return { format: "vaultly-backup", version: 2, createdAt: new Date().toISOString(), profile: getActiveVaultProfile(), data, profileImages };
   };
   app.get("/api/backup", exportBackup);
   app.post("/api/backup/archive", async (request, reply) => {
@@ -85,12 +87,13 @@ export async function registerBackupRoutes(app: FastifyInstance) {
     const encoded = Buffer.from(JSON.stringify({ ...backup, preferences }));
     if (encoded.length > maxBackupBytes) return reply.code(400).send({ message: "The backup exceeds the 100 MB restore limit." });
     return reply.type("application/gzip")
-      .header("Content-Disposition", `attachment; filename="vaultly-backup-${new Date().toISOString().slice(0, 10)}.json.gz"`)
+      .header("Content-Disposition", `attachment; filename="vaultly-${getActiveVaultProfile().id}-backup-${new Date().toISOString().slice(0, 10)}.json.gz"`)
       .send(await compress(encoded, { level: 9 }));
   });
 
   app.post("/api/backup/restore", { bodyLimit: maxBackupBytes }, async (request, reply) => {
     if (getConversionActivity().length) return reply.code(409).send({ message: "Cancel video conversion before restoring a backup." });
+    if (getBackgroundActivity().length) return reply.code(409).send({ message: "Finish or cancel background work before restoring a backup." });
     let payload = request.body;
     if (Buffer.isBuffer(payload)) {
       try { payload = JSON.parse((await decompress(payload, { maxOutputLength: maxBackupBytes })).toString("utf8")); }

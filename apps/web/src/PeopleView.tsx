@@ -1,3 +1,4 @@
+import { vaultUrl } from "./vault-session";
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
@@ -44,7 +45,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
     <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : filtered.map((person) =>
       <article className="person-profile-card" key={person.id}>
         <button type="button" className="person-profile-photo" title={`Set profile image for ${person.name}`} aria-label={`Set profile image for ${person.name}`} onClick={() => setImagePerson(person)}>
-          {person.profile_image ? <img src={`/api/people/${person.id}/image?v=${person.profile_image}`} alt={person.name} loading="lazy" /> : <Users size={64} />}
+          {person.profile_image ? <img src={vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`)} alt={person.name} loading="lazy" /> : <Users size={64} />}
           <span className="person-profile-photo-edit"><Pencil size={14} />{person.profile_image ? "Edit photo" : "Add photo"}</span>
         </button>
         <div className="person-profile-details">

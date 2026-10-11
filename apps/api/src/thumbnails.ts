@@ -4,15 +4,16 @@ import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
-import { runtimeDirectory } from "./database.js";
+import { runtimeDirectory, onVaultChanged } from "./database.js";
 import { withMediaProcess } from "./process-resources.js";
 
 const execFileAsync = promisify(execFile);
-const thumbnailDirectory = path.join(runtimeDirectory, "thumbnails");
+let thumbnailDirectory = path.join(runtimeDirectory, "thumbnails");
 const inFlight = new Map<string, Promise<string>>();
 export interface VideoMetadata { durationSeconds: number | null; width: number | null; height: number | null }
 const metadataInFlight = new Map<string, Promise<VideoMetadata>>();
 const failedPdfUntil = new Map<string, number>();
+onVaultChanged(() => { thumbnailDirectory = path.join(runtimeDirectory, "thumbnails"); failedPdfUntil.clear(); });
 const waiting: Array<() => void> = [];
 const probeWaiting: Array<() => void> = [];
 let running = 0;

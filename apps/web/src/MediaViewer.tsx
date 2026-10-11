@@ -1,3 +1,5 @@
+import { vaultUrl } from "./vault-session";
+import { vaultStorage } from "./vault-session";
 import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AttributeManagerContext } from "./attribute-manager";
@@ -14,7 +16,7 @@ const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).Pdf
 type ComicFit = "screen" | "width" | "custom";
 
 const storedComicFit = (): ComicFit => {
-  const value = window.localStorage.getItem("vaultly.comic.fit");
+  const value = vaultStorage.getItem("vaultly.comic.fit");
   return value === "width" || value === "custom" ? value : "screen";
 };
 
@@ -63,7 +65,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [showRename, setShowRename] = useState(false);
   const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [seriesIds, setSeriesIds] = useState<number[]>([]);
-  const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => window.localStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
+  const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => vaultStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
   const [similarVideos, setSimilarVideos] = useState<SimilarVideo[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
   const lastFullscreenExit = useRef(-Infinity);
@@ -80,9 +82,9 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const continuousReading = readBooleanPreference("vaultly.reader.continuous", true);
   useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic", `${itemId}:${page}`);
 
-  useEffect(() => { window.localStorage.setItem("vaultly.comic.fit", fit); }, [fit]);
-  useEffect(() => { window.localStorage.setItem("vaultly.comic.zoom", String(comicZoom)); }, [comicZoom]);
-  useEffect(() => { window.localStorage.setItem("vaultly.video.sidebarTab", sidebarTab); }, [sidebarTab]);
+  useEffect(() => { vaultStorage.setItem("vaultly.comic.fit", fit); }, [fit]);
+  useEffect(() => { vaultStorage.setItem("vaultly.comic.zoom", String(comicZoom)); }, [comicZoom]);
+  useEffect(() => { vaultStorage.setItem("vaultly.video.sidebarTab", sidebarTab); }, [sidebarTab]);
 
   useEffect(() => {
     if (floating) return;
@@ -348,7 +350,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {!item && !error && <div className="viewer-loading"><LoaderCircle className="spin" size={30} /> Loading…</div>}
           {item?.media_type === "video" && (
             <div className="video-stage">
-              <VideoPlayer key={item.id} itemId={item.id} src={`/api/items/${item.id}/file`} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
+              <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
           {item?.media_type === "story" && (
@@ -374,11 +376,11 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                   tabIndex={-1}
                   onPointerDown={() => viewerRef.current?.focus({ preventScroll: true })}
                 >
-                  <img className={`comic-page fit-${fit}`} style={fit === "custom" ? { width: `${comicZoom}%` } : undefined} src={`/api/items/${item.id}/pages/${page}`} alt={`Page ${page + 1}`} />
+                  <img className={`comic-page fit-${fit}`} style={fit === "custom" ? { width: `${comicZoom}%` } : undefined} src={vaultUrl(`/api/items/${item.id}/pages/${page}`)} alt={`Page ${page + 1}`} />
                 </div>
               </div>
             ) : archive ? (
-              <div className="archive-state"><BookOpen size={40} /><h2>Archive reader is coming next</h2><p>This CBZ/ZIP comic is indexed, but pages cannot be shown in the browser yet.</p><a className="secondary-button" href={`/api/items/${item.id}/file`} download>Open the archive <Download size={17} /></a></div>
+              <div className="archive-state"><BookOpen size={40} /><h2>Archive reader is coming next</h2><p>This CBZ/ZIP comic is indexed, but pages cannot be shown in the browser yet.</p><a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download>Open the archive <Download size={17} /></a></div>
             ) : <div className="viewer-loading"><LoaderCircle className="spin" size={28} /> Loading pages…</div>
           )}
         </div>
@@ -400,7 +402,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                 {!galleryContext && similarLoading && <div className="viewer-playlist-state"><LoaderCircle className="spin" size={16} /> Finding similar videos…</div>}
                 {!similarLoading && suggestedVideos.length === 0 && <p className="viewer-playlist-state">{galleryContext ? "No videos on this gallery page." : "No other videos are available yet."}</p>}
                 <div className="similar-playlist-list">{suggestedVideos.map((video) => <button type="button" key={video.id} className={video.id === itemId ? "is-playing" : undefined} aria-current={video.id === itemId ? "true" : undefined} onClick={() => { if (video.id !== itemId) onNavigateItem(video.id); }} title={video.filename}>
-                  <span className="similar-video-art"><img src={`/api/items/${video.id}/thumbnail`} alt="" loading="lazy" /></span>
+                  <span className="similar-video-art"><img src={vaultUrl(`/api/items/${video.id}/thumbnail`)} alt="" loading="lazy" /></span>
                   <span className="similar-video-copy"><strong>{video.title}</strong><small>{video.source_name} · {formatDuration(video.duration_seconds)}</small></span>
                 </button>)}</div>
               </section>
@@ -414,7 +416,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
               {seriesContext && <p className="detail-hint">Alt + ←/→ moves to the previous or next file in this set.</p>}
               <button className="secondary-button" type="button" onClick={() => setShowRename(true)} disabled={saving}><Pencil size={16} /> Rename title</button>
               <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
-              {item.media_type !== "comic" && <a className="secondary-button" href={`/api/items/${item.id}/file`} download><Download size={16} /> Download file</a>}
+              {item.media_type !== "comic" && <a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download><Download size={16} /> Download file</a>}
               <h3>Categories</h3>
               {item.source_attributes && (item.source_attributes.tags.length > 0 || item.source_attributes.categories.length > 0) && <div className="attribute-help">Common source attributes:<div className="attribute-badges">{item.source_attributes.tags.map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{item.source_attributes.categories.map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>These apply to every file; edit them in Sources.</div>}
               <TagCombobox attributeKind="category" label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />

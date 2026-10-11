@@ -40,6 +40,7 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 ### Build a library that feels yours
 
 - **Multiple source folders:** scan nested directories for videos, PDFs, CBZ/ZIP archives, and image-based comics.
+- **Separate vault profiles:** create and switch vaults from the top bar. Each starts empty and keeps its own library, preferences, caches, and backups.
 - **Tags, categories, and favourites:** describe individual items or select across pages for bulk edits.
 - **Cast & artists:** manage names, aliases, credits, and profile images in one shared directory.
 - **Series & sets:** arrange mixed media in a chosen order, with custom covers, descriptions, and tags. Move between entries from the viewer.
