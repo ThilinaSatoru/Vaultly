@@ -887,3 +887,7 @@ main { grid-column: 2; min-width: 0; }
 .media-card-video .media-card-footer-actions { margin-left: auto; }
 .video-cover-editor img { display: block; max-width: 150px; max-height: 180px; object-fit: contain; margin-bottom: 10px; }
 .video-cover-editor > div { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.vault-delete-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+.vault-delete-actions .danger-button { border: 1px solid #ff789580; border-radius: 7px; padding: 8px 12px; background: #8b2335; color: #fff; font: inherit; font-size: 12px; cursor: pointer; }

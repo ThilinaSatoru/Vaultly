@@ -2,8 +2,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 
 const { video, hooks } = vi.hoisted(() => ({
-  video: { currentTime: 42, pause: vi.fn() },
-  hooks: { states: [] as unknown[], cursor: 0 },
+  video: { currentTime: 42, pause: vi.fn(), querySelector: vi.fn(), focus: vi.fn() },
+  hooks: { states: [] as unknown[], cursor: 0, refs: [] as Array<{ current: unknown }>, refCursor: 0 },
 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -12,7 +12,10 @@ vi.mock("react", async (original) => ({
     if (!(index in hooks.states)) hooks.states[index] = typeof initial === "function" ? initial() : initial;
     return [hooks.states[index], (value: unknown) => { hooks.states[index] = typeof value === "function" ? value(hooks.states[index]) : value; }];
   },
-  useRef: (initial: unknown) => ({ current: initial === null ? video : initial }),
+  useRef: (initial: unknown) => {
+    const index = hooks.refCursor++;
+    return hooks.refs[index] ??= { current: index < 2 ? video : initial };
+  },
   useEffect: vi.fn(),
 }));
 vi.mock("./media", () => ({ api: vi.fn() }));
@@ -32,14 +35,14 @@ function find(node: ReactNode, predicate: (element: ReactElement<any>) => boolea
   throw new Error("Control not found");
 }
 function render() {
-  hooks.cursor = 0;
+  hooks.cursor = 0; hooks.refCursor = 0;
   return VideoPlayer({ itemId: 1, src: "/api/items/1/file", autoPlay: true, onError: vi.fn() });
 }
 beforeEach(() => {
-  vi.clearAllMocks(); hooks.states = [];
+  vi.clearAllMocks(); hooks.states = []; hooks.refs = [];
   vi.stubGlobal("window", { localStorage: { getItem: () => null } });
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 test("unsupported video and audio-only decoding show a launch action without converting or opening anything automatically", () => {
   const element = find(render(), (node) => node.type === "video");
@@ -89,4 +92,22 @@ test("track switchers are directly on the toolbar and subtitle size persists fro
   size.props.onChange({ target: { value: "150" } });
   expect(writePreference).toHaveBeenCalledWith("vaultly.video.subtitleSize", 150);
   expect(render().props.style["--subtitle-scale"]).toBe(1.5);
+});
+
+
+test.each([false, true])("controls hide after mouse inactivity even with focused controls (fullscreen=%s)", (fullscreen) => {
+  vi.useFakeTimers();
+  window.setTimeout = globalThis.setTimeout as typeof window.setTimeout;
+  window.clearTimeout = globalThis.clearTimeout as typeof window.clearTimeout;
+  vi.stubGlobal("document", { activeElement: {}, fullscreenElement: fullscreen ? video : null });
+  video.querySelector.mockReturnValue({ contains: () => true });
+  render().props.onMouseMove();
+  expect(render().props.className).toContain("controls-visible");
+  vi.advanceTimersByTime(1400);
+  render().props.onMouseMove();
+  vi.advanceTimersByTime(1400);
+  expect(render().props.className).toContain("controls-visible");
+  vi.advanceTimersByTime(100);
+  expect(render().props.className).toContain("controls-hidden");
+  expect(video.focus).toHaveBeenCalled();
 });

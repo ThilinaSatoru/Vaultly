@@ -40,7 +40,7 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 ### Build a library that feels yours
 
 - **Sources by media type:** choose Movies, TV series, Anime, Manga, E-books, or Pictures. Scans preserve nested folders and skip unrelated media; existing mixed sources can be reclassified in Sources.
-- **Separate vault profiles:** create and switch vaults from the top bar. Each starts empty and keeps its own library, preferences, caches, and backups.
+- **Separate vault profiles:** create and switch vaults from the top bar. Each starts empty and keeps its own library, preferences, caches, and backups. The trash button deletes a profile and its database/cache while preserving source media.
 - **Tags, categories, and favourites:** describe individual items or select across pages for bulk edits.
 - **Cast & artists:** manage names, aliases, credits, and profile images in one shared directory.
 - **Series & sets:** arrange mixed media in a chosen order, with custom covers, descriptions, and tags. Move between entries from the viewer.
@@ -50,7 +50,7 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 ### Watch and read in place
 
 - **Video player:** play supported formats with seeking, playback speed, SRT/VTT companion subtitles, and keyboard shortcuts. Floating playback survives Back and library navigation until manually closed; adjust its size in the header and optionally show the playlist. Launch original files in the system player for other codecs.
-- **Readers:** PDF page navigation, continuous PDF/comic views, EPUB chapters, text/FB2/HTML books, zoom, and adjustable slow auto-scroll (1–100 pixels/second). Auto-scroll starts on request and pauses on manual scrolling, loss of focus, or the end of the reading area.
+- **Readers:** PDF page navigation, continuous PDF/comic views, EPUB chapters, text/FB2/HTML books, zoom, and adjustable slow auto-scroll (1–100 pixels/second). Auto-scroll starts on request; Space toggles play/pause. Hold the mouse button to pause reading movement and release to resume. Manual scrolling, loss of focus, and the end of the reading area stop it.
 - **Comic reader:** browse image folders and CBZ/ZIP pages in natural order. Picture sources index each image separately.
 - **Cached previews:** video and PDF thumbnails help you recognize items at a glance.
 - **Management dock:** open tags, categories, people, sources, and settings in a tabbed drawer that keeps drafts while you browse.
@@ -130,4 +130,6 @@ Video cards use folder covers (`Video name.jpg`, `Video name-poster.png`, `poste
 
 The player remembers speed, volume, mute, repeat, picture fit, floating size, subtitle size and audio/subtitle language choices per vault. It applies matching languages to newly opened files and falls back to original audio / an available subtitle when a match is unavailable. Each new video enables subtitles when available, even if subtitles were switched off for the previous video. Embedded text subtitles and matching SRT, VTT, ASS/SSA, SUB, SBV, SAMI, LRC, MPL and STL text files are supported. Bitmap subtitles use the default desktop player. Alternate audio is cached locally as an audio-only file and synchronized to the original video. Preparing a new track may briefly pause playback.
 
-Secondary controls live in **Player options**. Controls hide immediately on pointer exit or **Hide controls now**, with small seek/volume feedback for shortcuts. Use Tab inside the player to reach the controls. Timeline hover previews can be disabled in the player or **Settings → Playback and reading**.
+Secondary controls live in **Player options**. Controls hide after 1.5 seconds of inactivity, including fullscreen, and immediately on pointer exit or **Hide controls now**, with small seek/volume feedback for shortcuts. Use Tab inside the player to reach the controls. Timeline hover previews can be disabled in the player or **Settings → Playback and reading**.
+
+Enable **Settings → Playback and reading → Remember video playback position** to resume all videos in the vault where you stopped. This is off by default, and completed videos restart from the beginning. Video cards and video Info show only the source rather than repeating the movie folders and filename. Movie sources skip clips with a separate `sample` filename marker.

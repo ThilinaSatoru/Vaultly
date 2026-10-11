@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { exportVaultPreferences, restoreVaultPreferences, setActiveProfile, vaultFetch, vaultStorage, vaultUrl } from "./vault-session";
+import { exportVaultPreferences, restoreVaultPreferences, removeVaultPreferences, setActiveProfile, vaultFetch, vaultStorage, vaultUrl } from "./vault-session";
 
 let values: Map<string, string>;
 beforeEach(() => {
@@ -45,4 +45,13 @@ test("media and fetch URLs are pinned to the vault without changing external URL
   vi.stubGlobal("fetch", fetch);
   await vaultFetch("/api/backup/archive", { method: "POST" });
   expect(fetch).toHaveBeenCalledWith("/api/backup/archive?vaultProfile=default", { method: "POST" });
+});
+
+
+test("deleting vault preferences removes its progress and settings without clearing other profiles", () => {
+  values.set("vaultly.video.position.7", "45"); values.set("vaultly.video.volume", "0.7");
+  values.set("vaultly.profile.other.vaultly.video.position.7", "20"); values.set("unrelated", "keep");
+  removeVaultPreferences("default");
+  expect([...values.keys()]).toEqual(["vaultly.profile.other.vaultly.video.position.7", "unrelated"]);
+  removeVaultPreferences("other"); expect([...values.keys()]).toEqual(["unrelated"]);
 });

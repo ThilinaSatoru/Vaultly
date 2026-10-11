@@ -50,3 +50,13 @@ test("SRT conversion preserves cue text and converts timestamps to native WebVTT
   expect(subtitleVtt("\uFEFF1\r\n00:00:01,000 --> 00:00:02,500\r\nHello\r\n")).toBe("WEBVTT\n\n1\n00:00:01.000 --> 00:00:02.500\nHello\n");
   expect(subtitleVtt("WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nHello")).toMatch(/^WEBVTT\n\n00:/);
 });
+
+
+test("movie scans omit sample clips while preserving real films and other source types", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-movie-samples-")); roots.push(root);
+  const folder = path.join(root, "Movie"); await mkdir(folder);
+  const names = ["sample.avi", "SAMPLE.mp4", "Movie.sample.mkv", "Movie-Sample-1080p.mp4", "#sample.mp4", "Throne of Blood.avi", "Samples of Life.mp4", "Unsampled.mp4"];
+  await Promise.all(names.map((name) => writeFile(path.join(folder, name), name)));
+  expect((await collectItems(root, undefined, undefined, "movies")).map((item) => item.filename).sort()).toEqual(["Samples of Life.mp4", "Throne of Blood.avi", "Unsampled.mp4"]);
+  expect((await collectItems(root, undefined, undefined, "tv")).map((item) => item.filename).sort()).toEqual(names.sort());
+});

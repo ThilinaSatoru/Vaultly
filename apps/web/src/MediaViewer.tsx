@@ -439,7 +439,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
             {(item.media_type !== "video" || sidebarTab === "info") && <AttributeMediaContext.Provider value={item.media_type}><div className="viewer-info-panel" role={item.media_type === "video" ? "tabpanel" : undefined}>
               <div className="viewer-detail-row"><span>Type</span><strong>{item.media_type}</strong></div>
               <div className="viewer-detail-row"><span>{item.file_extension ? "File name" : "Folder name"}</span><strong title={item.filename}>{item.filename}</strong></div>
-              <div className="viewer-detail-row"><span>Path</span><strong title={item.relative_path}>{item.relative_path}</strong></div>
+              <div className="viewer-detail-row"><span>{item.media_type === "video" ? "Source" : "Path"}</span><strong title={item.media_type === "video" ? item.source_name : item.relative_path}>{item.media_type === "video" ? item.source_name : item.relative_path}</strong></div>
               {item.media_type === "video" && <p className="detail-hint">Arrow keys seek 5 seconds by default. Shift + Arrow seeks 1 minute. Mouse wheel changes volume by 5%; all shortcuts and seek durations can be changed in Settings.</p>}
               {(item.media_type === "story" || item.media_type === "comic") && <p className="detail-hint">Page, scroll, zoom, and fit shortcuts can be assigned in Settings.</p>}
               {seriesContext && <p className="detail-hint">Alt + ←/→ moves to the previous or next file in this set.</p>}

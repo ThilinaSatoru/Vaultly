@@ -280,3 +280,5 @@
   .video-track-switcher { flex: 1; max-width: 50%; }
   .video-track-switcher select { flex: 1; width: 100%; max-width: none; }
 }
+
+.video-player.controls-hidden:fullscreen { cursor: none; }

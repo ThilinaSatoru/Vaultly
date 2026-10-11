@@ -17,6 +17,7 @@ const shortcutGroups: Array<{ title: string; actions: Array<{ action: ShortcutAc
   { title: "PDF reader", actions: [
     { action: "reader.previousPage", label: "Previous page" }, { action: "reader.nextPage", label: "Next page" },
     { action: "reader.scrollUp", label: "Scroll up" }, { action: "reader.scrollDown", label: "Scroll down" },
+    { action: "reader.autoScroll", label: "Play / pause auto-scroll" },
     { action: "reader.zoomIn", label: "Zoom in" }, { action: "reader.resetFit", label: "Reset to fit" },
   ] },
   { title: "Comic reader", actions: [
@@ -30,6 +31,7 @@ export function SettingsView() {
   const [bindings, setBindings] = useState(readBindings);
   const [capturing, setCapturing] = useState<ShortcutAction | null>(null);
   const [autoPlay, setAutoPlay] = useState(() => readBooleanPreference("vaultly.video.autoplay", true));
+  const [rememberPosition, setRememberPosition] = useState(() => readBooleanPreference("vaultly.video.rememberPosition", false));
   const [seekPreviews, setSeekPreviews] = useState(() => readBooleanPreference("vaultly.video.seekPreviews", true));
   const [autoAdvance, setAutoAdvance] = useState(() => readBooleanPreference("vaultly.video.autoAdvance", true));
   const [continuous, setContinuous] = useState(() => readBooleanPreference("vaultly.reader.continuous", true));
@@ -106,6 +108,7 @@ export function SettingsView() {
     <details className="settings-panel" open><summary className="settings-panel-heading"><Settings2 size={18} /><div><h2>Playback and reading</h2><p>Automatic playback, seeking, and reader scrolling.</p></div></summary>
       <label className="setting-toggle"><input type="checkbox" checked={autoPlay} onChange={(event) => { setAutoPlay(event.target.checked); writePreference("vaultly.video.autoplay", event.target.checked); }} /><span><strong>Autoplay videos</strong><small>Start playback when a video viewer opens.</small></span></label>
       <label className="setting-toggle"><input type="checkbox" checked={autoAdvance} onChange={(event) => { setAutoAdvance(event.target.checked); writePreference("vaultly.video.autoAdvance", event.target.checked); }} /><span><strong>Open next collection item automatically</strong><small>At the end of a video, continue to the next file in its collection.</small></span></label>
+      <label className="setting-toggle"><input type="checkbox" checked={rememberPosition} onChange={(event) => { setRememberPosition(event.target.checked); writePreference("vaultly.video.rememberPosition", event.target.checked); }} /><span><strong>Remember video playback position</strong><small>Resume every video where you stopped. Applies to all videos in this vault.</small></span></label>
       <label className="setting-toggle"><input type="checkbox" checked={seekPreviews} onChange={(event) => { setSeekPreviews(event.target.checked); writePreference("vaultly.video.seekPreviews", event.target.checked); }} /><span><strong>Seek hover previews</strong><small>Show a video frame above the timeline. Speed, audio language, subtitles, repeat and picture fit are remembered from the player.</small></span></label>
       <label className="setting-select"><span><strong>Arrow-key seek</strong><small>Used by Left Arrow and Right Arrow.</small></span><input type="number" min={0.25} max={999} step={0.25} value={seekAmount} onChange={(event) => { const value = Math.max(.25, Math.min(999, Number(event.target.value) || .25)); setSeekAmount(value); writePreference("vaultly.video.seekAmount", value); }} aria-label="Arrow-key seek duration" /><select value={seekUnit} onChange={(event) => { setSeekUnit(event.target.value); writePreference("vaultly.video.seekUnit", event.target.value); }} aria-label="Arrow-key seek unit"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></select></label>
       <label className="setting-select"><span><strong>Shift + Arrow-key seek</strong><small>Used for the larger forward or backward jump.</small></span><input type="number" min={0.25} max={999} step={0.25} value={largeSeekAmount} onChange={(event) => { const value = Math.max(.25, Math.min(999, Number(event.target.value) || .25)); setLargeSeekAmount(value); writePreference("vaultly.video.seekLargeAmount", value); }} aria-label="Large seek duration" /><select value={largeSeekUnit} onChange={(event) => { setLargeSeekUnit(event.target.value); writePreference("vaultly.video.seekLargeUnit", event.target.value); }} aria-label="Large seek unit"><option value="seconds">Seconds</option><option value="minutes">Minutes</option></select></label>

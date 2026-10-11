@@ -16,7 +16,7 @@ vi.mock("react", async (original) => ({
     previous?.cleanup?.(); hooks.effects[index] = { dependencies, cleanup: effect() };
   },
 }));
-vi.mock("./preferences", () => ({ readNumberPreference: () => 1 }));
+vi.mock("./preferences", () => ({ readNumberPreference: () => 1, matchesShortcut: (event: KeyboardEvent) => event.code === "Space" && !event.ctrlKey }));
 vi.mock("./vault-session", () => ({ vaultStorage: { setItem: vi.fn() } }));
 import { ReaderAutoScroll } from "./ReaderAutoScroll";
 
@@ -69,4 +69,24 @@ test("scroll stops at the end and on changing books or hiding the window", () =>
   render(2); expect(findButton(render(2)).props["aria-pressed"]).toBe(false); expect(frames.size).toBe(0);
   findButton(render(2)).props.onClick(); render(2); windowEvents.dispatchEvent(new Event("blur"));
   expect(findButton(render(2)).props["aria-pressed"]).toBe(false);
+});
+
+
+test("holding the mouse pauses movement and releasing outside the reader resumes without a jump", () => {
+  findButton(render()).props.onClick(); render(); advance(100);
+  element.dispatchEvent(Object.assign(new Event("pointerdown"), { button: 0, pointerId: 7 }));
+  const held = element.scrollTop; advance(100);
+  expect(element.scrollTop).toBe(held); expect(findButton(render()).props["aria-pressed"]).toBe(true);
+  windowEvents.dispatchEvent(Object.assign(new Event("pointerup"), { pointerId: 7 }));
+  advance(100); expect(element.scrollTop).toBe(held + 1);
+});
+
+test("Space toggles auto-scroll, ignores repeats and stays disabled in paginated views", () => {
+  const key = (repeat = false) => Object.assign(new Event("keydown", { cancelable: true }), { code: "Space", repeat });
+  render(); const start = key(); windowEvents.dispatchEvent(start); render();
+  expect(start.defaultPrevented).toBe(true); expect(findButton(render()).props["aria-pressed"]).toBe(true);
+  windowEvents.dispatchEvent(key(true)); expect(findButton(render()).props["aria-pressed"]).toBe(true);
+  advance(100); expect(element.scrollTop).toBe(1);
+  windowEvents.dispatchEvent(key()); expect(findButton(render()).props["aria-pressed"]).toBe(false);
+  render(1, false); windowEvents.dispatchEvent(key()); expect(findButton(render(1, false)).props["aria-pressed"]).toBe(false);
 });

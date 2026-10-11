@@ -192,7 +192,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
       </button>
       <div className="media-card-body">
         <h3 title={item.title}><button className="card-title-open" type="button" onClick={onOpen}>{item.title}</button></h3>
-        <p title={item.relative_path}>{item.source_name} · {item.relative_path}</p>
+        <p title={item.media_type === "video" ? item.source_name : item.relative_path}>{item.source_name}{item.media_type !== "video" && ` · ${item.relative_path}`}</p>
         <div className="media-card-tags">
           {item.tags.map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} mediaType={item.media_type} />)}
           {item.categories.map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} mediaType={item.media_type} />)}

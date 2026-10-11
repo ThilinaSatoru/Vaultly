@@ -4,7 +4,7 @@ export type ShortcutAction =
   | "video.playPause" | "video.fullscreen" | "video.seekBack" | "video.seekForward"
   | "video.seekBackLarge" | "video.seekForwardLarge" | "video.volumeUp" | "video.volumeDown" | "video.mute"
   | "reader.previousPage" | "reader.nextPage" | "reader.scrollUp" | "reader.scrollDown"
-  | "reader.zoomIn" | "reader.resetFit"
+  | "reader.zoomIn" | "reader.resetFit" | "reader.autoScroll"
   | "comic.zoomIn" | "comic.zoomOut" | "comic.fitWidth" | "comic.resetFit" | "comic.fullscreen";
 
 export const defaultBindings: Record<ShortcutAction, string[]> = {
@@ -24,6 +24,7 @@ export const defaultBindings: Record<ShortcutAction, string[]> = {
   "reader.nextPage": ["ArrowRight", "PageDown"],
   "reader.scrollUp": ["ArrowUp"],
   "reader.scrollDown": ["ArrowDown"],
+  "reader.autoScroll": ["Space"],
   "reader.zoomIn": ["Enter"],
   "reader.resetFit": ["Numpad0"],
   "comic.zoomIn": ["Shift+ArrowUp"],

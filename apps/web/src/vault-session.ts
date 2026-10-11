@@ -48,3 +48,13 @@ export function restoreVaultPreferences(preferences?: Record<string, unknown>) {
     if (preferenceKey(key) && typeof value === "string") vaultStorage.setItem(key, value);
   }
 }
+
+export function removeVaultPreferences(profileId: string) {
+  const prefix = profileId === "default" ? "" : `vaultly.profile.${profileId}.`;
+  const keys: string[] = [];
+  for (let index = 0; index < window.localStorage.length; index++) {
+    const key = window.localStorage.key(index);
+    if (key && (prefix ? key.startsWith(prefix) : preferenceKey(key))) keys.push(key);
+  }
+  for (const key of keys) window.localStorage.removeItem(key);
+}

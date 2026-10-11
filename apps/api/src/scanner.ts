@@ -283,6 +283,11 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
           if (progress) progress.filesChecked++;
           continue;
         }
+        if (sourceType === "movies" && videoExtensions.has(extension)
+          && /(?:^|[^a-z0-9])sample(?:[^a-z0-9]|$)/i.test(path.basename(entry.name, extension))) {
+          if (progress) progress.filesChecked++;
+          continue;
+        }
         const allowed = (sourceType === "mixed" && (videoExtensions.has(extension) || imageExtensions.has(extension) || comicArchiveExtensions.has(extension) || extension === ".pdf"))
           || (["movies", "tv", "anime"].includes(sourceType) && videoExtensions.has(extension))
           || (sourceType === "ebooks" && storyExtensions.has(extension))

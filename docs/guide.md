@@ -4,7 +4,7 @@ A local-first media library for movies, TV series, anime, manga, e-books, and pi
 
 ## Organize sources and folders
 
-Choose a media type before adding a source: Movies, TV series, Anime, Manga / comics, E-books / documents, or Pictures. Video sources index videos and leave subtitles, covers, and unrelated images out of the gallery. E-book sources index supported book/document files. Manga sources group image pages by folder and index comic archives and PDFs. Picture sources index each image individually. Scans descend through all subfolders, including seasons, extras, and custom directories. TV/anime season folders and manga chapter folders help infer ordered collections.
+Choose a media type before adding a source: Movies, TV series, Anime, Manga / comics, E-books / documents, or Pictures. Video sources index videos and leave subtitles, covers, and unrelated images out of the gallery. Movie sources also skip video filenames marked `sample` (for example, `sample.avi` or `Movie.sample.mkv`); rescanning removes existing sample clips from the available gallery. E-book sources index supported book/document files. Manga sources group image pages by folder and index comic archives and PDFs. Picture sources index each image individually. Scans descend through all subfolders, including seasons, extras, and custom directories. TV/anime season folders and manga chapter folders help infer ordered collections.
 
 Existing mixed sources keep their previous scan behavior. Expand a source in **Sources**, choose its media type, and let the rescan update the index. Source type is included in backups; older backups restore as mixed sources.
 
@@ -14,7 +14,7 @@ In a gallery, use the collection-type buttons to choose Movies, TV series, Anime
 
 Choose **Float** in the video player to keep it open while using Back, browsing another library, or opening a reader. Close it explicitly with the close button (or its close shortcut while focused). Use the header size slider or resize corner to change its size. The playlist button reveals Up next and Info. Seeking, volume, playback speed, fullscreen, and associated-player actions remain available. Matching SRT/VTT files beside the video appear in the subtitle selector; when a folder contains only one video, its companion subtitle files are offered as well.
 
-PDF and comic readers offer **Continuous view**. EPUB follows the book's chapter order; TXT, FB2, and HTML text also use a continuous reader. **Auto-scroll** starts only when clicked, with a remembered speed from 1 to 100 pixels per second. It pauses on manual interaction, loss of focus, or the end of the content. PDF pages outside the viewport are unloaded to limit canvas memory.
+PDF and comic readers offer **Continuous view**. EPUB follows the book's chapter order; TXT, FB2, and HTML text also use a continuous reader. **Auto-scroll** starts from its button or the Space shortcut, with a remembered speed from 1 to 100 pixels per second. Space toggles play/pause. Holding the mouse button in the reading area temporarily pauses movement; releasing it resumes without a jump. Manual scrolling, loss of focus, and the end of the content stop auto-scroll. PDF pages outside the viewport are unloaded to limit canvas memory.
 
 WPS, DOC/DOCX, ODT, RTF, MOBI, AZW/AZW3, DjVu, and CBR/CB7/CBT archives are indexed and opened by the associated desktop app. PDF, EPUB, image folders, and CBZ/ZIP have built-in readers. ZIP readers support archives up to 256 MB with bounded chapter/page sizes; encrypted or unsupported books use a desktop reader. EPUB text and raster illustrations are preserved with simplified styling.
 
@@ -34,7 +34,7 @@ Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by defaul
 
 ## Vault profiles
 
-Use **Active vault** in the top bar to switch profiles, or the **+** button beside it to create one. A new profile opens a blank vault with no sources, media, attributes, collections, or inherited preferences. Your existing library becomes **Default** and stays at its original location. The selected profile is remembered when the app restarts.
+Use **Active vault** in the top bar to switch profiles, or the **+** button beside it to create one. A new profile opens a blank vault with no sources, media, attributes, collections, or inherited preferences. Your existing library becomes **Default** and stays at its original location. The selected profile is remembered when the app restarts. Use the trash button and **Delete profile and data** to delete that profile’s database, thumbnails, people images, audio cache, and preferences. Source media stays in place. Another profile opens afterward; deleting the last profile creates a fresh empty vault.
 
 Each profile uses its own SQLite database, thumbnail cache, people images, scan report, and browser preferences. New vaults are stored in `vaults/<profile-id>/` under the runtime directory (the desktop app's user-data directory); Default retains `vaultly.db` at the runtime root. `vault-profiles.json` stores profile names and the active selection.
 
@@ -42,7 +42,7 @@ Switching returns to Home and closes viewers and management drafts. Finish or ca
 
 Settings backups include only the active vault, and their filenames identify that profile. Restore replaces only the active vault's metadata and preferences, so create a blank profile first when importing a backup as a separate library. Older backups remain supported. A backup contains library data and people images, not the original media files or other profiles.
 
-The API exposes `GET /api/vault-profiles`, `POST /api/vault-profiles` with `{ "name": "Comics" }`, and `POST /api/vault-profiles/:id/activate`. Library requests can send `vaultProfile=<profile-id>` in the query string or `X-Vaultly-Profile` in a header to reject requests when the active profile has changed.
+The API exposes `GET /api/vault-profiles`, `POST /api/vault-profiles` with `{ "name": "Comics" }`, `POST /api/vault-profiles/:id/activate`, and `DELETE /api/vault-profiles/:id`. Library requests can send `vaultProfile=<profile-id>` in the query string or `X-Vaultly-Profile` in a header to reject requests when the active profile has changed.
 
 ## Desktop app
 
@@ -149,4 +149,6 @@ Audio and subtitle dropdowns sit directly beside the seek controls. Open **Playe
 
 Alternate audio is prepared locally and cached as audio only; the original video remains the playback source. While a track is prepared, you can pause or resume the requested playback. Seeking and speed changes apply to both picture and audio.
 
-Controls hide after a short idle delay and immediately when the pointer exits the player. **Hide controls now** hides them immediately. Keyboard and wheel actions show small indicators. Tab from the player reveals its accessible controls. Preview thumbnails above the seek bar are optional, and turning them off stops loading the preview video.
+Controls hide after 1.5 seconds of pointer or keyboard inactivity, including while fullscreen and immediately when the pointer exits the player. **Hide controls now** hides them immediately. Keyboard and wheel actions show small indicators. Tab from the player reveals its accessible controls. Preview thumbnails above the seek bar are optional, and turning them off stops loading the preview video.
+
+Enable **Remember video playback position** in **Settings → Playback and reading** to resume every video in the active vault. The option is off by default. Positions are saved on pause, seeking, closing, and periodically during playback; completed videos start from the beginning. Video cards and video Info display the source alone instead of repeating the title folders and filename.

@@ -1,3 +1,4 @@
+import { trackVideoPosition } from "./video-position";
 import { VideoAudioTrack } from "./VideoAudioTrack";
 import { VideoSeekPreview } from "./VideoSeekPreview";
 import { preferredSubtitle, preferredTrack, subtitleLanguage, trackPreference, type PlaybackTrack } from "./video-preferences";
@@ -54,7 +55,6 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   const seekPeekTimer = useRef<number | null>(null);
   const volumeTimer = useRef<number | null>(null);
   const lastWheelChange = useRef(0);
-  const controlsHovered = useRef(false);
   const wantsPlayback = useRef(autoPlay);
   const [waitingToPlay, setWaitingToPlay] = useState(autoPlay);
 
@@ -121,6 +121,10 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     const tracks = videoRef.current?.textTracks;
     if (tracks) for (let index = 0; index < tracks.length; index++) tracks[index].mode = index === subtitle ? "showing" : "disabled";
   }, [subtitle, subtitles]);
+
+  useEffect(() => {
+    if (itemId && videoRef.current) return trackVideoPosition(videoRef.current, itemId);
+  }, [itemId, src]);
 
   const handleUnsupported = () => {
     wantsPlayback.current = false;
@@ -198,9 +202,9 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   const scheduleHide = (_isPlaying: boolean) => {
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (controlsHovered.current || containerRef.current?.querySelector(".video-controls")?.contains(document.activeElement)) return;
+      if (containerRef.current?.querySelector(".video-controls")?.contains(document.activeElement)) containerRef.current.focus({ preventScroll: true });
       setShowControls(false); setOptionsOpen(false); setHoverSeek(null);
-    }, 900);
+    }, 1500);
   };
 
   useEffect(() => {
@@ -208,7 +212,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     return () => {
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
     };
-  }, [playing]);
+  }, [playing, fullscreen]);
   useEffect(() => () => {
     if (seekPeekTimer.current) window.clearTimeout(seekPeekTimer.current);
     if (volumeTimer.current) window.clearTimeout(volumeTimer.current);
@@ -221,7 +225,6 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   };
   const hideControls = () => {
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
-    controlsHovered.current = false;
     setShowControls(false); setOptionsOpen(false); setHoverSeek(null);
   };
   const togglePlay = () => {
@@ -342,6 +345,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
       tabIndex={0}
       aria-label="Video player"
       onKeyDown={(event) => {
+        scheduleHide(playing);
         if (event.key === "Tab" && !showControls && !event.shiftKey) {
           event.preventDefault(); setShowControls(true);
           window.requestAnimationFrame(() => containerRef.current?.querySelector<HTMLButtonElement>(".video-controls button")?.focus());
@@ -349,15 +353,11 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
       }}
       className={`video-player${compact ? " compact" : ""} ${showControls ? "controls-visible" : "controls-hidden"}`}
       style={{ "--subtitle-scale": subtitleSize / 100 } as CSSProperties}
-      onMouseMove={(event) => {
-        setShowControls(true);
-        controlsHovered.current = Boolean((event.target as HTMLElement).closest(".video-controls")) || event.clientY >= event.currentTarget.getBoundingClientRect().bottom - 65;
-        if (controlsHovered.current) { if (hideTimer.current) window.clearTimeout(hideTimer.current); }
-        else scheduleHide(playing);
-      }}
+      onMouseMove={() => { setShowControls(true); scheduleHide(playing); }}
+      onPointerDown={() => scheduleHide(playing)}
       onMouseLeave={hideControls}
       onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) hideControls(); }}
-      onFocus={(event) => { if ((event.target as HTMLElement).closest(".video-controls")) { setShowControls(true); if (hideTimer.current) window.clearTimeout(hideTimer.current); } }}
+      onFocus={(event) => { if ((event.target as HTMLElement).closest(".video-controls")) { setShowControls(true); scheduleHide(playing); } }}
       onDoubleClick={(event) => { if (event.target === videoRef.current) toggleFullscreen(); }}
       onWheel={(event) => {
         if ((event.target as HTMLElement).closest(".video-options, input, select")) return;

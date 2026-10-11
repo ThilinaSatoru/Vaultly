@@ -119,3 +119,50 @@ test("switching waits for an asynchronous request and background scans", async (
     expect((await app.inject({ method: "POST", url: "/api/vault-profiles/default/activate" })).statusCode).toBe(200);
   } finally { release(); await app.close(); }
 });
+
+
+test("profile deletion removes database and caches while preserving source files and other vaults", async () => {
+  const app = await buildVaultlyServer();
+  try {
+    const created = (await app.inject({ method: "POST", url: "/api/vault-profiles", payload: { name: "Delete me" } })).json();
+    const directory = path.join(isolated.directory, "vaults", created.id);
+    for (const cache of ["thumbnails", "profile-images", "audio-tracks", "playback"]) {
+      mkdirSync(path.join(directory, cache), { recursive: true }); writeFileSync(path.join(directory, cache, "fixture"), "cached");
+    }
+    writeFileSync(path.join(directory, "movie.mp4"), "source media");
+    const other = (await app.inject({ method: "POST", url: "/api/vault-profiles", payload: { name: "Keep me" } })).json();
+    await app.inject({ method: "POST", url: `/api/vault-profiles/${created.id}/activate` });
+    database.prepare("INSERT INTO tags(name) VALUES ('Delete tag')").run();
+    const deleted = await app.inject({ method: "DELETE", url: `/api/vault-profiles/${created.id}` });
+    expect(deleted.statusCode, deleted.body).toBe(200);
+    expect(deleted.json().profiles.some((profile: { id: string }) => profile.id === created.id)).toBe(false);
+    expect(deleted.json().activeId).not.toBe(created.id);
+    for (const name of ["vaultly.db", "vaultly.db-wal", "vaultly.db-shm", "thumbnails", "profile-images", "audio-tracks", "playback"]) expect(existsSync(path.join(directory, name))).toBe(false);
+    expect(readFileSync(path.join(directory, "movie.mp4"), "utf8")).toBe("source media");
+    expect(existsSync(path.join(isolated.directory, "vaults", other.id, "vaultly.db"))).toBe(true);
+    expect((await app.inject({ method: "DELETE", url: `/api/vault-profiles/${created.id}` })).statusCode).toBe(404);
+    expect((await app.inject({ method: "DELETE", url: `/api/vault-profiles/${other.id}`, headers: { origin: "https://example.com" } })).statusCode).toBe(403);
+    database.prepare("INSERT INTO sources(name, root_path, normalized_path, status) VALUES ('Busy delete', 'busy-delete', 'busy-delete', 'scanning')").run();
+    expect((await app.inject({ method: "DELETE", url: `/api/vault-profiles/${other.id}` })).statusCode).toBe(409);
+    database.prepare("DELETE FROM sources WHERE normalized_path = 'busy-delete'").run();
+    expect((await app.inject({ method: "DELETE", url: `/api/vault-profiles/${other.id}` })).statusCode).toBe(200);
+  } finally { await app.close(); }
+});
+
+test("profile deletion of the last vault creates an empty replacement and preserves the registry", async () => {
+  const app = await buildVaultlyServer();
+  try {
+    for (const profile of (await app.inject("/api/vault-profiles")).json().profiles) {
+      const response = await app.inject({ method: "DELETE", url: `/api/vault-profiles/${profile.id}` });
+      expect(response.statusCode, response.body).toBe(200);
+    }
+    let profiles = (await app.inject("/api/vault-profiles")).json();
+    // Repeated deletion must still work when the automatic name already exists.
+    expect((await app.inject({ method: "DELETE", url: `/api/vault-profiles/${profiles.activeId}` })).statusCode).toBe(200);
+    profiles = (await app.inject("/api/vault-profiles")).json();
+    expect(profiles.profiles).toHaveLength(1); expect(profiles.profiles[0].id).toBe(profiles.activeId);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM tags").get()).toMatchObject({ count: 0 });
+    expect(existsSync(path.join(isolated.directory, "vaultly.db"))).toBe(false);
+    expect(JSON.parse(readFileSync(path.join(isolated.directory, "vault-profiles.json"), "utf8"))).toEqual(profiles);
+  } finally { await app.close(); }
+});
