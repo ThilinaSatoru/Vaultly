@@ -1,0 +1,112 @@
+# Vaultly usage and development guide
+
+A local-first media library for comics, videos, and PDF stories found in one or more source folders.
+
+## Requirements
+
+- Node.js 22.13 or newer
+- pnpm 11
+
+## Start
+
+```powershell
+pnpm install
+pnpm dev
+```
+
+Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by default. Set `VAULTLY_API_PORT` before running `pnpm dev` to use another port; the API and Vite proxy will both use it. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. Adding a source indexes files in place. Scans remove `#` favourite markers from filenames; explicit rename and conversion actions also modify source files. See the library features below.
+
+## Desktop app
+
+Vaultly also runs as a native desktop app on Windows, macOS, and Linux. The Electron shell starts the local API on loopback, stores its database and thumbnail cache in the operating system's application-data directory, and uses native folder and file-reveal dialogs.
+
+```powershell
+pnpm desktop:dev
+```
+
+Build the app, or create an installer for the current operating system:
+
+```powershell
+pnpm desktop:build
+pnpm desktop:dist
+```
+
+Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian package on Linux. Build each installer on its target operating system. The release workflow produces unsigned installers; signed and notarized macOS distribution requires Apple credentials.
+
+Desktop builds generate the application PNG and Windows ICO from `apps/web/public/favicon.svg`, and include them in the app window, executable, and installer. Edit that SVG to update the branding; generated icons live in `apps/desktop/build/`.
+
+## Manual GitHub releases
+
+Releases run only when you start **Actions → Manual release → Run workflow**, selecting the repository's default branch. There are no automatic push/tag triggers and no release PRs. Set the repository Actions **secret** `GH_TOKEN` to a GitHub token with **Contents: read and write** access to this repository. It is used to push the release commit/tag and publish release assets; keep the token out of ordinary repository variables and source files.
+
+Choose `patch`, `minor`, `major`, or an exact version such as `0.2.0-beta.1`. Versions follow SemVer and stay synchronized in the root, API, web and desktop manifests. `patch` makes backward-compatible fixes, `minor` adds backward-compatible features, and `major` marks breaking changes. An exact prerelease version publishes a GitHub prerelease without making it the latest stable release. The default is `patch`; use `0.1.0` explicitly to publish the current initial version.
+
+Add user-facing notes under **Unreleased** in [CHANGELOG.md](../CHANGELOG.md) before running the workflow, or provide extra Markdown in its **notes** input. New releases move these notes into a dated version entry and append commit summaries since the previous reachable version tag. Conventional Commit subjects such as `feat:`, `fix:`, `docs:` and `feat!:` are grouped into change categories; other subjects appear under Changed. With no prior version tag, the first generated entry includes the repository's history. Existing-version retries keep the tagged notes unchanged.
+
+The workflow validates versions/notes, runs release-tooling tests, production typechecks and application tests, then commits `chore(release): vX.Y.Z` directly to the default branch and pushes an annotated tag atomically. It never force-pushes. Native runners build Windows x64 NSIS, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/Debian installers. All builds must succeed before publication. The release starts as a draft, receives all five installers plus `SHA256SUMS.txt`, and becomes public only after every upload succeeds. Artifact names include version, operating system and architecture. Installers are currently unsigned and macOS builds are not notarized.
+
+If a build/upload fails after tagging, rerun **Manual release** with the same **exact version** (for example `0.1.1`), rather than `patch`. It reuses the original tagged source, replaces matching draft assets and finishes publication. Published releases cannot be overwritten; use a new version for further changes. A concurrent default-branch change causes the atomic push to fail safely; rerun against the updated default branch.
+
+The same version/changelog tools are available locally on a clean checkout:
+
+```powershell
+pnpm release:prepare minor
+pnpm release:check v0.2.0
+pnpm release:notes v0.2.0
+```
+
+Local preparation edits manifests/changelog only; it does not commit, tag, push or publish. Normally let the manual workflow prepare the release so the tagged commit and installers match.
+
+## English search and attribute matching
+
+The gallery defaults to **English forms & synonyms**, searching titles and filenames only. A bundled [winkNLP English lite model](https://winkjs.org/wink-nlp/language-models.html) handles word forms, irregular plurals/verb tenses and British/American spellings. A small built-in synonym dictionary adds equivalences such as `movie`/`film`, `holiday`/`vacation`, and `car`/`automobile`. For example, `child holiday` finds a title containing `Children on vacations`; `run film` finds `Running movies.pdf`. The filename filter uses the same matching but only checks filenames. This is a lightweight NLP model plus dictionary, rather than vector similarity or a generative LLM; synonym coverage is limited to the built-in groups and does not infer every possible meaning.
+
+Everything runs offline after dependency installation. The model is included in the desktop bundle, requires no GPU, API key or Ollama installation, and downloads nothing at runtime. A versioned SQLite FTS5 index stores normalized title/filename tokens; startup backfills it once, dictionary version changes rebuild it, and scans, edits, renames, deletes and backup restores maintain it through triggers. A bounded in-memory cache reuses normalization. **Automatic** sorting uses title-weighted BM25 relevance in English/typo-tolerant mode, or title order in literal mode. Other gallery filters and sorts still apply.
+
+Use quotes to require literal phrases and suppress English expansion, such as `"summer trip"`. **Literal / phrases** retains substring searching across titles, paths and assigned attributes. **Typo tolerant** retains edit-distance matching with adjacent transpositions, up to eight alternatives per word of 4–40 characters (one edit, or two for words of eight or more characters). All unquoted terms must match. Quoted terms are never typo-expanded. The API retains literal mode when `searchMode` is omitted; request `searchMode=english` to use the embedded matcher.
+
+For attribute scans, use **Sources → English matching scan** for all sources, or a source's **Scan with English matching** menu action. This reuses English word forms and synonyms for existing tags/categories and their aliases. It adds assignments without clearing manual ones, requires complete words/phrases, excludes file extensions and parent directories, and skips inferred phrases that normalize to multiple different attributes. Exact names/aliases still match. Cast/artist names and explicit sidecar metadata remain exact. Ordinary **Scan again**, **Rescan all**, and initial scans retain their existing matching rules. The scan API accepts `{ "englishAttributes": true }` on `POST /api/sources/scan` or `POST /api/sources/:id/scan`; programmatic scans can pass the same option to `scanSource`.
+
+To extend synonym coverage, update `englishSynonymGroups` in `apps/api/src/english-matching.ts`, increment `englishMatchingVersion`, and add representative positive and negative tests. For library-specific or ambiguous terminology, use explicit attribute patterns instead.
+
+## Library features
+
+- Set people's profile images by upload or image URL from Cast & artists. Images are resized to at most 512 pixels and stored in `profile-images` beside the database (the desktop app's user-data directory).
+- For sites that require a referrer, enter the gallery or source page URL alongside the image URL. Desktop downloads use Chromium networking for system-proxy support; connection failures and HTTP refusals show recovery guidance.
+- In the desktop app, use **Cast & artists → Scan all existing people** to find portraits in both performer directories using Chromium automation. It checks directory cards and targeted profile pages, matches exact names or explicitly listed aliases, keeps existing photos, and reports ambiguous, missing, or failed matches. Cancel from the same panel; the latest report is saved as `people-profile-scan.json` beside the database.
+- To scan a specific local database without opening the main window, run `pnpm --filter @vaultly/desktop profiles:scan --data-dir "D:\path\to\Vaultly\user-data"`. This scans existing rows only and saves images in the same `profile-images` folder used by backups.
+- Download compressed `.json.gz` backups from Settings, including metadata, collections, profile images, and preferences. Restore compressed archives or older `.json` backups.
+- Click tags, categories, or people in Manage attributes to open a filtered gallery.
+
+- Register multiple directory roots, including folders containing mixed media.
+- Scan nested folders for videos (including `.ts` transport streams), PDFs, CBZ/ZIP comics, and image-based comic folders.
+- Persist source records and indexed item metadata in SQLite.
+- Persist a compact SQLite FTS5 trigram index for fast substring searches across titles, filenames, and paths. Existing libraries are indexed once on upgrade; scans, edits, renames, deletions, and backup restores keep it synchronized automatically. One- and two-character searches retain a scan fallback.
+- Scan directories and file metadata in bounded parallel batches, aggregate comic pages without keeping per-page metadata, and skip unchanged media-row writes on rescans.
+- Start a fresh breadcrumb trail and discard carried-over gallery/viewer state when opening Home or a destination from the main menu; nested browsing still restores filters and scroll with Back.
+- Show per-source counts, scanning state, errors, and last scan time.
+- Background work monitors CPU, free RAM, and app memory. Source scans run one at a time; converters, probes, and thumbnail renderers share a two-process limit and wait under low-memory pressure. FFmpeg uses at most two codec threads. PDF thumbnails render in isolated child processes with a 256 MB JavaScript heap limit; files over 128 MB skip thumbnail rendering. Process logs use fixed-height containers and scroll to the newest entry. Desktop crash diagnostics are saved to `crash-error.log` in the app's user-data folder.
+- After scanning, use **Sources → Convert unsupported videos** to run the supplied Python converter as a separate process. It remuxes compatible streams or encodes H.264/AAC MP4, verifies duration before replacing originals, and keeps existing media IDs and library details. Compatible MP4/M4V and WebM files and existing output filenames are skipped. Conversion has its own progress, errors, and cancellation; scans and source relocation/removal wait until it finishes. Requires Python, `ffmpeg`, and `ffprobe` on PATH (`VAULTLY_PYTHON` can select the Python executable).
+- Show live scan stages, folder/file counts, comic-page and media counts, current path, elapsed time, and progress within categorization, collection grouping, and thumbnail preparation. Folder discovery shows counts until the total is known.
+- Keep scanning responsive to progress and cancellation requests with short indexing transactions, normalize filenames once for metadata matching, and reuse unchanged PDF/video thumbnails during manual rescans.
+- Rescan sources manually, cancel an individual scan or all active scans, or remove a source. Existing sources are never rescanned on app startup; interrupted scans keep their index until you rescan. Adding or relocating a source starts its initial scan. Removing one only deletes its Vaultly records.
+- Match existing category and tag names against complete words or phrases in filenames during every scan; rescan adds newly matching metadata without clearing manual assignments. People and their alternative patterns are matched as cast on videos and artists on comics and stories, including newly created people.
+- During scans, remove every `#` from media titles and filenames and mark affected items as favourites. Rename media files and comic folders while preserving item IDs, assignments, and nested indexed paths; use numbered suffixes when cleaned names collide. The source root itself stays in place. A later scan preserves any manual change to favourites after the markers have been removed.
+- Read optional `meta.json` files in image-folder comics, including a comic at the source root. Accept nested `metadata.tags`/`metadata.artists` named objects and top-level string arrays. Tags match existing whole names or patterns only; artists match names or patterns without case sensitivity and unmatched artists are created. External IDs and folder paths are ignored. Rescans reread metadata and add assignments while preserving manual edits; missing, malformed, or oversized sidecars (over 1 MB) are skipped.
+- Browse all media or filter to Comics, Videos, and Stories.
+- Search titles, paths, and assigned tag/category/cast/artist names and patterns, including inherited source attributes, or filter specifically by filename. Combine media type, source, format, series membership, categories, tags, size, and modified-date filters; sort by title, filename, date, or size.
+- Generate and cache video and PDF first-page thumbnails on demand; hover a video card for a muted preview.
+- Play browser-supported video files without cropping, with range-based seeking and keyboard shortcuts.
+- Open original videos in the system's default player through an explicit player button. Videos that the browser cannot decode show this action immediately, including MP4 files whose audio plays without video. The desktop app uses the operating system's file associations; the browser version supports Windows. Playback never transcodes or creates additional video copies. On startup, remove cached copies named by the retired converter, leaving source media and thumbnails untouched.
+- Read PDFs with a page-at-a-time viewer, fit-page/fit-width modes, zoom, and keyboard page navigation; page through image-folder comics.
+- Create, rename, and delete categories; assign them to individual items.
+- Open Tags, Categories, Cast & artists, Sources, and Settings from the bottom management dock in a separate tabbed drawer. Minimize, expand, close, and reopen it while preserving each opened tab's drafts, filters, and scroll position. Library navigation and background scans leave management mounted; modeless management editors keep the library usable and retain drafts when switching tabs. Pattern editors survive rows disappearing from refreshed or filtered lists. Attribute pickers and viewer controls open the same drawer; changes refresh metadata without reopening media.
+- Create, rename, and delete tags; assign multiple tags through a searchable picker, browse them as badges, and filter by several tags at once. Search Tags, Categories, and Cast & artists by names or matching patterns; sort by name, usage, or pattern count and filter used, unused, or patterned attributes. Customize alternative filename-matching phrases from each row; rescan to apply them. Attribute pickers also find names by these patterns.
+- Create ordered series or sets containing any mix of comics, videos, and PDFs. Give each set its own title, description, tags, and optional PNG/JPEG/WebP cover (up to 5 MB); add or reorder entries without moving media files.
+- Browse sets in separate video, comic, story, and mixed sections; move to the previous or next file while viewing an ordered set.
+- Select media cards across pages and bulk add or remove tags, categories, series membership, cast, and artists without replacing unrelated metadata.
+- Manage one shared list of Cast & artists; video credits are Cast and comic/story credits are Artists. Existing credits use the correct label automatically. Bulk edits apply the appropriate role to each selected item.
+- Rename an item through one title dialog: the title and actual file or comic folder name change together, preserving file extensions and custom titles during rescans. Folder renames also update indexed child paths. Library root folders are managed through Sources.
+
+CBZ/ZIP archives are indexed but not yet readable in-browser. In-app video playback depends on the browser's codecs; use Open in default player for other formats and assign a compatible application to their extensions in system settings. Live folder watching and Windows NTFS MFT/USN journal integration (as used by Everything) are future work; initial scans still traverse source folders. Node's built-in SQLite API is currently experimental and may change in future Node releases; use the stated Node version for now.
+

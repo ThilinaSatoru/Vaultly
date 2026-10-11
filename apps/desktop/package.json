@@ -8,6 +8,7 @@
   "homepage": "https://github.com/ThilinaSatoru/Vaultly",
   "repository": { "type": "git", "url": "https://github.com/ThilinaSatoru/Vaultly.git" },
   "main": "dist/main.cjs",
+  "desktopName": "vaultly.desktop",
   "scripts": {
     "build:main": "node build.mjs",
     "profiles:scan": "pnpm build:main && electron dist/profile-scan.cjs",
@@ -73,6 +74,12 @@
     ],
     "win": { "target": "nsis", "icon": "build/icon.ico" },
     "mac": { "target": "dmg", "category": "public.app-category.entertainment" },
-    "linux": { "target": ["AppImage", "deb"], "category": "AudioVideo", "maintainer": "Vaultly contributors" }
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "executableName": "vaultly",
+      "syncDesktopName": true,
+      "category": "AudioVideo",
+      "maintainer": "Vaultly contributors"
+    }
   }
 }

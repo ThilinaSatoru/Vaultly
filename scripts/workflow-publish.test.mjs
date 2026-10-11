@@ -26,7 +26,7 @@ function fixture(t, { version = "0.2.0", existing, failUpload = false } = {}) {
     rmSync(cwd, { recursive: true, force: true });
   });
   mkdirSync("release-assets"); writeFileSync("release-notes.md", "### Added\n\n- Embedded search.\n");
-  const files = [`Vaultly-${version}-win-x64.exe`, `Vaultly-${version}-mac-x64.dmg`, `Vaultly-${version}-mac-arm64.dmg`, `Vaultly-${version}-linux-x64.AppImage`, `Vaultly-${version}-linux-x64.deb`];
+  const files = [`Vaultly-${version}-win-x64.exe`, `Vaultly-${version}-mac-x64.dmg`, `Vaultly-${version}-mac-arm64.dmg`, `Vaultly-${version}-linux-x86_64.AppImage`, `Vaultly-${version}-linux-amd64.deb`];
   for (const name of files) writeFileSync(path.join("release-assets", name), "installer fixture");
   const calls = [];
   const repos = {
