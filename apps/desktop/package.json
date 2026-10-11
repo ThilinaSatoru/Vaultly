@@ -1,12 +1,15 @@
 {
   "name": "@vaultly/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "A local-first media library for comics, videos and PDF stories.",
   "author": "Vaultly contributors",
   "homepage": "https://github.com/ThilinaSatoru/Vaultly",
-  "repository": { "type": "git", "url": "https://github.com/ThilinaSatoru/Vaultly.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ThilinaSatoru/Vaultly.git"
+  },
   "main": "dist/main.cjs",
   "desktopName": "vaultly.desktop",
   "scripts": {
@@ -66,16 +69,28 @@
       "package.json"
     ],
     "extraResources": [
-      { "from": "../web/dist", "to": "web" }
+      {
+        "from": "../web/dist",
+        "to": "web"
+      }
     ],
     "asarUnpack": [
       "node_modules/@napi-rs/canvas/**",
       "node_modules/@ffmpeg-installer/**"
     ],
-    "win": { "target": "nsis", "icon": "build/icon.ico" },
-    "mac": { "target": "dmg", "category": "public.app-category.entertainment" },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.entertainment"
+    },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "executableName": "vaultly",
       "syncDesktopName": true,
       "category": "AudioVideo",

@@ -5,9 +5,15 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-11
+
 ### Added
 
 - Manual GitHub Actions releases with synchronized versions, changelogs, cross-platform installers, and SHA-256 checksums.
+
+### Changed
+
+- Linux build fix. readme update (0a5f008)
 
 ## [0.1.0] - 2026-10-11
 
