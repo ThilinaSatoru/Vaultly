@@ -1,8 +1,14 @@
 import type { DatabaseSync } from "node:sqlite";
 import { englishMatchingVersion, englishText } from "./english-matching.js";
 
+const registeredDatabases = new WeakSet<DatabaseSync>();
+
 export function registerEnglishMatchingFunction(db: DatabaseSync): void {
+  // Startup registers this before migrations, and index initialization calls it
+  // again. SQLite cannot replace a function while statements are active.
+  if (registeredDatabases.has(db)) return;
   db.function("vaultly_english", { deterministic: true }, (value) => englishText(String(value ?? "")));
+  registeredDatabases.add(db);
 }
 
 export function initializeEnglishSearchIndex(db: DatabaseSync): void {

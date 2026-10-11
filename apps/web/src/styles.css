@@ -125,6 +125,9 @@ main { grid-column: 2; min-width: 0; }
 .source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: 8px; align-items: start; }
 .source-card { position: relative; min-width: 0; overflow: visible; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); box-shadow: 0 2px 8px #0002; transition: border-color .2s; }
 .source-card:hover { border-color: #6c809b; }
+.source-card.is-expanded { grid-column: 1 / -1; }
+.source-operations { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.source-operations select { flex: 1; min-width: 0; max-width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; color: #dce5f0; background: var(--panel); font: inherit; font-size: .78rem; }
 .source-expand { display: grid; place-items: center; flex-shrink: 0; width: 24px; height: 32px; padding: 0; border: 0; border-radius: 5px; color: #b9c9dc; background: transparent; }
 .source-expand:hover { background: var(--panel-2); color: var(--acid); }
 .source-expand svg { transition: transform .15s; }

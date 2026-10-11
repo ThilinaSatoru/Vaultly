@@ -278,9 +278,6 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
             <div className="source-menu">
               <button type="button" onClick={() => { setMenuOpen(false); setAttributesOpen(true); }}><TagIcon size={16} /> Common attributes</button>
               <button type="button" onClick={() => void relocate()} disabled={converting || source.status === "scanning"}><FolderOpen size={16} /> Relocate source</button>
-              {source.status === "scanning"
-                ? <button type="button" onClick={() => void cancelScan()}><X size={16} /> Cancel scan</button>
-                : <><button type="button" onClick={() => void rescan()} disabled={converting || !source.path_available}><RefreshCw size={16} /> Scan again</button><button type="button" onClick={() => void rescan(true)} disabled={converting || !source.path_available} title="Match English word forms and synonyms for tags and categories. People remain exact."><RefreshCw size={16} /> Scan with English matching</button></>}
               <button className="danger" type="button" onClick={remove} disabled={converting || source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
             </div>
           )}
@@ -293,13 +290,13 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
         <div><BookOpen size={17} /><span>Stories</span><strong>{formatCount(source.story_count)}</strong></div>
       </div>
 
+      <SourceConversion sourceId={source.id} enabled={source.video_count > 0 && source.path_available && source.status !== "scanning" && Boolean(source.last_scanned_at)} scanEnabled={source.path_available && source.status !== "scanning"} scanBusy={working} expanded={expanded} onScan={rescan} onExpand={onToggle} onChanged={onChanged} onRunning={setConverting} />
       <div id={`source-details-${source.id}`} className="source-details" hidden={!expanded}>
       <div className="source-common-attributes">
         <div className="attribute-badges">{(source.tags ?? []).map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{(source.categories ?? []).map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>
         <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
       </div>
       {source.status === "scanning" && source.scan_progress && <ScanProgress progress={source.scan_progress} />}
-      {source.video_count > 0 && <SourceConversion sourceId={source.id} enabled={source.path_available && source.status !== "scanning" && Boolean(source.last_scanned_at)} onChanged={onChanged} onRunning={setConverting} />}
       </div>
       {attributesOpen && <SourceAttributesDialog source={source} {...attributeOptions} onClose={() => setAttributesOpen(false)} onSaved={onChanged} />}
       <footer>
@@ -572,7 +569,7 @@ function LibraryApp() {
       <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Manage local folders by media type. Expand a source for attributes, scanning, and conversion. Scans include subfolders and run when you choose.</p></div>
       <div className="page-heading-actions">{isScanning
         ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
-        : <><button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button><button className="secondary-button" type="button" onClick={() => void rescanAll(true)} disabled={rescanningAll || sources.length === 0} title="Add matching English word forms and synonyms for tags and categories across all sources">English matching scan</button></>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
+        : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
     </div>
 
     <section className="summary-strip" aria-label="Source summary">

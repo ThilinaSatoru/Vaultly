@@ -10,6 +10,7 @@ import { withMediaProcess } from "./process-resources.js";
 
 const run = promisify(execFile);
 const python = () => process.env.VAULTLY_PYTHON || "python";
+export type ConversionMode = "quick" | "slow" | "both";
 export interface ConversionProgress {
   status: "running" | "completed" | "cancelled" | "failed";
   processed: number; total: number; converted: number; skipped: number;
@@ -33,6 +34,8 @@ export const getConversionActivity = () => [...jobs].filter(([, job]) => job.pro
 // Reuse the supplied converter's codec planning, retries and duration verification.
 // Python writes only a temporary file; Vaultly commits the file and its existing ID.
 export const conversionWorker = video2mp4Script
+  .replace('def convert(src, tmp, total, allow_transcode=True):', 'def convert(src, tmp, total, allow_transcode=True, mode="both"):\n    allow_transcode = allow_transcode and mode != "quick"')
+  .replace('    if not vcopy and not allow_transcode:', '    if mode == "slow":\n        vcopy, acopy = False, False\n    if not vcopy and not allow_transcode:')
   .replace('if __name__ == "__main__":', 'if False:')
   .replace('capture_output=True, text=True)', 'capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)')
   .replace('text=True, errors="replace")', 'text=True, encoding="utf-8", errors="replace")')
@@ -55,7 +58,10 @@ if supported:
 total = duration(src)
 if total is None or not math.isfinite(total) or total <= 0:
     raise RuntimeError('Could not read source duration')
-success, errs = convert(src, tmp, total)
+success, errs = convert(src, tmp, total, mode=data.get('mode', 'both'))
+if success is None:
+    print('Skipped: needs slow video encoding; quick method selected')
+    sys.exit(3)
 d_out = duration(tmp) if tmp.exists() else None
 if not success or d_out is None or not math.isfinite(d_out) or abs(total-d_out) > max(2, total*0.01):
     raise RuntimeError('Conversion or duration verification failed: ' + '; '.join(errs[-3:]))
@@ -74,7 +80,7 @@ function addConversionError(progress: ConversionProgress, message: string) {
   addConversionLog(progress, message);
 }
 
-async function worker(src: string, tmp: string, signal: AbortSignal, progress: ConversionProgress) {
+async function worker(src: string, tmp: string, signal: AbortSignal, progress: ConversionProgress, mode: ConversionMode) {
   signal.throwIfAborted();
   return new Promise<number>((resolve, reject) => {
     const child = spawn(python(), ["-X", "utf8", "-u", "-c", conversionWorker], { windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
@@ -106,7 +112,7 @@ async function worker(src: string, tmp: string, signal: AbortSignal, progress: C
       else reject(new Error(errors.trim() || "Converter failed"));
     });
     child.stdin.on("error", () => undefined);
-    child.stdin.end(JSON.stringify({ src, tmp }));
+    child.stdin.end(JSON.stringify({ src, tmp, mode }));
   });
 }
 
@@ -114,12 +120,13 @@ export async function checkConversionRuntime() {
   await run(python(), ["-c", "import shutil; assert shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg and ffprobe must be on PATH'"], { windowsHide: true, timeout: 10_000 });
 }
 
-export function startSourceConversion(id: number, root: string): ConversionProgress {
+export function startSourceConversion(id: number, root: string, mode: ConversionMode = "both"): ConversionProgress {
   if (isSourceConverting(id)) return getConversionProgress(id)!;
   const items = database.prepare("SELECT id, relative_path FROM media_items WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 ORDER BY id")
     .all(id) as Array<{ id: number; relative_path: string }>;
   const progress: ConversionProgress = { status: "running", processed: 0, total: items.length, converted: 0, skipped: 0, failed: 0, currentPath: "", errors: [], logs: [] };
   const controller = new AbortController();
+  addConversionLog(progress, `Conversion method: ${mode}`);
   const promise = (async () => {
     try {
       const resolvedRoot = await realpath(root);
@@ -139,8 +146,8 @@ export function startSourceConversion(id: number, root: string): ConversionProgr
           catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
           tmp = path.join(parsed.dir, `.vaultly-${randomUUID()}.converting.tmp`);
           addConversionLog(progress, "Waiting for process slot / available resources");
-          const result = await withMediaProcess(() => worker(src, tmp!, controller.signal, progress), controller.signal);
-          if (result === 3) { progress.skipped++; addConversionLog(progress, "Skipped: already browser compatible"); continue; }
+          const result = await withMediaProcess(() => worker(src, tmp!, controller.signal, progress, mode), controller.signal);
+          if (result === 3) { progress.skipped++; addConversionLog(progress, "Skipped: already browser compatible or needs a different conversion method"); continue; }
           controller.signal.throwIfAborted();
           const after = await stat(src);
           if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("Source changed during conversion; original kept");

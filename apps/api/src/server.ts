@@ -73,6 +73,7 @@ app.post("/api/sources/:id/conversion", async (request, reply) => {
   const origin = request.headers.origin;
   if (origin && !["http://127.0.0.1:5173", "http://localhost:5173", `http://${request.headers.host}`].includes(origin)) return reply.code(403).send({ message: "Conversion must be started from Vaultly." });
   const { id } = sourceIdInput.parse(request.params);
+  const { mode } = z.object({ mode: z.enum(["quick", "slow", "both"]).default("both") }).parse(request.body ?? {});
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
   if (source.status === "scanning" || !source.last_scanned_at) return reply.code(409).send({ message: "Finish scanning this source before converting videos." });
@@ -82,7 +83,7 @@ app.post("/api/sources/:id/conversion", async (request, reply) => {
   // A scan may have started while checking the external tools.
   const current = database.prepare("SELECT status, root_path FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!current || current.status === "scanning" || current.root_path !== source.root_path) return reply.code(409).send({ message: "Source changed; try conversion after scanning finishes." });
-  return reply.code(202).send(startSourceConversion(id, source.root_path));
+  return reply.code(202).send(startSourceConversion(id, source.root_path, mode));
 });
 app.post("/api/sources/:id/conversion/cancel", async (request) => {
   const { id } = sourceIdInput.parse(request.params);
