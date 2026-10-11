@@ -1,3 +1,4 @@
+import { VideoCoverEditor } from "./VideoCoverEditor";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
 import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
@@ -6,12 +7,14 @@ import { AttributeManagerContext } from "./attribute-manager";
 import { TagCombobox } from "./TagCombobox";
 import { RenameMediaDialog } from "./RenameMediaDialog";
 import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
+import { ReaderAutoScroll } from "./ReaderAutoScroll";
 import { VideoPlayer } from "./VideoPlayer";
 import { api, formatDuration, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type SimilarVideo, type Tag } from "./media";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 import { viewerNavigationItems, type GalleryVideoContext } from "./video-playlist";
 
+const EbookReader = lazy(async () => ({ default: (await import("./EbookReader")).EbookReader }));
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
 type ComicFit = "screen" | "width" | "custom";
 
@@ -55,11 +58,14 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const comicStageRef = useRef<HTMLDivElement>(null);
   const [item, setItem] = useState<MediaDetail | null>(null);
   const [pages, setPages] = useState<string[]>([]);
+  const [comicContinuous, setComicContinuous] = useState(false);
   const [archive, setArchive] = useState(false);
   const [page, setPage] = useState(0);
   const [fit, setFit] = useState<ComicFit>(storedComicFit);
   const [comicZoom, setComicZoom] = useState(storedComicZoom);
   const [comicFullscreen, setComicFullscreen] = useState(false);
+  const [floatSize, setFloatSize] = useState(() => ({ width: readNumberPreference("vaultly.video.floatWidth", 520, 320, 1000), height: readNumberPreference("vaultly.video.floatHeight", 342, 160, 900) }));
+  const [floatDetails, setFloatDetails] = useState(() => readBooleanPreference("vaultly.video.floatDetails", false));
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [showRename, setShowRename] = useState(false);
@@ -80,11 +86,21 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const openPreviousItem = () => { if (previousItem) onNavigateItem(previousItem.id); };
   const openNextItem = () => { if (nextItem) onNavigateItem(nextItem.id); };
   const continuousReading = readBooleanPreference("vaultly.reader.continuous", true);
-  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic", `${itemId}:${page}`);
+  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic" && item.file_extension !== "pdf", `${itemId}:${page}`);
+
+  useEffect(() => {
+    if (!floating || !viewerRef.current) return;
+    const node = viewerRef.current;
+    const observer = new ResizeObserver(() => setFloatSize({ width: node.offsetWidth, height: node.offsetHeight }));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [floating]);
 
   useEffect(() => { vaultStorage.setItem("vaultly.comic.fit", fit); }, [fit]);
   useEffect(() => { vaultStorage.setItem("vaultly.comic.zoom", String(comicZoom)); }, [comicZoom]);
   useEffect(() => { vaultStorage.setItem("vaultly.video.sidebarTab", sidebarTab); }, [sidebarTab]);
+  useEffect(() => { vaultStorage.setItem("vaultly.video.floatWidth", String(floatSize.width)); vaultStorage.setItem("vaultly.video.floatHeight", String(floatSize.height)); }, [floatSize]);
+  useEffect(() => { vaultStorage.setItem("vaultly.video.floatDetails", String(floatDetails)); }, [floatDetails]);
 
   useEffect(() => {
     if (floating) return;
@@ -94,7 +110,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     const focusViewer = () => viewerRef.current?.focus({ preventScroll: true });
     const frame = window.requestAnimationFrame(focusViewer);
     const keepFocusInside = (event: FocusEvent) => {
-      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .dialog-backdrop")) return;
+      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .dialog-backdrop, .viewer-floating")) return;
       if (viewerRef.current && event.target instanceof Node && !viewerRef.current.contains(event.target)) focusViewer();
     };
     document.addEventListener("focusin", keepFocusInside);
@@ -133,9 +149,13 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
             .catch(() => { if (active) setSimilarVideos([]); })
             .finally(() => { if (active) setSimilarLoading(false); });
         }
-        if (detail.media_type === "comic") {
-          const pageResult = await api<{ pages: string[]; archive: boolean }>(`/api/items/${itemId}/pages`);
-          if (active) { setPages(pageResult.pages); setArchive(pageResult.archive); }
+        if (detail.media_type === "comic" && detail.file_extension !== "pdf") {
+          try {
+            const pageResult = await api<{ pages: string[]; archive: boolean }>(`/api/items/${itemId}/pages`);
+            if (active) { setPages(pageResult.pages); setArchive(pageResult.archive); }
+          } catch (reason) {
+            if (active) { setArchive(true); setError(reason instanceof Error ? reason.message : "Could not read comic pages."); }
+          }
         }
       })
       .catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not open item."); });
@@ -187,8 +207,10 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   };
 
   useLayoutEffect(() => {
-    comicScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  }, [itemId, page]);
+    const container = comicScrollRef.current;
+    const destination = comicContinuous ? container?.querySelector<HTMLElement>(`[data-comic-page="${page}"]`) : null;
+    container?.scrollTo({ top: destination && container ? destination.offsetTop - container.offsetTop : 0, left: 0, behavior: "instant" });
+  }, [itemId, page, comicContinuous]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -211,6 +233,8 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
         return;
       }
+      if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".viewer") && !viewerRef.current?.contains(document.activeElement)) return;
+      if (floating && !viewerRef.current?.contains(document.activeElement)) return;
       if (matchesShortcut(event, "viewer.close")) {
         // While the video is in fullscreen, let the browser exit fullscreen first;
         // a second Escape press then closes the viewer.
@@ -227,7 +251,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
         if (target) onNavigateItem(target.id);
         return;
       }
-      if (item?.media_type === "comic") {
+      if (item?.media_type === "comic" && item.file_extension !== "pdf") {
         if (matchesShortcut(event, "reader.nextPage")) { event.preventDefault(); nextComicPage(); }
         if (matchesShortcut(event, "reader.previousPage")) { event.preventDefault(); previousComicPage(); }
         if (matchesShortcut(event, "comic.zoomIn") && !activatingControl) { event.preventDefault(); changeComicZoom(25); }
@@ -244,7 +268,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [item, page, pages.length, navigationItems, previousItem, nextItem, onClose, onNavigateItem, manager?.isOpen]);
+  }, [item, page, pages.length, navigationItems, previousItem, nextItem, onClose, onNavigateItem, manager?.isOpen, floating]);
 
   const toggleFavorite = async () => {
     if (!item) return;
@@ -333,11 +357,13 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   };
 
   return (
-    <div className={`viewer-backdrop${floating ? " is-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} role="presentation" onMouseDown={floating ? undefined : onClose}>
-      <section ref={viewerRef} className={`viewer${floating ? " viewer-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+    <div className={`viewer-backdrop${floating ? " is-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} role="presentation" onMouseDown={floating ? undefined : onClose}>
+      <section ref={viewerRef} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} className={`viewer${floating ? " viewer-floating" : ""}${hasPlaylist ? " has-playlist" : ""}${floating && floatDetails ? " show-float-details" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <header className="viewer-header">
           <div className="viewer-title"><strong>{item?.title || "Opening media…"}</strong><span>{galleryContext && seriesIndex >= 0 ? `Gallery page ${galleryContext.page + 1} · ${seriesIndex + 1} / ${galleryContext.videos.length}` : playlistIndex >= 0 ? `Temporary playlist · ${playlistIndex + 1} / ${playlist.length}` : seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
           <div className="viewer-header-actions">
+            {floating && <label className="float-size-control" title="Player size"><input type="range" aria-label="Floating player size" min="320" max={Math.max(320, Math.min(1000, window.innerWidth - 36))} step="20" value={floatSize.width} onChange={(event) => { const width = Number(event.target.value); setFloatSize({ width, height: Math.min(window.innerHeight - 36, width * 9 / 16 + (floatDetails ? 189 : 49)) }); }} /></label>}
+            {floating && hasPlaylist && <button type="button" aria-label="Show floating playlist and details" aria-pressed={floatDetails} onClick={() => { setFloatDetails((value) => !value); setFloatSize((value) => ({ ...value, height: Math.max(230, Math.min(window.innerHeight - 36, value.height + (floatDetails ? -140 : 140))) })); }}><ListVideo size={17} /></button>}
             {manager && <button type="button" onClick={() => manager.open("tags")} title="Manage attributes without leaving this media" aria-label="Manage attributes"><SlidersHorizontal size={17} /><span className="viewer-manage-label">Attributes</span></button>}
             {item && <button className={item.favorite ? "is-favorite" : ""} type="button" onClick={() => void toggleFavorite()} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} title={item.favorite ? "Remove from favorites" : "Add to favorites"}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>}
             {navigationItems && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file"><ChevronLeft size={17} /> Previous</button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file">Next <ChevronRight size={17} /></button></>}
@@ -350,18 +376,21 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {!item && !error && <div className="viewer-loading"><LoaderCircle className="spin" size={30} /> Loading…</div>}
           {item?.media_type === "video" && (
             <div className="video-stage">
-              <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={floating || readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
+              <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
-          {item?.media_type === "story" && (
+          {(item?.media_type === "story" || (item?.media_type === "comic" && item.file_extension === "pdf")) && (
             <Suspense fallback={<div className="viewer-loading"><LoaderCircle className="spin" size={19} /> Loading PDF reader…</div>}>
-              <PdfReader itemId={item.id} onPreviousItem={continuousReading && previousItem ? openPreviousItem : undefined} onNextItem={continuousReading && nextItem ? openNextItem : undefined} />
+              {item.file_extension === "pdf" ? <PdfReader itemId={item.id} onPreviousItem={continuousReading && previousItem ? openPreviousItem : undefined} onNextItem={continuousReading && nextItem ? openNextItem : undefined} /> : <EbookReader key={item.id} itemId={item.id} extension={item.file_extension} />}
             </Suspense>
           )}
-          {item?.media_type === "comic" && (
+          {item?.media_type === "comic" && item.file_extension !== "pdf" && (
             pages.length > 0 ? (
               <div className="comic-stage" ref={comicStageRef}>
                 <div className="comic-toolbar">
+                  {item.file_extension && <button type="button" onClick={() => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open file.")); }}>Open in desktop app</button>}
+                  <label><input type="checkbox" checked={comicContinuous} onChange={(event) => { setComicContinuous(event.target.checked); changeComicFit("width"); }} /> Continuous view</label>
+                  <ReaderAutoScroll scrollRef={comicScrollRef} enabled={comicContinuous || fit !== "screen"} contentKey={`${itemId}:${comicContinuous}:${page}`} />
                   <button type="button" onClick={previousComicPage} disabled={page === 0 && (!continuousReading || !previousItem)}><ChevronLeft size={18} /> Previous</button>
                   <span>Page {page + 1} / {pages.length}</span>
                   <button type="button" onClick={nextComicPage} disabled={page === pages.length - 1 && (!continuousReading || !nextItem)}>Next <ChevronRight size={18} /></button>
@@ -376,11 +405,11 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                   tabIndex={-1}
                   onPointerDown={() => viewerRef.current?.focus({ preventScroll: true })}
                 >
-                  <img className={`comic-page fit-${fit}`} style={fit === "custom" ? { width: `${comicZoom}%` } : undefined} src={vaultUrl(`/api/items/${item.id}/pages/${page}`)} alt={`Page ${page + 1}`} />
+                  {(comicContinuous ? pages.map((_, index) => index) : [page]).map((index) => <img key={index} data-comic-page={index} loading="lazy" className={`comic-page fit-${fit}`} style={fit === "custom" ? { width: `${comicZoom}%` } : undefined} src={vaultUrl(`/api/items/${item.id}/pages/${index}`)} alt={`Page ${index + 1}`} />)}
                 </div>
               </div>
             ) : archive ? (
-              <div className="archive-state"><BookOpen size={40} /><h2>Archive reader is coming next</h2><p>This CBZ/ZIP comic is indexed, but pages cannot be shown in the browser yet.</p><a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download>Open the archive <Download size={17} /></a></div>
+              <div className="archive-state"><BookOpen size={40} /><h2>Open in your comic reader</h2><p>This archive format uses your associated desktop reader.</p><button className="secondary-button" type="button" onClick={() => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open comic.")); }}>Open in desktop reader</button><a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download>Open the archive <Download size={17} /></a></div>
             ) : <div className="viewer-loading"><LoaderCircle className="spin" size={28} /> Loading pages…</div>
           )}
         </div>
@@ -417,6 +446,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
               <button className="secondary-button" type="button" onClick={() => setShowRename(true)} disabled={saving}><Pencil size={16} /> Rename title</button>
               <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
               {item.media_type !== "comic" && <a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download><Download size={16} /> Download file</a>}
+              {item.media_type === "video" && <VideoCoverEditor key={item.id} item={item} onChanged={(changes) => { setItem((current) => current?.id === item.id ? { ...current, ...changes } : current); onChanged(); }} />}
               <h3>Categories</h3>
               {item.source_attributes && (item.source_attributes.tags.length > 0 || item.source_attributes.categories.length > 0) && <div className="attribute-help">Common source attributes:<div className="attribute-badges">{item.source_attributes.tags.map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{item.source_attributes.categories.map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>These apply to every file; edit them in Sources.</div>}
               <TagCombobox attributeKind="category" label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />

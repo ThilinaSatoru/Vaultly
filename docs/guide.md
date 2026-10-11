@@ -1,6 +1,22 @@
 # Vaultly usage and development guide
 
-A local-first media library for comics, videos, and PDF stories found in one or more source folders.
+A local-first media library for movies, TV series, anime, manga, e-books, and pictures found in one or more source folders.
+
+## Organize sources and folders
+
+Choose a media type before adding a source: Movies, TV series, Anime, Manga / comics, E-books / documents, or Pictures. Video sources index videos and leave subtitles, covers, and unrelated images out of the gallery. E-book sources index supported book/document files. Manga sources group image pages by folder and index comic archives and PDFs. Picture sources index each image individually. Scans descend through all subfolders, including seasons, extras, and custom directories. TV/anime season folders and manga chapter folders help infer ordered collections.
+
+Existing mixed sources keep their previous scan behavior. Expand a source in **Sources**, choose its media type, and let the rescan update the index. Source type is included in backups; older backups restore as mixed sources.
+
+In a gallery, use the collection-type buttons to choose Movies, TV series, Anime, Manga, E-books, or Pictures. Choose **Sort → Folders** to browse sources and their original folder hierarchy. The same folder view works inside a selected category and in Favorites. Use **Up**, **All source folders**, or Back to navigate.
+
+## Floating playback and reading
+
+Choose **Float** in the video player to keep it open while using Back, browsing another library, or opening a reader. Close it explicitly with the close button (or its close shortcut while focused). Use the header size slider or resize corner to change its size. The playlist button reveals Up next and Info. Seeking, volume, playback speed, fullscreen, and associated-player actions remain available. Matching SRT/VTT files beside the video appear in the subtitle selector; when a folder contains only one video, its companion subtitle files are offered as well.
+
+PDF and comic readers offer **Continuous view**. EPUB follows the book's chapter order; TXT, FB2, and HTML text also use a continuous reader. **Auto-scroll** starts only when clicked, with a remembered speed from 1 to 100 pixels per second. It pauses on manual interaction, loss of focus, or the end of the content. PDF pages outside the viewport are unloaded to limit canvas memory.
+
+WPS, DOC/DOCX, ODT, RTF, MOBI, AZW/AZW3, DjVu, and CBR/CB7/CBT archives are indexed and opened by the associated desktop app. PDF, EPUB, image folders, and CBZ/ZIP have built-in readers. ZIP readers support archives up to 256 MB with bounded chapter/page sizes; encrypted or unsupported books use a desktop reader. EPUB text and raster illustrations are preserved with simplified styling.
 
 ## Requirements
 
@@ -14,7 +30,7 @@ pnpm install
 pnpm dev
 ```
 
-Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by default. Set `VAULTLY_API_PORT` before running `pnpm dev` to use another port; the API and Vite proxy will both use it. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. Adding a source indexes files in place. Scans remove `#` favourite markers from filenames; explicit rename and conversion actions also modify source files. See the library features below.
+Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by default. Set `VAULTLY_API_PORT` before running `pnpm dev` to use another port; the API and Vite proxy will both use it. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. Adding a source indexes files in place. Scans remove leading `#` favourite markers from filenames; explicit rename and conversion actions also modify source files. See the library features below.
 
 ## Vault profiles
 
@@ -103,7 +119,7 @@ To extend synonym coverage, update `englishSynonymGroups` in `apps/api/src/engli
 - Keep scanning responsive to progress and cancellation requests with short indexing transactions, normalize filenames once for metadata matching, and reuse unchanged PDF/video thumbnails during manual rescans.
 - Rescan sources manually, cancel an individual scan or all active scans, or remove a source. Existing sources are never rescanned on app startup; interrupted scans keep their index until you rescan. Adding or relocating a source starts its initial scan. Removing one only deletes its Vaultly records.
 - Match existing category and tag names against complete words or phrases in filenames during every scan; rescan adds newly matching metadata without clearing manual assignments. People and their alternative patterns are matched as cast on videos and artists on comics and stories, including newly created people.
-- During scans, remove every `#` from media titles and filenames and mark affected items as favourites. Rename media files and comic folders while preserving item IDs, assignments, and nested indexed paths; use numbered suffixes when cleaned names collide. The source root itself stays in place. A later scan preserves any manual change to favourites after the markers have been removed.
+- During scans, only filenames beginning with `#` mark items as favourites. Remove those leading markers and preserve hashes elsewhere, including custom titles. Rename media files and comic folders while preserving item IDs, assignments, and nested indexed paths; use numbered suffixes when cleaned names collide. The source root itself stays in place. A later scan preserves any manual change to favourites after the markers have been removed.
 - Read optional `meta.json` files in image-folder comics, including a comic at the source root. Accept nested `metadata.tags`/`metadata.artists` named objects and top-level string arrays. Tags match existing whole names or patterns only; artists match names or patterns without case sensitivity and unmatched artists are created. External IDs and folder paths are ignored. Rescans reread metadata and add assignments while preserving manual edits; missing, malformed, or oversized sidecars (over 1 MB) are skipped.
 - Browse all media or filter to Comics, Videos, and Stories.
 - Search titles, paths, and assigned tag/category/cast/artist names and patterns, including inherited source attributes, or filter specifically by filename. Combine media type, source, format, series membership, categories, tags, size, and modified-date filters; sort by title, filename, date, or size.
@@ -122,3 +138,15 @@ To extend synonym coverage, update `englishSynonymGroups` in `apps/api/src/engli
 
 CBZ/ZIP archives are indexed but not yet readable in-browser. In-app video playback depends on the browser's codecs; use Open in default player for other formats and assign a compatible application to their extensions in system settings. Live folder watching and Windows NTFS MFT/USN journal integration (as used by Everything) are future work; initial scans still traverse source folders. Node's built-in SQLite API is currently experimental and may change in future Node releases; use the stated Node version for now.
 
+
+Video covers and playback preferences
+------------------------------------
+Place `poster`, `cover`, `folder`, a matching video filename, or a matching `-poster` / `-cover` image beside a video. Scanning ignores unrelated artwork. JPEG, PNG, WebP and AVIF covers are accepted; covers must be smaller than 5 MB. All video cards use the same size. Artwork is fitted without cropping, including portrait covers for landscape movies. Video previews fit their own dimensions.
+
+Open a video and select **Info → Choose cover** to override its folder artwork. **Use folder cover / video frame** removes the override. Covers are preserved through rescans and included in backups.
+
+Audio and subtitle dropdowns sit directly beside the seek controls. Open **Player options** for speed, subtitle size (50–200%), fit/fill, repeat, and seek previews. These choices and volume/mute are remembered within the active vault. A preferred language follows newly opened videos even when track ordering changes. Each new video enables an available subtitle; if the preferred language is missing, a default or first available subtitle is used. You can turn subtitles off for the current video. Bitmap subtitles remain available through the default desktop player.
+
+Alternate audio is prepared locally and cached as audio only; the original video remains the playback source. While a track is prepared, you can pause or resume the requested playback. Seeking and speed changes apply to both picture and audio.
+
+Controls hide after a short idle delay and immediately when the pointer exits the player. **Hide controls now** hides them immediately. Keyboard and wheel actions show small indicators. Tab from the player reveals its accessible controls. Preview thumbnails above the seek bar are optional, and turning them off stops loading the preview video.

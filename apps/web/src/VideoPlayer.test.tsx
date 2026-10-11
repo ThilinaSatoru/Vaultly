@@ -16,7 +16,8 @@ vi.mock("react", async (original) => ({
   useEffect: vi.fn(),
 }));
 vi.mock("./media", () => ({ api: vi.fn() }));
-vi.mock("./preferences", () => ({ readNumberPreference: (_key: string, fallback: number) => fallback, matchesShortcut: () => false }));
+vi.mock("./preferences", () => ({ readNumberPreference: (_key: string, fallback: number) => fallback, readBooleanPreference: (_key: string, fallback: boolean) => fallback, writePreference: vi.fn(), matchesShortcut: () => false }));
+import { writePreference } from "./preferences";
 import { api } from "./media";
 import { VideoPlayer } from "./VideoPlayer";
 
@@ -70,4 +71,22 @@ test("a native playback error offers the original download and default player", 
   const fallback = find(render(), (node) => node.props.className === "video-external-fallback");
   expect(find(fallback, (node) => node.type === "a").props.href).toBe("/api/items/1/file");
   expect(api).not.toHaveBeenCalled();
+});
+
+
+test("track switchers are directly on the toolbar and subtitle size persists from the menu", () => {
+  const view = render();
+  const toolbar = find(view, (node) => node.props.className === "video-controls-row");
+  expect(find(toolbar, (node) => node.props["aria-label"] === "Audio track").type).toBe("select");
+  const subtitles = find(toolbar, (node) => node.props["aria-label"] === "Subtitles");
+  expect(subtitles.type).toBe("select");
+  subtitles.props.onChange({ target: { value: "-1" } });
+  expect(writePreference).not.toHaveBeenCalled();
+  find(view, (node) => node.props["aria-label"] === "Player options").props.onClick();
+  const menu = find(render(), (node) => node.props.className === "video-options");
+  expect(() => find(menu, (node) => node.props["aria-label"] === "Subtitles")).toThrow();
+  const size = find(menu, (node) => node.props["aria-label"] === "Subtitle size");
+  size.props.onChange({ target: { value: "150" } });
+  expect(writePreference).toHaveBeenCalledWith("vaultly.video.subtitleSize", 150);
+  expect(render().props.style["--subtitle-scale"]).toBe(1.5);
 });

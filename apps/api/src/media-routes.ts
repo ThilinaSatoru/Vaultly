@@ -1,8 +1,10 @@
+import { getVideoTracks, getAudioTrack, getEmbeddedSubtitle } from "./video-tracks.js";
+import { findVideoCover, normalizeVideoCover } from "./video-covers.js";
 import { itemAssignmentIds, sourceAttributes, withAttributePatterns } from "./attribute-routes.js";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { lstat, opendir, realpath, rename as renamePath, stat } from "node:fs/promises";
+import { readFile, lstat, opendir, realpath, rename as renamePath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { database } from "./database.js";
@@ -11,6 +13,10 @@ import { gallerySearchFilters } from "./gallery-search.js";
 import { expandSearchTerms, rankedMatch } from "./advanced-search.js";
 import { englishSearchFilters } from "./english-search.js";
 import { englishMatch } from "./english-matching.js";
+import { videoSubtitles, readSubtitle } from "./subtitles.js";
+import { browseFolders } from "./folder-browse.js";
+import { openBookArchive, epubChapters } from "./book-archive.js";
+import { ebookExtensions, sourceMediaTypes, pictureExtensions } from "./source-media.js";
 import { getScanProgress, isVideoFile } from "./scanner.js";
 import { getPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
 import { openVideoInDefaultPlayer } from "./open-video.js";
@@ -26,6 +32,7 @@ const dateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
   .refine((value) => !Number.isNaN(new Date(`${value}T00:00:00`).getTime()));
 const listInput = z.object({
   type: z.enum(["comic", "video", "story"]).optional(),
+  sourceType: z.enum(sourceMediaTypes).optional(),
   q: z.string().trim().max(200).optional(),
   searchMode: z.enum(["literal", "fuzzy", "english"]).default("literal"),
   filename: z.string().trim().max(200).optional(),
@@ -47,7 +54,8 @@ const listInput = z.object({
   artists: idListInput.optional(),
   people: idListInput.optional(),
   favorite: z.enum(["1"]).optional(),
-  sort: z.enum(["relevance", "title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
+  folder: z.string().max(2000).default(""),
+  sort: z.enum(["folders", "relevance", "title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
 }).refine((value) => value.minMb === undefined || value.maxMb === undefined || value.minMb <= value.maxMb,
   { message: "Minimum size must not exceed maximum size." });
@@ -64,7 +72,7 @@ interface MediaPathRow {
   modified_at_ms: number;
 }
 
-const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
+const imageExtensions = pictureExtensions;
 const mimeTypes: Record<string, string> = {
   ".mp4": "video/mp4", ".m4v": "video/mp4", ".mkv": "video/x-matroska",
   ".webm": "video/webm", ".avi": "video/x-msvideo", ".mov": "video/quicktime",
@@ -74,7 +82,7 @@ const mimeTypes: Record<string, string> = {
   ".3gp": "video/3gpp", ".3g2": "video/3gpp2", ".asf": "video/x-ms-asf", ".mxf": "application/mxf",
   ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
   ".gif": "image/gif", ".avif": "image/avif", ".cbz": "application/zip",
-  ".zip": "application/zip",
+  ".zip": "application/zip", ".m4a": "audio/mp4",
 };
 
 function mediaRow(id: number): MediaPathRow | undefined {
@@ -112,7 +120,12 @@ function invalidFileNameMessage(fileName: string): string | null {
 
 async function comicPages(item: MediaPathRow): Promise<string[]> {
   const directoryPath = await resolveItemPath(item);
-  if (!(await stat(directoryPath)).isDirectory()) return [];
+  if (!(await stat(directoryPath)).isDirectory()) {
+    const extension = path.extname(directoryPath).toLowerCase();
+    if (imageExtensions.has(extension)) return [path.basename(directoryPath)];
+    if (extension === ".cbz" || extension === ".zip") return [...(await openBookArchive(directoryPath)).entries.keys()].filter((name) => imageExtensions.has(path.extname(name).toLowerCase())).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return [];
+  }
   const directory = await opendir(directoryPath);
   const pages: string[] = [];
   for await (const entry of directory) {
@@ -161,7 +174,8 @@ async function sendLocalFile(
 
 const itemSelect = (indexedSearch = false) => `
   SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes, m.favorite, m.duration_seconds,
-    m.modified_at_ms, m.file_count, m.video_width, m.video_height, s.name AS source_name,
+    m.modified_at_ms, m.file_count, m.video_width, m.video_height, m.cover_width, m.cover_height, m.cover_signature,
+    (m.cover_data IS NOT NULL) AS custom_cover, (m.cover_data IS NOT NULL OR m.cover_path IS NOT NULL) AS has_cover, s.name AS source_name,
     COALESCE((SELECT group_concat(c.name, ', ')
       FROM effective_item_categories ic JOIN categories c ON c.id = ic.category_id
       WHERE ic.item_id = m.id), '') AS category_names
@@ -251,6 +265,7 @@ export async function registerMediaRoutes(
       conditions.push("m.media_type = ?");
       values.push(input.type);
     }
+    if (input.sourceType) { conditions.push("m.source_id IN (SELECT id FROM sources WHERE media_type = ?)"); values.push(input.sourceType); }
     if (input.favorite) conditions.push("m.favorite = 1");
     if (input.source) {
       conditions.push("m.source_id = ?");
@@ -339,6 +354,19 @@ export async function registerMediaRoutes(
       values.push(personId);
     }
 
+    let folders: ReturnType<typeof browseFolders> | undefined;
+    if (input.sort === "folders") {
+      const paths = database.prepare(`SELECT m.source_id, s.name AS source_name, m.relative_path
+        FROM media_items m JOIN sources s ON s.id = m.source_id WHERE ${conditions.join(" AND ")}`).all(...values) as Array<{ source_id: number; source_name: string; relative_path: string }>;
+      folders = browseFolders(paths, input.source, input.folder);
+      if (input.source === undefined) conditions.push("0");
+      else {
+        const normalized = "replace(m.relative_path, char(92), '/')";
+        const prefix = input.folder ? `${input.folder}/` : "";
+        conditions.push(`substr(${normalized}, 1, ?) = ? AND instr(substr(${normalized}, ?), '/') = 0`);
+        values.push(prefix.length, prefix, prefix.length + 1);
+      }
+    }
     const where = conditions.join(" AND ");
     const wordMatch = rankedMatch(searchGroups);
     const match = wordMatch && input.searchMode === "english" ? `{title filename} : (${wordMatch})` : wordMatch;
@@ -371,7 +399,7 @@ export async function registerMediaRoutes(
     const credits = creditsByItem(rows.map((row) => row.id));
     const items = rows.map((row) => ({ ...row, series_ids: memberships.get(row.id) ?? [], categories: categories.get(row.id) ?? [], tags: tags.get(row.id) ?? [],
       cast: credits.get(row.id)?.cast ?? [], artists: credits.get(row.id)?.artists ?? [] }));
-    return { items, total: total.count, page: input.page, pageSize: 48 };
+    return { items, folders, total: total.count, page: input.page, pageSize: 48 };
   });
 
   app.get("/api/items/:id/similar", async (request, reply) => {
@@ -555,15 +583,148 @@ export async function registerMediaRoutes(
     return { duration_seconds: duration };
   });
 
+  app.get("/api/items/:id/tracks", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send();
+    return getVideoTracks(await resolveItemPath(item));
+  });
+  app.get("/api/items/:id/audio/:page", async (request, reply) => {
+    const { id, page } = pageInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send();
+    const filename = await resolveItemPath(item);
+    const track = (await getVideoTracks(filename)).audio.find((track) => track.index === page);
+    if (!track) return reply.code(404).send({ message: "Audio track not found." });
+    try { return sendLocalFile(reply, await getAudioTrack(id, filename, track), request.headers.range); }
+    catch { return reply.code(422).send({ message: "Could not prepare this audio track." }); }
+  });
+  app.get("/api/items/:id/embedded-subtitles/:page", async (request, reply) => {
+    const { id, page } = pageInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send();
+    const filename = await resolveItemPath(item);
+    const track = (await getVideoTracks(filename)).subtitles.find((track) => track.index === page);
+    if (!track) return reply.code(404).send();
+    try { return reply.type("text/vtt; charset=utf-8").send(await getEmbeddedSubtitle(filename, track)); }
+    catch { return reply.code(422).send({ message: "Could not read embedded subtitles." }); }
+  });
+
+  app.get("/api/items/:id/subtitles", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send();
+    return { subtitles: await videoSubtitles(await resolveItemPath(item)) };
+  });
+  app.get("/api/items/:id/subtitles/:page", async (request, reply) => {
+    const { id, page } = pageInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send();
+    const video = await resolveItemPath(item);
+    const names = await videoSubtitles(video);
+    if (!names[page]) return reply.code(404).send();
+    const filename = await realpath(path.join(path.dirname(video), names[page]));
+    if (!withinRoot(await realpath(item.root_path), filename)) return reply.code(403).send();
+    return reply.type("text/vtt; charset=utf-8").send(await readSubtitle(filename));
+  });
+
+  app.get("/api/items/:id/ebook", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "story") return reply.code(404).send({ message: "Book not found." });
+    const location = await resolveItemPath(item);
+    const extension = path.extname(location).toLowerCase();
+    try {
+      if (extension === ".epub") return { chapters: epubChapters(await openBookArchive(location)) };
+      if (![".txt", ".fb2", ".html", ".htm"].includes(extension)) return reply.code(415).send({ message: "Use the associated desktop app for this book format." });
+      if ((await stat(location)).size > 32 * 1024 * 1024) return reply.code(413).send({ message: "Book text is too large for the built-in reader." });
+      const text = await readFile(location, "utf8");
+      return { chapters: [extension === ".txt" ? { text } : { html: text }] };
+    } catch (error) { return reply.code(422).send({ message: error instanceof Error ? error.message : "Could not read book archive." }); }
+  });
+
+  app.get("/api/items/:id/ebook-image", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { path: name } = z.object({ path: z.string().max(2000) }).parse(request.query);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "story" || !imageExtensions.has(path.extname(name).toLowerCase())) return reply.code(404).send({ message: "Book image not found." });
+    const location = await resolveItemPath(item);
+    if (path.extname(location).toLowerCase() !== ".epub") return reply.code(404).send();
+    try { return reply.type(mimeTypes[path.extname(name).toLowerCase()] ?? "application/octet-stream").send((await openBookArchive(location)).read(name)); }
+    catch { return reply.code(404).send({ message: "Book image unavailable." }); }
+  });
+
+  app.post("/api/items/:id/open-document", async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin && !["http://127.0.0.1:5173", "http://localhost:5173", `http://${request.headers.host}`].includes(origin)) return reply.code(403).send();
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item) return reply.code(404).send({ message: "Book not found." });
+    const location = await resolveItemPath(item);
+    if (!ebookExtensions.has(path.extname(location).toLowerCase()) && !pictureExtensions.has(path.extname(location).toLowerCase()) && ![".cbz", ".zip", ".cbr", ".cb7", ".cbt"].includes(path.extname(location).toLowerCase())) return reply.code(400).send({ message: "Unsupported document format." });
+    if (!options.openVideo && process.platform !== "win32") return reply.code(501).send({ message: "Opening books requires the desktop app." });
+    try { await (options.openVideo ?? openVideoInDefaultPlayer)(location); }
+    catch { return reply.code(502).send({ message: "Assign a desktop reader to this file format in system settings." }); }
+    return reply.code(204).send();
+  });
+
+  app.put("/api/items/:id/cover", { bodyLimit: 7 * 1024 * 1024 }, async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send({ message: "Video not found." });
+    const { image } = z.object({ image: z.string().max(7 * 1024 * 1024) }).parse(request.body);
+    try {
+      const cover = await normalizeVideoCover(Buffer.from(image, "base64"));
+      const signature = `manual:${Date.now()}`;
+      database.prepare("UPDATE media_items SET cover_data = ?, cover_width = ?, cover_height = ?, cover_signature = ? WHERE id = ?")
+        .run(cover.data, cover.width, cover.height, signature, id);
+      return { cover_width: cover.width, cover_height: cover.height, custom_cover: 1, has_cover: 1, cover_signature: signature };
+    } catch { return reply.code(400).send({ message: "Choose a valid PNG, JPEG, WebP or AVIF image smaller than 5 MB." }); }
+  });
+  app.delete("/api/items/:id/cover", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const item = mediaRow(id);
+    if (!item || item.media_type !== "video") return reply.code(404).send();
+    const cover = await findVideoCover(item.root_path, await resolveItemPath(item));
+    database.prepare("UPDATE media_items SET cover_data = NULL, cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ? WHERE id = ?")
+      .run(cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null, id);
+    return { cover_width: cover?.width ?? null, cover_height: cover?.height ?? null, custom_cover: 0, has_cover: cover ? 1 : 0, cover_signature: cover?.signature ?? null };
+  });
+
   app.get("/api/items/:id/thumbnail", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
-    if (!item || (item.media_type !== "video" && item.media_type !== "story")) {
+    if (item?.media_type === "video") {
+      const cover = database.prepare("SELECT cover_data, cover_path FROM media_items WHERE id = ?").get(id) as { cover_data: Uint8Array | null; cover_path: string | null };
+      if (cover.cover_data) return reply.type("image/png").header("Cache-Control", "private, no-cache").send(Buffer.from(cover.cover_data));
+      if (cover.cover_path) {
+        try {
+          const root = await realpath(item.root_path);
+          const filename = await realpath(path.resolve(root, cover.cover_path));
+          if (withinRoot(root, filename) && imageExtensions.has(path.extname(filename).toLowerCase())) return sendLocalFile(reply, filename, undefined);
+        } catch { /* Fall back to a video frame when a folder cover disappeared. */ }
+      }
+    }
+    if (item?.media_type === "comic" && path.extname(item.relative_path).toLowerCase() !== ".pdf") {
+      const pages = await comicPages(item);
+      if (pages.length) {
+        const location = await resolveItemPath(item);
+        if ((await stat(location)).isDirectory()) {
+          const cover = await realpath(path.join(location, pages[0]));
+          if (!withinRoot(await realpath(item.root_path), cover)) return reply.code(403).send();
+          return sendLocalFile(reply, cover, undefined);
+        }
+        if (imageExtensions.has(path.extname(location).toLowerCase())) return sendLocalFile(reply, location, undefined);
+        return reply.type(mimeTypes[path.extname(pages[0]).toLowerCase()] ?? "application/octet-stream").send((await openBookArchive(location)).read(pages[0]));
+      }
+    }
+    if (!item || (item.media_type !== "video" && item.media_type !== "story" && !(item.media_type === "comic" && path.extname(item.relative_path).toLowerCase() === ".pdf"))) {
       return reply.code(404).send({ message: "Thumbnail not found." });
     }
     const filePath = await resolveItemPath(item);
     try {
-      if (item.media_type === "story") {
+      if (item.media_type !== "video") {
+        if (path.extname(filePath).toLowerCase() !== ".pdf") return reply.code(404).send({ message: "Book thumbnail unavailable." });
         const generation = getPdfThumbnail(id, filePath, item.size_bytes, item.modified_at_ms)
           .catch((error: unknown) => {
             app.log.warn({ err: error, id }, "Could not generate PDF thumbnail");
@@ -604,6 +765,10 @@ export async function registerMediaRoutes(
     const pageName = pages[page];
     if (!pageName) return reply.code(404).send({ message: "Page not found." });
     const directoryPath = await resolveItemPath(item);
+    if ((await stat(directoryPath)).isFile()) {
+      if (imageExtensions.has(path.extname(directoryPath).toLowerCase())) return sendLocalFile(reply, directoryPath, undefined);
+      return reply.type(mimeTypes[path.extname(pageName).toLowerCase()] ?? "application/octet-stream").send((await openBookArchive(directoryPath)).read(pageName));
+    }
     const pagePath = await realpath(path.join(directoryPath, pageName));
     if (!withinRoot(directoryPath, pagePath)) return reply.code(403).send({ message: "Page is outside this comic." });
     return sendLocalFile(reply, pagePath, undefined);

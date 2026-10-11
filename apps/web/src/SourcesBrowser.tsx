@@ -1,13 +1,16 @@
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
+const sourceLabels: Record<string, string> = { movies: "Movies", tv: "TV series", anime: "Anime", manga: "Manga", ebooks: "E-books", pictures: "Pictures" };
 interface SourceSummary {
+  media_type?: string;
   id: number; name: string; root_path: string; comic_count: number; video_count: number; story_count: number;
   item_count: number; status: string; path_available: boolean;
 }
 type MediaFilter = "all" | "comic" | "video" | "story" | "mixed";
-const groups = ["Mixed media", "Videos", "Comics", "Stories", "No indexed media"];
+const groups = [...Object.values(sourceLabels), "Mixed media", "Videos", "Comics", "Stories", "No indexed media"];
 export function sourceMediaGroup(source: SourceSummary) {
+  if (source.media_type && sourceLabels[source.media_type]) return sourceLabels[source.media_type];
   const types = [source.comic_count, source.video_count, source.story_count].filter((count) => count > 0).length;
   return types > 1 ? "Mixed media" : source.video_count > 0 ? "Videos" : source.comic_count > 0 ? "Comics" : source.story_count > 0 ? "Stories" : "No indexed media";
 }

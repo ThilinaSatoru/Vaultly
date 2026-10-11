@@ -1,3 +1,4 @@
+import { videoCardOrientation } from "./video-preferences";
 import { vaultUrl } from "./vault-session";
 import { ArrowLeft, BookOpen, Check, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -31,9 +32,9 @@ interface GalleryViewProps {
 }
 
 const galleryNames: Record<MediaType, string> = {
-  comic: "Comics",
+  comic: "Comics & pictures",
   video: "Videos",
-  story: "Stories",
+  story: "E-books",
 };
 
 const previewClipSeconds = 3;
@@ -111,12 +112,12 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
 
 function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQueue }: { item: MediaItem; selected: boolean; queued: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void; onQueue: () => void }) {
   const [hovered, setHovered] = useState(false);
+  const [orientation, setOrientation] = useState(() => videoCardOrientation(item));
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
   const [duration, setDuration] = useState(item.duration_seconds);
   const hoverTimer = useRef<number | null>(null);
   const retryTimer = useRef<number | null>(null);
-  const archive = /\.(cbz|zip)$/i.test(item.relative_path);
 
   const startPreview = () => {
     if (item.media_type !== "video") return;
@@ -142,8 +143,10 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
     return () => { active = false; };
   }, [item.id, item.media_type, duration]);
 
+  useEffect(() => { setThumbnailFailed(false); setThumbnailAttempt(0); setOrientation(videoCardOrientation(item)); }, [item.id, item.cover_signature, item.video_width, item.video_height]);
+
   const handleThumbnailError = () => {
-    if (item.media_type !== "story" || thumbnailAttempt >= 8) {
+    if (item.file_extension !== "pdf" || thumbnailAttempt >= 8) {
       setThumbnailFailed(true);
       return;
     }
@@ -155,7 +158,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
   };
 
   return (
-    <article className={`media-card media-card-selectable${selected ? " is-selected" : ""}`}>
+    <article className={`media-card media-card-selectable${item.media_type === "video" ? ` media-card-video media-card-${orientation}` : ""}${selected ? " is-selected" : ""}`}>
       <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
       <button className={`media-card-favorite${item.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>
       <button
@@ -168,22 +171,23 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
       onBlur={stopPreview}
       aria-label={`Open ${item.title}`}
     >
-      <div className={`media-art media-art-${item.media_type}`}>
-        {item.media_type === "comic" && !archive ? (
-          <img src={vaultUrl(`/api/items/${item.id}/pages/0`)} alt="" loading="lazy" />
+      <div className={`media-art media-art-${item.media_type}${item.media_type === "video" ? ` media-art-${orientation}` : ""}`}>
+        {item.media_type === "comic" && !thumbnailFailed ? (
+          <img src={vaultUrl(`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&cover=${encodeURIComponent(item.cover_signature ?? "")}&attempt=${thumbnailAttempt}`)} alt="" loading="lazy" onError={handleThumbnailError} />
         ) : item.media_type === "video" && hovered ? (
           <VideoHoverPreview itemId={item.id} knownDuration={duration} />
         ) : (item.media_type === "video" || item.media_type === "story") && !thumbnailFailed ? (
           <img
-            src={vaultUrl(`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&attempt=${thumbnailAttempt}`)}
+            src={vaultUrl(`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&cover=${encodeURIComponent(item.cover_signature ?? "")}&attempt=${thumbnailAttempt}`)}
             alt=""
             loading="lazy"
             onError={handleThumbnailError}
+            onLoad={(event) => { if (item.media_type === "video") setOrientation(event.currentTarget.naturalHeight > event.currentTarget.naturalWidth ? "portrait" : "landscape"); }}
           />
         ) : (
           item.media_type === "video" ? <Clapperboard size={42} /> : item.media_type === "story" ? <BookOpen size={42} /> : <Image size={42} />
         )}
-        <span className="media-type-badge">{item.media_type === "video" ? formatDuration(duration) : item.media_type}</span>
+        <span className="media-type-badge">{item.media_type === "video" ? formatDuration(duration) : item.media_type === "story" ? "E-book" : item.media_type}</span>
       </div>
       </button>
       <div className="media-card-body">
@@ -205,11 +209,11 @@ function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; 
   const contentTypes = (["video", "comic", "story"] as const).filter((type) => series[`${type}_count`] > 0);
   const badgeType = mediaType ?? (contentTypes.length === 1 ? contentTypes[0] : contentTypes.length === 0 && series.preferred_type !== "mixed" ? series.preferred_type : undefined);
   const fallback = series.cover_item_id === null || !series.cover_item_type ? null
-    : series.cover_item_type === "comic" && !/\.(cbz|zip)$/i.test(series.cover_item_path ?? "")
+    : series.cover_item_type === "comic" && !/\.(pdf|cbz|zip)$/i.test(series.cover_item_path ?? "")
       ? `/api/items/${series.cover_item_id}/pages/0`
       : `/api/items/${series.cover_item_id}/thumbnail`;
   const cover = series.has_cover ? `/api/series/${series.id}/cover` : fallback;
-  return <article className="media-card collection-media-card">
+  return <article className={`media-card collection-media-card${badgeType === "video" ? " media-card-video" : ""}`}>
     <button className="media-card-open" type="button" onClick={onOpen} aria-label={`Open collection ${series.title}`}>
       <div className={`media-art collection-art${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={vaultUrl(cover)} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
     </button>
@@ -234,7 +238,9 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const [debouncedPath, setDebouncedPath] = useState(pathText);
   const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [selectedType, setSelectedType] = useGalleryField<MediaType | "">("selectedType", "");
+  const [sourceType, setSourceType] = useGalleryField("sourceType", "");
   const [sourceId, setSourceId] = useGalleryField("sourceId", "");
+  const [folderPath, setFolderPath] = useGalleryField("folderPath", "");
   const [extension, setExtension] = useGalleryField("extension", "");
   const [seriesFilter, setSeriesFilter] = useGalleryField("seriesFilter", "");
   const [circleFilter, setCircleFilter] = useGalleryField("circleFilter", "");
@@ -248,7 +254,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const [formats, setFormats] = useState<Array<{ extension: string; item_count: number }>>([]);
   const [seriesOptions, setSeriesOptions] = useState<SeriesSummary[]>([]);
   const [circleOptions, setCircleOptions] = useState<CircleSummary[]>([]);
-  const [sort, setSort] = useGalleryField<"auto" | "relevance" | "title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "auto");
+  const [sort, setSort] = useGalleryField<"auto" | "folders" | "relevance" | "title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "auto");
   const [searchMode, setSearchMode] = useGalleryField<"literal" | "fuzzy" | "english">("searchMode", "english");
   const [page, setPage] = useGalleryField("page", 0);
   const [result, setResult] = useState<ItemPage | null>(null);
@@ -309,7 +315,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     setSelectedArtistIds((current) => current.filter((id) => people.some((person) => person.id === id)));
   }, [people]);
 
-  const filterKey = JSON.stringify([type, view, browseCategory, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
+  const filterKey = JSON.stringify([type, view, browseCategory, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceType, sourceId, folderPath, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort]);
   const previousFilterKey = useRef(filterKey);
   useEffect(() => {
     if (previousFilterKey.current !== filterKey) {
@@ -327,11 +333,14 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     }
     const params = new URLSearchParams({ page: String(page), searchMode });
     if (sort !== "auto") params.set("sort", sort);
+    if (sort === "folders") params.set("folder", folderPath);
     if (type || selectedType) params.set("type", type || selectedType);
+    if (sourceType) params.set("sourceType", sourceType);
     if (view === "favorites") params.set("favorite", "1");
     if (view === "categories" && browseCategory === "uncategorized") params.set("uncategorized", "1");
     if (view === "categories" && typeof browseCategory === "number") params.set("category", String(browseCategory));
     if (view === "browse" && debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+    if (sourceId) params.set("source", sourceId);
     if (view !== "browse") {
       setLoading(true);
       api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
@@ -366,16 +375,16 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [view, browseCategory, type, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, searchMode, page, refreshKey]);
+  }, [view, browseCategory, type, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceType, sourceId, folderPath, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, searchMode, page, refreshKey]);
 
   const libraryTitle = type ? galleryNames[type] : "All media";
   const selectedCategoryName = browseCategory === "uncategorized" ? "Uncategorized" : categoryOverview?.categories.find((category) => category.id === browseCategory)?.name;
   const title = view === "categories" ? selectedCategoryName ? `${libraryTitle} · ${selectedCategoryName}` : `${libraryTitle} categories` : view === "favorites" ? `${libraryTitle} favorites` : libraryTitle;
-  const hasFilters = Boolean(filename || pathText || selectedType || sourceId || extension || seriesFilter || circleFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
-  const extraFilterCount = [pathText, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
+  const hasFilters = Boolean(filename || pathText || selectedType || sourceType || sourceId || folderPath || extension || seriesFilter || circleFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
+  const extraFilterCount = [pathText, selectedType, sourceType, sourceId, folderPath, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
   const clearFilters = () => {
     setFilename(""); setPathText(""); setDebouncedFilename(""); setDebouncedPath("");
-    setSelectedType(""); setSourceId(""); setExtension(""); setSeriesFilter(""); setCircleFilter("");
+    setSelectedType(""); setSourceType(""); setFolderPath(""); setSourceId(""); setExtension(""); setSeriesFilter(""); setCircleFilter("");
     setMinMb(""); setMaxMb(""); setModifiedFrom(""); setModifiedTo("");
     setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSelectedCastIds([]); setSelectedArtistIds([]); setSort("auto");
   };
@@ -419,7 +428,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     <AttributeMediaContext.Provider value={type || selectedType || undefined}><section className="gallery-view">
       <div className="page-heading gallery-heading">
         <div>{view === "categories" && browseCategory !== null && <button className="category-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setBrowseCategory(null); setSelectedItemIds([]); } }}><ArrowLeft size={16} /> All categories</button>}<p className="eyebrow">Your library</p><h1>{title}</h1><p>{view === "categories" && browseCategory === null ? "Choose a category to open its media library." : search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
-        <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : `${formatCount(result?.total ?? 0)} items`}</span>
+        <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : `${formatCount((result?.total ?? 0) + (sort === "folders" ? result?.folders?.reduce((total, folder) => total + folder.item_count, 0) ?? 0 : 0))} items`}</span>
       </div>
 
       {view === "categories" && browseCategory === null && categoryOverview && <div className="category-selection-grid">
@@ -436,6 +445,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
           <span>Sort</span>
           <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
             <option value="auto">Automatic</option>
+            <option value="folders">Folders</option>
             <option value="relevance">Best match</option>
             <option value="title">Title A–Z</option>
             <option value="filename">Filename A–Z</option>
@@ -452,7 +462,8 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
 
       {view === "browse" && advancedOpen && <div className="gallery-advanced" aria-label="More filters">
         {!type && <label className="gallery-filter-field"><span>Media type</span><select value={selectedType} onChange={(event) => { setSelectedType(event.target.value as MediaType | ""); setExtension(""); }}><option value="">All types</option><option value="comic">Comics</option><option value="video">Videos</option><option value="story">PDF stories</option></select></label>}
-        <label className="gallery-filter-field"><span>Source folder</span><select value={sourceId} onChange={(event) => setSourceId(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
+        <label className="gallery-filter-field"><span>Collection type</span><select value={sourceType} onChange={(event) => { setSourceType(event.target.value); setSourceId(""); setFolderPath(""); }}><option value="">All collection types</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga</option><option value="ebooks">E-books</option><option value="pictures">Pictures</option></select></label>
+        <label className="gallery-filter-field"><span>Source folder</span><select value={sourceId} onChange={(event) => { setSourceId(event.target.value); setFolderPath(""); }}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
         <label className="gallery-filter-field"><span>File format</span><select value={extension} onChange={(event) => setExtension(event.target.value)}><option value="">All formats</option>{formats.map((format) => <option key={format.extension || "folder"} value={format.extension || "folder"}>{format.extension ? `.${format.extension.toUpperCase()}` : "Image folder"} ({format.item_count})</option>)}</select></label>
         <label className="gallery-filter-field"><span>Series / set</span><select value={seriesFilter} onChange={(event) => setSeriesFilter(event.target.value)}><option value="">All items</option><option value="grouped">In any set</option><option value="ungrouped">Not in a set</option>{seriesOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>
         <label className="gallery-filter-field"><span>Circle</span><select value={circleFilter} onChange={(event) => setCircleFilter(event.target.value)}><option value="">All circles</option>{circleOptions.map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</select></label>
@@ -466,11 +477,14 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
         <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
       </div>}
 
+      {!(view === "categories" && browseCategory === null) && <div className="source-media-filters" role="group" aria-label="Browse by collection type">{[{ value: "", label: "All types", type: undefined }, { value: "movies", label: "Movies", type: "video" }, { value: "tv", label: "TV series", type: "video" }, { value: "anime", label: "Anime", type: "video" }, { value: "manga", label: "Manga", type: "comic" }, { value: "ebooks", label: "E-books", type: "story" }, { value: "pictures", label: "Pictures", type: "comic" }].filter((option) => !type || !option.type || option.type === type).map((option) => <button type="button" key={option.value} aria-pressed={sourceType === option.value} onClick={() => { setSourceType(option.value); setSourceId(""); setFolderPath(""); }}>{option.label}</button>)}</div>}
       {!(view === "categories" && browseCategory === null) && <div className="gallery-selection-bar">
         <button className="secondary-button" type="button" onClick={selectPage} disabled={!result?.items.length}>Select page</button>
         {selectedItemIds.length > 0 && <><span>{selectedItemIds.length} selected{selectedItemIds.length >= 500 ? " · limit reached" : ""}</span><button className="primary-button" type="button" onClick={() => setBulkOpen(true)}>Bulk actions</button><button className="gallery-clear-button" type="button" onClick={() => setSelectedItemIds([])}>Clear selection</button></>}
       </div>}
 
+      {sort === "folders" && <div className="folder-navigation"><button type="button" className="secondary-button" onClick={() => { setSourceId(""); setFolderPath(""); }}>All source folders</button>{sourceId && <><button type="button" className="secondary-button" onClick={() => { if (folderPath) setFolderPath(folderPath.split("/").slice(0, -1).join("/")); else setSourceId(""); }}><ArrowLeft size={16} /> Up</button><span>{sources.find((source) => String(source.id) === sourceId)?.name}{folderPath ? ` / ${folderPath}` : ""}</span></>}</div>}
+      {sort === "folders" && !loading && Boolean(result?.folders?.length) && <div className="folder-grid">{result?.folders?.map((folder) => <button className="folder-card" type="button" key={`${folder.source_id}:${folder.path}`} onClick={() => { navigation.push({ [`gallery.${type ?? "all"}.${view}.sourceId`]: String(folder.source_id), [`gallery.${type ?? "all"}.${view}.folderPath`]: folder.path, [`gallery.${type ?? "all"}.${view}.page`]: 0 }, folder.name); }}><Folder size={30} /><strong>{folder.name}</strong><span>{formatCount(folder.item_count)} items</span></button>)}</div>}
       {error && <p className="page-error" role="alert">{error}</p>}
       {view === "categories" && browseCategory === null ? (!categoryOverview && !error ? <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading categories…</span></div> : categoryOverview && categoryOverview.categories.length === 0 && categoryOverview.uncategorized_count === 0 ? <div className="gallery-empty"><Folder size={34} /><h2>No categorized media</h2><p>Assign categories to media, then return here.</p></div> : null) : loading ? (
         <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading media…</span></div>
@@ -480,7 +494,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
           <div className="media-grid">{renderCards(result.items)}</div>
           {paginationControls}
         </>
-      ) : (
+      ) : sort === "folders" && Boolean(result?.folders?.length) ? null : (
         <div className="gallery-empty">
           {search ? <Search size={34} /> : <FolderPlus size={34} />}
           <h2>{search || hasFilters ? "No matching media" : `No ${type ? title.toLowerCase() : "media"} indexed yet`}</h2>

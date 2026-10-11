@@ -22,19 +22,19 @@ async function fixture(run: (root: string, sourceId: number) => Promise<void>) {
 const rows = (sourceId: number) => database.prepare("SELECT id, title, filename, relative_path, favorite, available FROM media_items WHERE source_id = ? ORDER BY filename")
   .all(sourceId) as unknown as Row[];
 
-test("scan strips every hash, renames media files, resolves collisions, and favourites affected items", async () => {
+test("scan removes leading markers, preserves other hashes, resolves collisions, and favourites only marked filenames", async () => {
   await fixture(async (root, sourceId) => {
-    for (const filename of ["##Clip#.mp4", "#Sto#ry##.pdf", "##Archive#.cbz", "Story.pdf", "###.pdf"]) {
+    for (const filename of ["##Clip#.mp4", "#Sto#ry##.pdf", "##Archive#.cbz", "Sto#ry##.pdf", "Middle#hash.pdf", "Story.pdf", "###.pdf"]) {
       await writeFile(path.join(root, filename), filename);
     }
     await scanSource(sourceId, root);
     expect(database.prepare("SELECT status, last_error FROM sources WHERE id = ?").get(sourceId)).toEqual({ status: "ready", last_error: null });
     const items = rows(sourceId);
-    expect(items.map((item) => item.filename)).toEqual(["Archive.cbz", "Clip.mp4", "Story (2).pdf", "Story.pdf", "Untitled.pdf"]);
-    expect(items.every((item) => !item.title.includes("#") && !item.filename.includes("#") && item.available === 1)).toBe(true);
-    expect(items.filter((item) => item.favorite === 0).map((item) => item.filename)).toEqual(["Story.pdf"]);
+    expect(items.map((item) => item.filename)).toEqual(["Archive#.cbz", "Clip#.mp4", "Middle#hash.pdf", "Sto#ry## (2).pdf", "Sto#ry##.pdf", "Story.pdf", "Untitled.pdf"]);
+    expect(items.every((item) => !item.title.startsWith("#") && !item.filename.startsWith("#") && item.available === 1)).toBe(true);
+    expect(items.filter((item) => item.favorite === 0).map((item) => item.filename)).toEqual(["Middle#hash.pdf", "Sto#ry##.pdf", "Story.pdf"]);
     expect(await readFile(path.join(root, "Story.pdf"), "utf8")).toBe("Story.pdf");
-    expect(await readFile(path.join(root, "Story (2).pdf"), "utf8")).toBe("#Sto#ry##.pdf");
+    expect(await readFile(path.join(root, "Sto#ry## (2).pdf"), "utf8")).toBe("#Sto#ry##.pdf");
     for (const item of items) expect(await readFile(path.join(root, item.relative_path), "utf8")).toBeTruthy();
     await expect(readFile(path.join(root, "#Sto#ry##.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
     database.prepare("UPDATE media_items SET favorite = 0 WHERE source_id = ?").run(sourceId);
@@ -61,7 +61,7 @@ test("existing marked titles and filenames keep their IDs, assignments, and coll
       const items = rows(sourceId);
       expect(items.map((item) => item.id).sort()).toEqual([...ids].sort());
       expect(items.map((item) => [item.title, item.filename, item.favorite])).toEqual([
-        ["First", "First.pdf", 1], ["Custom title", "Plain.pdf", 1], ["Second", "Second.pdf", 1],
+        ["First#", "First#.pdf", 1], ["#Custom## title#", "Plain.pdf", 0], ["Second##", "Second##.pdf", 1],
       ]);
       expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").all(ids[0])).toEqual([{ tag_id: tagId }]);
       expect(database.prepare("SELECT item_id FROM series_items WHERE series_id = ?").all(seriesId)).toEqual([{ item_id: ids[0] }]);
@@ -91,10 +91,10 @@ test("comic folder renames update nested indexed paths and preserve all existing
     await scanSource(sourceId, root);
     const items = rows(sourceId);
     expect(items.map((item) => item.id).sort()).toEqual([...ids].sort());
-    expect(items.map((item) => item.relative_path).sort()).toEqual(["Comic", path.join("Comic", "Nested"), path.join("Comic", "Nested", "Movie.mp4")].sort());
+    expect(items.map((item) => item.relative_path).sort()).toEqual(["Comic#", path.join("Comic#", "Nested##"), path.join("Comic#", "Nested##", "Movie#.mp4")].sort());
     expect(items.every((item) => item.favorite === 1 && item.available === 1)).toBe(true);
-    expect(await readFile(path.join(root, "Comic", "Nested", "Movie.mp4"), "utf8")).toBe("movie");
-    expect(await readFile(path.join(root, "Comic", "Nested", "001.jpg"), "utf8")).toBe("nested page");
+    expect(await readFile(path.join(root, "Comic#", "Nested##", "Movie#.mp4"), "utf8")).toBe("movie");
+    expect(await readFile(path.join(root, "Comic#", "Nested##", "001.jpg"), "utf8")).toBe("nested page");
     await scanSource(sourceId, root);
     expect(rows(sourceId)).toEqual(items);
   });
@@ -107,10 +107,10 @@ test("a source-root comic gets a clean title and favourite without moving its so
     await writeFile(path.join(comicRoot, "001.jpg"), "page");
     database.prepare("UPDATE sources SET root_path = ?, normalized_path = ? WHERE id = ?").run(comicRoot, comicRoot, sourceId);
     await scanSource(sourceId, comicRoot);
-    expect(rows(sourceId)).toMatchObject([{ title: "Root comic", relative_path: ".", favorite: 1 }]);
+    expect(rows(sourceId)).toMatchObject([{ title: "Root# comic##", relative_path: ".", favorite: 1 }]);
     database.prepare("UPDATE media_items SET favorite = 0 WHERE source_id = ?").run(sourceId);
     await scanSource(sourceId, comicRoot);
-    expect(rows(sourceId)).toMatchObject([{ title: "Root comic", relative_path: ".", favorite: 0 }]);
+    expect(rows(sourceId)).toMatchObject([{ title: "Root# comic##", relative_path: ".", favorite: 0 }]);
     expect(await readFile(path.join(comicRoot, "001.jpg"), "utf8")).toBe("page");
   });
 });
@@ -126,7 +126,7 @@ test("a failed index update rolls the filesystem rename back", async () => {
         .toEqual({ status: "error", last_error: "Forced index failure" });
       expect(rows(sourceId)).toEqual([]);
       expect(await readFile(path.join(root, "##Rollback#.pdf"), "utf8")).toBe("original");
-      await expect(readFile(path.join(root, "Rollback.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(readFile(path.join(root, "Rollback#.pdf"))).rejects.toMatchObject({ code: "ENOENT" });
     } finally { database.exec("DROP TRIGGER reject_hash_scan_insert"); }
   });
 });

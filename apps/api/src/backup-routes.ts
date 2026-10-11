@@ -24,8 +24,8 @@ const optionalTables = new Set<string>(["tag_patterns", "category_patterns", "pe
 const deleteOrder = [...tableOrder].reverse();
 
 const columns: Record<(typeof tableOrder)[number], string[]> = {
-  sources: ["id", "name", "root_path", "normalized_path", "status", "connected", "last_error", "last_scanned_at", "created_at", "updated_at"],
-  media_items: ["id", "source_id", "media_type", "title", "filename", "file_extension", "relative_path", "size_bytes", "modified_at_ms", "file_count", "favorite", "duration_seconds", "video_width", "video_height", "video_metadata_signature", "indexed", "available", "created_at", "updated_at"],
+  sources: ["id", "media_type", "name", "root_path", "normalized_path", "status", "connected", "last_error", "last_scanned_at", "created_at", "updated_at"],
+  media_items: ["id", "source_id", "media_type", "title", "filename", "file_extension", "relative_path", "size_bytes", "modified_at_ms", "file_count", "favorite", "duration_seconds", "video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature", "indexed", "available", "created_at", "updated_at"],
   categories: ["id", "name", "created_at"],
   tags: ["id", "name", "created_at"],
   people: ["id", "name", "created_at", "profile_image"],
@@ -56,13 +56,14 @@ const backupInput = z.object({
 });
 
 function exportRow(table: string, row: BackupRow): BackupRow {
-  if (table !== "series" || !(row.cover_data instanceof Uint8Array)) return row;
+  if (!["series", "media_items"].includes(table) || !(row.cover_data instanceof Uint8Array)) return row;
   return { ...row, cover_data: Buffer.from(row.cover_data).toString("base64") };
 }
 
 function importValue(table: string, column: string, value: unknown): unknown {
-  if (table === "media_items" && ["video_width", "video_height", "video_metadata_signature"].includes(column) && value === undefined) return null;
-  if (table === "series" && column === "cover_data" && typeof value === "string") return Buffer.from(value, "base64");
+  if (table === "sources" && column === "media_type" && value === undefined) return "mixed";
+  if (table === "media_items" && ["video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature"].includes(column) && value === undefined) return null;
+  if (["series", "media_items"].includes(table) && column === "cover_data" && typeof value === "string") return Buffer.from(value, "base64");
   return value;
 }
 

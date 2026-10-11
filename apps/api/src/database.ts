@@ -213,6 +213,7 @@ database.exec(`
 const sourceColumns = (database.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>).map((column) => column.name);
 const peopleColumns = (database.prepare("PRAGMA table_info(people)").all() as Array<{ name: string }>).map((column) => column.name);
 if (!peopleColumns.includes("profile_image")) database.exec("ALTER TABLE people ADD COLUMN profile_image TEXT");
+if (!sourceColumns.includes("media_type")) database.exec("ALTER TABLE sources ADD COLUMN media_type TEXT NOT NULL DEFAULT 'mixed'");
 if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD COLUMN connected INTEGER NOT NULL DEFAULT 1");
 
 // Filename and format are stored separately from the relative path so a filename
@@ -230,6 +231,9 @@ if (needsDuration) database.exec("ALTER TABLE media_items ADD COLUMN duration_se
 if (!mediaColumns.includes("video_width")) database.exec("ALTER TABLE media_items ADD COLUMN video_width INTEGER");
 if (!mediaColumns.includes("video_height")) database.exec("ALTER TABLE media_items ADD COLUMN video_height INTEGER");
 if (!mediaColumns.includes("video_metadata_signature")) database.exec("ALTER TABLE media_items ADD COLUMN video_metadata_signature TEXT");
+for (const [column, type] of Object.entries({ cover_data: "BLOB", cover_path: "TEXT", cover_width: "INTEGER", cover_height: "INTEGER", cover_signature: "TEXT" })) {
+  if (!mediaColumns.includes(column)) database.exec(`ALTER TABLE media_items ADD COLUMN ${column} ${type}`);
+}
 if (needsIndexed) {
   database.exec("ALTER TABLE media_items ADD COLUMN indexed INTEGER NOT NULL DEFAULT 1");
   database.exec("UPDATE media_items SET indexed = available");
@@ -320,6 +324,7 @@ export interface SourceRow {
   name: string;
   root_path: string;
   normalized_path: string;
+  media_type: import("./source-media.js").SourceMediaType;
   status: SourceStatus;
   connected: number;
   last_error: string | null;

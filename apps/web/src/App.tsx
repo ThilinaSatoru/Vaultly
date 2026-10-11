@@ -55,6 +55,7 @@ interface LibrarySource {
   id: number;
   name: string;
   root_path: string;
+  media_type: string;
   status: SourceStatus;
   last_error: string | null;
   last_scanned_at: string | null;
@@ -101,6 +102,7 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [name, setName] = useState("");
+  const [mediaType, setMediaType] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -129,7 +131,7 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
     try {
       await api("/api/sources", {
         method: "POST",
-        body: JSON.stringify({ rootPath: rootPath.trim(), name: name.trim() || undefined, tagIds, categoryIds }),
+        body: JSON.stringify({ rootPath: rootPath.trim(), name: name.trim() || undefined, mediaType, tagIds, categoryIds }),
       });
       onAdded();
       onClose();
@@ -143,9 +145,11 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
   return (
     <AttributeEditorDialog title="Add a library source" onClose={onClose} busy={saving || picking}>
         <div className="dialog-icon"><FolderOpen size={24} /></div>
-        <p className="dialog-intro">Choose a root folder. Vaultly will find comics, videos, and PDFs inside it without moving your files.</p>
+        <p className="dialog-intro">Choose a media type, then its root folder. Nested folders keep their structure and unrelated files are skipped.</p>
 
         <form onSubmit={submit}>
+          <label htmlFor="source-media-type">Media type</label>
+          <select id="source-media-type" required value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="" disabled>Choose a media type…</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></select>
           <label htmlFor="source-path">Folder path</label>
           <div className="path-control">
             <input
@@ -173,7 +177,7 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
 
           <div className="mixed-note">
             <Grid2X2 size={18} />
-            <div><strong>Mixed media is supported</strong><span>Nested folders are scanned. Existing category, tag, and cast/artist names in filenames are added automatically.</span></div>
+            <div><strong>Scan only the selected media</strong><span>Movie and series scans skip cover images, subtitles, and unrelated documents. Seasons, chapters, and custom subfolders stay browsable.</span></div>
           </div>
 
           {error && <p className="form-error" role="alert">{error}</p>}
@@ -294,6 +298,7 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
 
       <SourceConversion sourceId={source.id} enabled={source.video_count > 0 && source.path_available && source.status !== "scanning" && Boolean(source.last_scanned_at)} scanEnabled={source.path_available && source.status !== "scanning"} scanBusy={working} expanded={expanded} onScan={rescan} onExpand={onToggle} onChanged={onChanged} onRunning={setConverting} />
       <div id={`source-details-${source.id}`} className="source-details" hidden={!expanded}>
+      <label>Media type <select aria-label={`Media type for ${source.name}`} value={source.media_type ?? "mixed"} disabled={working || converting || source.status === "scanning"} onChange={(event) => { const mediaType = event.target.value; setWorking(true); void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, mediaType }) }).then(onChanged).catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change media type.")).finally(() => setWorking(false)); }}><option value="mixed">Legacy mixed media</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></select></label>
       <div className="source-common-attributes">
         <div className="attribute-badges">{(source.tags ?? []).map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{(source.categories ?? []).map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>
         <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
@@ -331,7 +336,7 @@ function HomeView({ sources, categories, onOpenLibrary, onOpenCategories, onAddS
   const libraries = [
     { type: "comic" as const, label: "Comics", description: "Issues, image folders, and archives", count: totals.comic, icon: <Image size={25} /> },
     { type: "video" as const, label: "Videos", description: "Movies, episodes, and local clips", count: totals.video, icon: <Clapperboard size={25} /> },
-    { type: "story" as const, label: "Stories", description: "PDF books and documents", count: totals.story, icon: <BookOpen size={25} /> },
+    { type: "story" as const, label: "E-books", description: "PDF, EPUB, books, and documents", count: totals.story, icon: <BookOpen size={25} /> },
   ];
   const availableCategories = categories.filter((category) => category.item_count > 0);
   const visibleCategories = availableCategories.slice(0, 8);
@@ -402,7 +407,19 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const addSource = () => { openManagement("sources"); setShowAddSource(true); };
   const [selectedItemId] = useNavigationField<number | null>("selectedItemId", null);
   const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
-  const [viewerFloating, setViewerFloating] = useNavigationField("viewerFloating", false);
+  const [floatingSession, setFloatingSession] = useState<{ id: number; series: SeriesViewerContext | null; gallery: GalleryVideoContext | null } | null>(null);
+  const viewerFloating = floatingSession !== null;
+  const activeViewerId = floatingSession?.id ?? selectedItemId;
+  const navigateViewer = (id: number) => {
+    if (floatingSession) setFloatingSession({ ...floatingSession, id });
+    else navigation.push({ selectedItemId: id }, `File ${id}`);
+  };
+  const toggleFloating = () => {
+    if (floatingSession) {
+      navigation.update({ selectedItemId: floatingSession.id, viewerSeriesContext: floatingSession.series, viewerGalleryContext: floatingSession.gallery });
+      setFloatingSession(null);
+    } else if (selectedItemId !== null) setFloatingSession({ id: selectedItemId, series: viewerSeriesContext, gallery: viewerGalleryContext });
+  };
   const [viewerSeriesContext, setViewerSeriesContext] = useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
   const [viewerGalleryContext] = useNavigationField<GalleryVideoContext | null>("viewerGalleryContext", null);
   const [selectedSeriesId] = useNavigationField<number | null>("selectedSeriesId", null);
@@ -515,7 +532,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
 
   const attributeOptions: SourceAttributeOptions = { tags, categories, onTagCreated: createTag, onCategoryCreated: createCategory };
   const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
-  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics", video: "Videos", story: "Stories", categories: "Categories", tags: "Tags", people: "Cast & artists", sources: "Sources", settings: "Settings" };
+  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics & pictures", video: "Videos", story: "E-books", categories: "Categories", tags: "Tags", people: "Cast & artists", sources: "Sources", settings: "Settings" };
   const selectSection = (nextSection: Section) => {
     navigation.reset({ section: nextSection, libraryView: "browse", search: "" }, sectionNames[nextSection]);
   };
@@ -531,17 +548,15 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const openItem = (id: number, context: SeriesViewerContext | null = null, gallery: GalleryVideoContext | null = null) => {
     navigation.push({ selectedItemId: id, viewerSeriesContext: context, viewerGalleryContext: gallery, viewerFloating: false }, gallery?.videos.find((item) => item.id === id)?.title ?? context?.items.find((item) => item.id === id)?.title ?? `File ${id}`);
   };
-  const closeViewer = () => {
+  const closePageViewer = () => {
     const origin = [...navigation.entry.breadcrumbs].reverse().find((crumb) => !crumb.viewer);
     if (origin) navigation.goTo(origin.id);
     else navigation.update({ selectedItemId: null, viewerSeriesContext: null, viewerGalleryContext: null, viewerFloating: false });
   };
   const queueVideo = (item: MediaItem) => {
     setTemporaryPlaylist((current) => current.some((entry) => entry.id === item.id) ? current : [...current, item]);
-    if (selectedItemId === null) {
-      navigation.push({ selectedItemId: item.id, viewerSeriesContext: null, viewerGalleryContext: null, viewerFloating: true }, "Temporary playlist");
-    }
-    setViewerFloating(true);
+    if (activeViewerId === null) setFloatingSession({ id: item.id, series: null, gallery: null });
+    else if (!floatingSession && selectedItemId !== null) setFloatingSession({ id: selectedItemId, series: viewerSeriesContext, gallery: viewerGalleryContext });
   };
   const rescanAll = async (englishAttributes = false) => {
     setRescanningAll(true);
@@ -564,6 +579,15 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not cancel scans.");
     } finally { setRescanningAll(false); }
+  };
+
+  const viewerCommonProps = {
+    attributeRevision, categories, tags, people,
+    playlist: temporaryPlaylist.map(({ id, title }) => ({ id, title })),
+    onRemoveFromPlaylist: (id: number) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id)),
+    onClearPlaylist: () => setTemporaryPlaylist([]),
+    onCategoryCreated: createCategory, onTagCreated: createTag, onPersonCreated: createPerson,
+    onOpenSeries: openSeries, onChanged: refreshMedia,
   };
 
   const sourcesPanel = <div className="sources-page">
@@ -591,7 +615,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       <section className="empty-state">
         <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
         <h2>Connect your media folders</h2>
-        <p>Add one or more folders. Each can contain a mix of comics, videos, and PDFs.</p>
+        <p>Add one or more folders. Choose a media type for each source to keep books, pictures, and videos organized.</p>
         <button className="primary-button" type="button" onClick={() => setShowAddSource(true)}>Choose a folder <ChevronRight size={18} /></button>
         <span>Nothing is uploaded or moved.</span>
       </section>
@@ -607,9 +631,9 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         <nav aria-label="Main navigation">
           <p>Library</p>
           <button className={section === "home" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("home")}><Home size={19} /> Home<span>{formatCount(totalItems)}</span></button>
-          <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
+          <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics & pictures" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
           <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
-          <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="Stories" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
+          <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="E-books" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
         </nav>
         <BackgroundStatus onOpen={openManagement} />
       </aside>
@@ -665,7 +689,36 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       </main>
 
 
-      {selectedItemId !== null && <MediaViewer attributeRevision={attributeRevision} itemId={selectedItemId} seriesContext={viewerSeriesContext} galleryContext={viewerGalleryContext} onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, temporaryPlaylist.find((item) => item.id === id)?.title ?? `File ${id}`)} playlist={temporaryPlaylist.map(({ id, title }) => ({ id, title }))} floating={viewerFloating} onToggleFloating={() => setViewerFloating((value) => !value)} onRemoveFromPlaylist={(id) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id))} onClearPlaylist={() => setTemporaryPlaylist([])} onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)} categories={categories} tags={tags} people={people} onCategoryCreated={createCategory} onTagCreated={createTag} onPersonCreated={createPerson} onOpenSeries={openSeries} onClose={closeViewer} onChanged={refreshMedia} />}
+      {activeViewerId !== null && <MediaViewer
+        {...viewerCommonProps}
+        itemId={activeViewerId}
+        seriesContext={floatingSession ? floatingSession.series : viewerSeriesContext}
+        galleryContext={floatingSession ? floatingSession.gallery : viewerGalleryContext}
+        floating={viewerFloating}
+        onToggleFloating={toggleFloating}
+        onNavigateItem={navigateViewer}
+        onNavigatePlaylistItem={(id) => {
+          if (floatingSession) setFloatingSession({ id, series: null, gallery: null });
+          else navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, `File ${id}`);
+        }}
+        onClose={() => {
+          if (floatingSession) {
+            setFloatingSession(null);
+            if (selectedItemId === floatingSession.id) navigation.update({ selectedItemId: null });
+          } else closePageViewer();
+        }}
+      />}
+      {floatingSession !== null && selectedItemId !== null && selectedItemId !== floatingSession.id && <MediaViewer
+        {...viewerCommonProps}
+        itemId={selectedItemId}
+        seriesContext={viewerSeriesContext}
+        galleryContext={viewerGalleryContext}
+        floating={false}
+        onToggleFloating={() => setFloatingSession({ id: selectedItemId, series: viewerSeriesContext, gallery: viewerGalleryContext })}
+        onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)}
+        onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, `File ${id}`)}
+        onClose={closePageViewer}
+      />}
       <ManagementDrawer open={managementOpen} minimized={managementMinimized} expanded={managementExpanded} active={managementTab} visited={managementVisited} onOpen={openManagement} onClose={() => setManagementOpen(false)} onMinimize={() => setManagementMinimized((value) => !value)} onExpand={() => setManagementExpanded((value) => !value)} panels={{
         tags: <TagsView tags={tags} onChanged={attributesChanged} />,
         categories: <CategoriesView categories={categories} onChanged={attributesChanged} />,

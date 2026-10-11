@@ -13,6 +13,11 @@ export interface MediaItem {
   size_bytes: number;
   modified_at_ms: number;
   duration_seconds: number | null;
+  has_cover?: number;
+  custom_cover?: number;
+  cover_width?: number | null;
+  cover_height?: number | null;
+  cover_signature?: string | null;
   video_width?: number | null;
   video_height?: number | null;
   file_count: number;
@@ -73,6 +78,7 @@ export interface ItemPage {
   total: number;
   page: number;
   pageSize: number;
+  folders?: Array<{ source_id: number; path: string; name: string; item_count: number }>;
 }
 
 export interface SeriesSummary {

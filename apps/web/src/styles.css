@@ -831,3 +831,59 @@ main { grid-column: 2; min-width: 0; }
 .vault-profiles p { margin: 8px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .vault-profiles [role="alert"] { color: #ffacac; }
 @media (max-width: 880px) { .topbar-actions .local-pill { display: none; } }
+
+/* Folder browsing and continuous readers. */
+.folder-navigation { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 16px 0; }
+.folder-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 14px; margin: 18px 0; }
+.folder-card { display: flex; align-items: flex-start; flex-direction: column; gap: 9px; padding: 20px; color: var(--text, #ecf0ed); background: #171b20; border: 1px solid #343b42; border-radius: 12px; text-align: left; }
+.folder-card svg { color: #9cff57; }
+.folder-card strong { overflow-wrap: anywhere; }
+.folder-card span { color: #9ca7a1; font-size: 12px; }
+.reader-auto-scroll, .reader-auto-scroll label { display: inline-flex; align-items: center; gap: 7px; }
+.reader-auto-scroll input { width: 82px; }
+.reader-auto-scroll output { white-space: nowrap; font-size: 11px; }
+.pdf-toolbar, .comic-toolbar { flex-wrap: wrap; }
+.pdf-continuous-page { margin: 16px auto; background: white; box-shadow: 0 7px 30px #0006; }
+.pdf-continuous-page canvas { display: block; }
+.comic-page-scroll .comic-page + .comic-page { margin-top: 12px; }
+.viewer-backdrop.is-floating { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+.viewer-floating { resize: both; overflow: hidden; min-width: 320px; min-height: 230px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }
+.viewer-floating.has-playlist { grid-template-rows: 49px minmax(0, 1fr); }
+.viewer-floating.has-playlist .viewer-details { display: none; }
+.viewer-floating .viewer-header-actions > button[aria-label="Previous file"], .viewer-floating .viewer-header-actions > button[aria-label="Next file"] { display: inline-flex; }
+.ebook-reader { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; height: 100%; min-height: 0; }
+.ebook-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 12px; }
+.ebook-scroll { overflow: auto; color: #252525; background: #f2ecdf; padding: 30px max(24px, calc((100% - 760px) / 2)); }
+.ebook-chapter { line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; margin-bottom: 2em; }
+.ebook-chapter img { max-width: 100%; display: block; margin: 1em auto; }
+
+.reader-auto-scroll button, .ebook-toolbar > button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #3c444d; border-radius: 6px; color: #e0e5e9; background: #20262e; font: inherit; font-size: 12px; }
+.reader-auto-scroll button:disabled { opacity: .45; }
+.ebook-toolbar { color: #c6cdd5; background: #111419; font-size: 12px; }
+.ebook-toolbar label { display: inline-flex; align-items: center; gap: 8px; }
+.reader-auto-scroll input, .ebook-toolbar input, .float-size-control input { accent-color: #9cff57; }
+.float-size-control { display: inline-flex; align-items: center; }
+.float-size-control input { width: 65px; }
+.viewer-floating .viewer-header-actions > button[aria-label="Show floating playlist and details"], .viewer-floating .viewer-header-actions > button[aria-label="Previous file"], .viewer-floating .viewer-header-actions > button[aria-label="Next file"] { display: inline-flex !important; }
+.viewer-floating.show-float-details.has-playlist { grid-template-rows: 49px minmax(0, 1fr) minmax(90px, 140px); }
+.viewer-floating.show-float-details.has-playlist .viewer-details { display: block; overflow: auto; }
+.viewer-floating.show-float-details .viewer-detail-tabs { display: flex; }
+.viewer-floating.show-float-details .viewer-info-panel { display: block; }
+
+.comic-page.fit-width { aspect-ratio: auto 2 / 3; }
+
+.viewer-floating .viewer-header-actions > button[aria-label="Previous file"]:disabled, .viewer-floating .viewer-header-actions > button[aria-label="Next file"]:disabled { display: none !important; }
+
+.viewer-backdrop.is-floating { z-index: 1100; }
+
+/* Video artwork fits a uniform, wider frame regardless of orientation. */
+.media-grid:has(.media-card-video) { grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
+.media-art-video { aspect-ratio: 16 / 9; background: #0c0e12; }
+.media-art-video img, .media-art-video video, .collection-art-video img { object-fit: contain; }
+.media-card-video .media-card-body { display: flex; flex-direction: column; height: 180px; }
+.media-card-video h3, .media-card-video p, .media-card-video .media-card-meta { flex-shrink: 0; }
+.media-card-video .media-card-tags { flex: 1; min-height: 0; overflow: auto; align-content: flex-start; }
+.media-card-video .media-card-meta { flex-wrap: wrap; row-gap: 6px; }
+.media-card-video .media-card-footer-actions { margin-left: auto; }
+.video-cover-editor img { display: block; max-width: 150px; max-height: 180px; object-fit: contain; margin-bottom: 10px; }
+.video-cover-editor > div { display: flex; gap: 6px; flex-wrap: wrap; }

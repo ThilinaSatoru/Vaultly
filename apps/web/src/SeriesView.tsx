@@ -52,7 +52,7 @@ function Cover({ series, version = 0, mediaType }: { series: SeriesSummary; vers
 }
 
 function itemArtwork(id: number, type: MediaType, relativePath: string) {
-  if (type === "comic" && !/\.(cbz|zip)$/i.test(relativePath)) return `/api/items/${id}/pages/0`;
+  if (type === "comic" && !/\.(pdf|cbz|zip)$/i.test(relativePath)) return `/api/items/${id}/pages/0`;
   return `/api/items/${id}/thumbnail`;
 }
 

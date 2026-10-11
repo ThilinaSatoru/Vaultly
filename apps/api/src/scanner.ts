@@ -1,3 +1,5 @@
+import { findVideoCover } from "./video-covers.js";
+import { ebookExtensions, pictureExtensions, folderCollection, type SourceMediaType } from "./source-media.js";
 import { withAttributePatterns } from "./attribute-routes.js";
 import { isSourceConverting } from "./source-conversion.js";
 import { withSourceScan } from "./process-resources.js";
@@ -13,9 +15,9 @@ const videoExtensions = new Set([
   ".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg", ".ts",
   ".mts", ".m2ts", ".vob", ".ogv", ".3gp", ".3g2", ".asf", ".mxf",
 ]);
-const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif"]);
-const storyExtensions = new Set([".pdf"]);
-const comicArchiveExtensions = new Set([".cbz", ".zip"]);
+const imageExtensions = pictureExtensions;
+const storyExtensions = ebookExtensions;
+const comicArchiveExtensions = new Set([".cbz", ".zip", ".cbr", ".cb7", ".cbt"]);
 
 export const isVideoFile = (filename: string) => videoExtensions.has(path.extname(filename).toLowerCase());
 
@@ -79,7 +81,7 @@ const strictIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "mod
 const looseIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "fileCount">) =>
   `${item.mediaType}|${item.sizeBytes}|${item.fileCount}`;
 
-const stripHashes = (value: string) => value.replace(/#/g, "").replace(/\s+/g, " ").trim();
+const stripHashes = (value: string) => value.replace(/^#+\s*/, "").trim();
 const scanPathKey = (value: string) => process.platform === "win32" ? value.toLowerCase() : value;
 
 /** Commit each rename with its index update before honoring cancellation again. */
@@ -88,7 +90,7 @@ async function normalizeHashMarkers(sourceId: number, rootPath: string, items: S
     file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
     modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
     FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[];
-  if (!items.some((item) => item.filename.includes("#")) && !existing.some((item) => item.title.includes("#"))) return;
+  if (!items.some((item) => item.filename.startsWith("#"))) return;
   const byPath = new Map(existing.map((item) => [`${item.mediaType}|${scanPathKey(item.relativePath)}`, item]));
   const incomingPaths = new Set(items.map((item) => `${item.mediaType}|${scanPathKey(item.relativePath)}`));
   const strictMatches = new Map<string, ExistingItem[]>();
@@ -121,8 +123,8 @@ async function normalizeHashMarkers(sourceId: number, rootPath: string, items: S
       const candidates = strictMatches.get(strictIdentity(item))?.filter((entry) => !consumedIds.has(entry.id));
       if (candidates?.length === 1 && incomingCounts.get(strictIdentity(item)) === 1) previous = candidates[0];
     }
-    const rootMarkerHandled = item.relativePath === "." && previous && !previous.title.includes("#");
-    if ((!item.filename.includes("#") || rootMarkerHandled) && !previous?.title.includes("#")) continue;
+    const rootMarkerHandled = item.relativePath === "." && previous && !previous.title.startsWith("#");
+    if (!item.filename.startsWith("#") || rootMarkerHandled) continue;
     const oldRelativePath = item.relativePath;
     const oldPath = path.resolve(rootPath, oldRelativePath);
     const isFolder = !item.fileExtension;
@@ -131,7 +133,7 @@ async function normalizeHashMarkers(sourceId: number, rootPath: string, items: S
     const stem = stripHashes(rawStem).replace(/[. ]+$/g, "") || "Untitled";
     let filename = item.filename;
     let relativePath = oldRelativePath;
-    if (item.filename.includes("#") && oldRelativePath !== ".") {
+    if (item.filename.startsWith("#") && oldRelativePath !== ".") {
       for (let suffix = 0; ; suffix++) {
         signal.throwIfAborted();
         filename = `${stem}${suffix ? ` (${suffix + 1})` : ""}${extension}`;
@@ -148,7 +150,7 @@ async function normalizeHashMarkers(sourceId: number, rootPath: string, items: S
     const nextPath = path.resolve(rootPath, relativePath);
     const changedPath = relativePath !== oldRelativePath;
     const previousDefaultTitle = previous && (previous.fileExtension ? titleFromFilename(previous.filename) : previous.filename);
-    const title = stripHashes(previous && previous.title !== previousDefaultTitle ? previous.title : item.title) || "Untitled";
+    const title = (previous && previous.title !== previousDefaultTitle ? previous.title : stripHashes(item.title)) || "Untitled";
     const descendants = isFolder && changedPath ? existing.filter((child) => {
       const suffix = path.relative(oldPath, path.resolve(rootPath, child.relativePath));
       return suffix && suffix !== ".." && !suffix.startsWith(`..${path.sep}`) && !path.isAbsolute(suffix);
@@ -220,7 +222,7 @@ export function inferCollectionPattern(filename: string): { title: string; order
   return Number.isFinite(order) ? { title, order } : null;
 }
 
-export async function collectItems(rootPath: string, signal?: AbortSignal, progress?: ScanProgress): Promise<ScannedItem[]> {
+export async function collectItems(rootPath: string, signal?: AbortSignal, progress?: ScanProgress, sourceType: SourceMediaType = "mixed"): Promise<ScannedItem[]> {
   signal?.throwIfAborted();
   const items: ScannedItem[] = [];
   const directories = [rootPath];
@@ -247,7 +249,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
           progress.filesChecked++;
           progress.currentPath = path.relative(rootPath, absolutePath);
         }
-        if (imageExtensions.has(extension)) {
+        if (imageExtensions.has(extension) && sourceType !== "pictures") {
           if (progress) progress.comicPages++;
           imageCount++;
           totalSize += fileStat.size;
@@ -260,7 +262,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
             progress.itemsTotal++;
           }
           items.push({
-            mediaType: videoExtensions.has(extension) ? "video" : storyExtensions.has(extension) ? "story" : "comic",
+            mediaType: videoExtensions.has(extension) ? "video" : storyExtensions.has(extension) && !(sourceType === "manga" && extension === ".pdf") ? "story" : "comic",
             title: titleFromFilename(name), filename: name, fileExtension: extension.slice(1),
             relativePath: path.relative(rootPath, absolutePath), sizeBytes: fileStat.size,
             modifiedAtMs: Math.round(fileStat.mtimeMs), fileCount: 1,
@@ -281,6 +283,12 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
           if (progress) progress.filesChecked++;
           continue;
         }
+        const allowed = (sourceType === "mixed" && (videoExtensions.has(extension) || imageExtensions.has(extension) || comicArchiveExtensions.has(extension) || extension === ".pdf"))
+          || (["movies", "tv", "anime"].includes(sourceType) && videoExtensions.has(extension))
+          || (sourceType === "ebooks" && storyExtensions.has(extension))
+          || (sourceType === "manga" && (imageExtensions.has(extension) || comicArchiveExtensions.has(extension) || extension === ".pdf"))
+          || (sourceType === "pictures" && imageExtensions.has(extension));
+        if (!allowed) { if (progress) progress.filesChecked++; continue; }
         pending.push({ name: entry.name, extension, absolutePath });
         if (pending.length === 8) await flush();
       }
@@ -354,8 +362,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
   const controller = new AbortController();
   const { signal } = controller;
   const progress = newProgress();
-  const previousSource = database.prepare("SELECT status, last_error FROM sources WHERE id = ?")
-    .get(sourceId) as { status: string; last_error: string | null } | undefined;
+  const previousSource = database.prepare("SELECT status, last_error, media_type FROM sources WHERE id = ?")
+    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType } | undefined;
 
   database.prepare(
       "UPDATE sources SET status = 'scanning', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -363,8 +371,14 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
   const scan = withSourceScan(async () => {
     progress.waitingForResources = false;
     try {
-      const items = await collectItems(rootPath, signal, progress);
+      const items = await collectItems(rootPath, signal, progress, previousSource?.media_type ?? "mixed");
       progress.phase = "indexing";
+      // Reclassifying PDF manga keeps its IDs, favourites, and assigned metadata.
+      const pdfType = previousSource?.media_type === "manga" ? "comic" : "story";
+      database.prepare(`UPDATE media_items SET media_type = ? WHERE source_id = ? AND file_extension = 'pdf'
+        AND media_type <> ? AND NOT EXISTS (SELECT 1 FROM media_items other
+          WHERE other.source_id = media_items.source_id AND other.relative_path = media_items.relative_path AND other.media_type = ?)`)
+        .run(pdfType, sourceId, pdfType, pdfType);
       await normalizeHashMarkers(sourceId, rootPath, items, signal);
       const previousItems = (database.prepare(`SELECT id, media_type AS mediaType, title, filename,
         file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
@@ -529,18 +543,19 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
 
         const collectionGroups = new Map<string, { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> }>();
         for (const indexed of indexedItems) {
-          const pattern = inferCollectionPattern(indexed.item.filename);
+          const folder = folderCollection(indexed.item.relativePath, indexed.item.filename, previousSource?.media_type ?? "mixed", path.basename(rootPath));
+          const pattern = folder ?? inferCollectionPattern(indexed.item.filename);
           if (!pattern) continue;
           // Image-folder comics must be sibling folders. Video/PDF sequels may span season or volume folders.
           const parent = indexed.item.mediaType === "comic" ? path.dirname(indexed.item.relativePath).replace(/\\/g, "/").toLocaleLowerCase() : "";
-          const key = `${sourceId}|${indexed.item.mediaType}|${parent}|${pattern.title.toLocaleLowerCase()}`;
+          const key = `${sourceId}|${indexed.item.mediaType}|${folder?.key ?? parent}|${pattern.title.toLocaleLowerCase()}`;
           const group = collectionGroups.get(key) ?? { title: pattern.title, mediaType: indexed.item.mediaType, entries: [] };
           group.entries.push({ id: indexed.id, order: pattern.order, path: indexed.item.relativePath });
           collectionGroups.set(key, group);
         }
         const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
         const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
-        const addSeriesItem = database.prepare("INSERT OR IGNORE INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)");
+        const addSeriesItem = database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?) ON CONFLICT(series_id, item_id) DO UPDATE SET position = excluded.position");
         const groupedItemIds = new Set((database.prepare(`SELECT si.item_id FROM series_items si
           JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?`).all(sourceId) as Array<{ item_id: number }>).map((row) => row.item_id));
         progress.collectionsTotal = collectionGroups.size;
@@ -602,13 +617,25 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         }));
         for (const result of results) if (result.status === "rejected") throw result.reason;
       }
+      // Cover images are rescanned even when the video itself has not changed.
+      const coverDimensions = new Map<string, { width: number; height: number }>();
+      const saveCover = database.prepare(`UPDATE media_items SET cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ? WHERE id = ? AND cover_data IS NULL`);
+      for (const { id, item } of indexedItems) {
+        if (item.mediaType !== "video") continue;
+        signal.throwIfAborted();
+        const custom = database.prepare("SELECT cover_data IS NOT NULL AS custom FROM media_items WHERE id = ?").get(id) as { custom: number };
+        if (custom.custom) continue;
+        const cover = await findVideoCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions);
+        signal.throwIfAborted();
+        saveCover.run(cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null, id);
+      }
       if (options.generateThumbnails || options.regenerateThumbnails) {
         signal.throwIfAborted();
         progress.phase = "thumbnails";
         progress.currentPath = "";
         if (options.regenerateThumbnails) await clearThumbnailCache([...new Set([...previousItemIds, ...indexedItems.map((entry) => entry.id)])]);
         signal.throwIfAborted();
-        const thumbnails = indexedItems.filter((entry) => entry.item.mediaType === "video" || entry.item.mediaType === "story");
+        const thumbnails = indexedItems.filter((entry) => entry.item.mediaType === "video" || entry.item.fileExtension === "pdf");
         progress.thumbnailsTotal = thumbnails.length;
         let nextThumbnail = 0;
         // Schedule only two at a time so cancellation never leaves a library-sized queue.

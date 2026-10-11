@@ -1,4 +1,5 @@
 import { registerAttributeRoutes, sourceAttributesInput, sourceAttributes, invalidSourceAttribute, setSourceAttributes } from "./attribute-routes.js";
+import { sourceMediaTypes } from "./source-media.js";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
@@ -59,6 +60,7 @@ await app.register(registerBackupRoutes);
 await app.register(registerAttributeRoutes);
 
 const sourceInput = z.object({
+  mediaType: z.enum(sourceMediaTypes).optional(),
   name: z.string().trim().min(1).max(80).optional(),
   rootPath: z.string().trim().min(1),
 });
@@ -171,9 +173,9 @@ app.post("/api/sources", async (request, reply) => {
     let sourceId: number;
     try {
       const result = database.prepare(`
-        INSERT INTO sources (name, root_path, normalized_path, status)
-        VALUES (?, ?, ?, 'idle')
-      `).run(name, resolvedPath, normalizedPath);
+        INSERT INTO sources (name, root_path, normalized_path, media_type, status)
+        VALUES (?, ?, ?, ?, 'idle')
+      `).run(name, resolvedPath, normalizedPath, input.mediaType ?? "mixed");
       sourceId = Number(result.lastInsertRowid);
       setSourceAttributes(sourceId, input);
       database.exec("COMMIT");
@@ -231,9 +233,9 @@ app.patch("/api/sources/:id", async (request, reply) => {
   const normalizedPath = process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
   const name = input.name || source.name;
   try {
-    database.prepare(`UPDATE sources SET name = ?, root_path = ?, normalized_path = ?, connected = 1,
+    database.prepare(`UPDATE sources SET name = ?, root_path = ?, normalized_path = ?, media_type = ?, connected = 1,
       status = 'idle', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(name, resolvedPath, normalizedPath, id);
+      .run(name, resolvedPath, normalizedPath, input.mediaType ?? source.media_type, id);
   } catch (error) {
     if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
       return reply.code(409).send({ message: "That folder is already used by another source." });

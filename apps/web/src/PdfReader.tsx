@@ -5,6 +5,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
+import { ReaderAutoScroll } from "./ReaderAutoScroll";
+import { PdfContinuousPage } from "./PdfContinuousPage";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -24,6 +26,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [fitMode, setFitMode] = useState<FitMode>(storedFitMode);
+  const [continuous, setContinuous] = useState(false);
   const [zoomPercent, setZoomPercent] = useState(storedZoom);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [loading, setLoading] = useState(true);
@@ -79,11 +82,13 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
 
   useLayoutEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const destination = continuous ? scrollRef.current.querySelector<HTMLElement>(`[data-pdf-page="${pageNumber}"]`) : null;
+      scrollRef.current.scrollTo({ top: destination ? destination.offsetTop - scrollRef.current.offsetTop : 0, left: 0, behavior: "instant" });
     }
-  }, [itemId, pageNumber, fitMode]);
+  }, [itemId, pageNumber, fitMode, continuous]);
 
   useEffect(() => {
+    if (continuous) { setRendering(false); return; }
     if (!pdfDocument || !canvasRef.current || !containerSize.width || !containerSize.height) return;
     let cancelled = false;
     let renderTask: RenderTask | null = null;
@@ -135,12 +140,13 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
     })();
 
     return () => { cancelled = true; renderTask?.cancel(); };
-  }, [pdfDocument, pageNumber, fitMode, zoomPercent, containerSize.width, containerSize.height]);
+  }, [pdfDocument, pageNumber, fitMode, zoomPercent, containerSize.width, containerSize.height, continuous]);
 
   useEffect(() => {
     if (!pdfDocument) return;
     const onKey = (event: KeyboardEvent) => {
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
+      if (targetElement?.closest(".viewer") && targetElement.closest(".viewer") !== scrollRef.current?.closest(".viewer")) return;
       if (targetElement?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
       const activatingControl = Boolean(targetElement?.closest("button, a"));
       if (matchesShortcut(event, "reader.nextPage")) {
@@ -175,6 +181,8 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   return (
     <div className="pdf-reader">
       <div className="pdf-toolbar">
+        <label><input type="checkbox" checked={continuous} onChange={(event) => { setContinuous(event.target.checked); setFitMode("width"); }} /> Continuous view</label>
+        <ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(pdfDocument) && !rendering && (continuous || fitMode !== "page")} contentKey={`${itemId}:${continuous}:${pageNumber}`} />
         <button type="button" onClick={() => pageNumber > 1 ? setPageNumber(pageNumber - 1) : onPreviousItem?.()} disabled={!pdfDocument || (pageNumber <= 1 && !onPreviousItem)} aria-label="Previous page"><ChevronLeft size={18} /></button>
         <label className="pdf-page-control">
           <span className="visually-hidden">Page number</span>
@@ -195,14 +203,15 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
         <button type="button" onClick={() => changeZoom(25)} aria-label="Zoom in"><Plus size={17} /></button>
       </div>
       <div
-        className={`pdf-scroll${fitMode === "page" ? " pdf-scroll-fit-page" : ""}`}
+        className={`pdf-scroll${!continuous && fitMode === "page" ? " pdf-scroll-fit-page" : ""}`}
         ref={scrollRef}
         tabIndex={-1}
         onPointerDown={() => scrollRef.current?.focus({ preventScroll: true })}
       >
         {loading && <div className="pdf-status"><LoaderCircle className="spin" size={25} /> Opening PDF…</div>}
         {error && <div className="pdf-status pdf-error" role="alert">{error}</div>}
-        <canvas ref={canvasRef} className={pdfDocument && hasPage ? "pdf-canvas" : "pdf-canvas hidden"} aria-label={`PDF page ${pageNumber}`} />
+        <canvas ref={canvasRef} className={!continuous && pdfDocument && hasPage ? "pdf-canvas" : "pdf-canvas hidden"} aria-label={`PDF page ${pageNumber}`} />
+        {continuous && pdfDocument && Array.from({ length: pdfDocument.numPages }, (_, index) => <PdfContinuousPage key={`${itemId}:${index}`} document={pdfDocument} number={index + 1} width={Math.max(100, containerSize.width - 32) * (fitMode === "custom" ? zoomPercent / 100 : 1)} />)}
         {rendering && !error && <div className="pdf-rendering"><LoaderCircle className="spin" size={18} /> Rendering page…</div>}
       </div>
     </div>
