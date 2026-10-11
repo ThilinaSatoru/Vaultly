@@ -196,12 +196,12 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
   const [actionError, setActionError] = useState("");
   const displayStatus = source.path_available ? converting ? "converting" : source.status : "unavailable";
 
-  const rescan = async () => {
+  const rescan = async (englishAttributes = false) => {
     setWorking(true);
     setMenuOpen(false);
     setActionError("");
     try {
-      await api(`/api/sources/${source.id}/scan`, { method: "POST" });
+      await api(`/api/sources/${source.id}/scan`, { method: "POST", body: JSON.stringify({ englishAttributes }) });
       onChanged();
     } catch (requestError) {
       setActionError(requestError instanceof Error ? requestError.message : "Could not scan this source.");
@@ -280,7 +280,7 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
               <button type="button" onClick={() => void relocate()} disabled={converting || source.status === "scanning"}><FolderOpen size={16} /> Relocate source</button>
               {source.status === "scanning"
                 ? <button type="button" onClick={() => void cancelScan()}><X size={16} /> Cancel scan</button>
-                : <button type="button" onClick={rescan} disabled={converting || !source.path_available}><RefreshCw size={16} /> Scan again</button>}
+                : <><button type="button" onClick={() => void rescan()} disabled={converting || !source.path_available}><RefreshCw size={16} /> Scan again</button><button type="button" onClick={() => void rescan(true)} disabled={converting || !source.path_available} title="Match English word forms and synonyms for tags and categories. People remain exact."><RefreshCw size={16} /> Scan with English matching</button></>}
               <button className="danger" type="button" onClick={remove} disabled={converting || source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
             </div>
           )}
@@ -544,11 +544,11 @@ function LibraryApp() {
     }
     setViewerFloating(true);
   };
-  const rescanAll = async () => {
+  const rescanAll = async (englishAttributes = false) => {
     setRescanningAll(true);
     setError("");
     try {
-      await api("/api/sources/scan", { method: "POST" });
+      await api("/api/sources/scan", { method: "POST", body: JSON.stringify({ englishAttributes }) });
       await loadSources(true);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not rescan all sources.");
@@ -572,7 +572,7 @@ function LibraryApp() {
       <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Manage local folders by media type. Expand a source for attributes, scanning, and conversion. Scans include subfolders and run when you choose.</p></div>
       <div className="page-heading-actions">{isScanning
         ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
-        : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
+        : <><button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button><button className="secondary-button" type="button" onClick={() => void rescanAll(true)} disabled={rescanningAll || sources.length === 0} title="Add matching English word forms and synonyms for tags and categories across all sources">English matching scan</button></>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
     </div>
 
     <section className="summary-strip" aria-label="Source summary">

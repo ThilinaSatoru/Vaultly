@@ -5,7 +5,7 @@ import { lstat, opendir, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { setImmediate as yieldToRequests } from "node:timers/promises";
 import { database } from "./database.js";
-import { AttributeNameMatcher, FilenameMetadataMatcher, normalizeMetadataFilename, normalizeMetadataPhrase } from "./filename-metadata.js";
+import { AttributeNameMatcher, EnglishFilenameMetadataMatcher, FilenameMetadataMatcher, normalizeMetadataFilename, normalizeMetadataPhrase } from "./filename-metadata.js";
 import { readComicMetadata, type ComicMetadata } from "./comic-metadata.js";
 import { clearThumbnailCache, getPdfThumbnail, getVideoMetadata, getVideoThumbnail } from "./thumbnails.js";
 
@@ -346,7 +346,7 @@ export async function cancelAllSourceScans(): Promise<number> {
   return active.length;
 }
 
-export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean } = {}): Promise<void> {
+export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean; englishAttributes?: boolean } = {}): Promise<void> {
   if (isSourceConverting(sourceId)) return Promise.resolve();
   const existingScan = scans.get(sourceId);
   if (existingScan) return existingScan.promise;
@@ -394,10 +394,11 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         const categories = database.prepare("SELECT id, name FROM categories").all() as Array<{ id: number; name: string }>;
         const tags = database.prepare("SELECT id, name FROM tags").all() as Array<{ id: number; name: string }>;
         const people = database.prepare("SELECT id, name FROM people").all() as Array<{ id: number; name: string }>;
-        const categoryMatcher = new FilenameMetadataMatcher(withAttributePatterns("categories", categories));
+        const DescriptiveMatcher = options.englishAttributes ? EnglishFilenameMetadataMatcher : FilenameMetadataMatcher;
+        const categoryMatcher = new DescriptiveMatcher(withAttributePatterns("categories", categories));
         const patternedTags = withAttributePatterns("tags", tags);
         const patternedPeople = withAttributePatterns("people", people);
-        const tagMatcher = new FilenameMetadataMatcher(patternedTags);
+        const tagMatcher = new DescriptiveMatcher(patternedTags);
         const peopleMatcher = new FilenameMetadataMatcher(patternedPeople);
         const metadataTagMatcher = new AttributeNameMatcher(patternedTags);
         const metadataArtistMatcher = new AttributeNameMatcher(patternedPeople);

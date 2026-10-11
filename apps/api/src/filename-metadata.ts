@@ -1,3 +1,5 @@
+import { englishText } from "./english-matching.js";
+
 interface NamedEntry { id: number; name: string; patterns?: string[] }
 
 export function normalizeMetadataPhrase(value: string): string {
@@ -133,6 +135,45 @@ export class FilenameMetadataMatcher<T extends NamedEntry> {
           matches.push(candidate.entry);
         }
       }
+    }
+    return matches;
+  }
+}
+
+/** Opt-in English matching for descriptive tags/categories, never identities.
+ * Exact aliases retain priority. Ambiguous normalized names are not inferred.
+ * No typo correction or substring matching is used for automatic assignments.
+ */
+export class EnglishFilenameMetadataMatcher<T extends NamedEntry> {
+  private readonly exact: FilenameMetadataMatcher<T>;
+  private readonly linguistic: FilenameMetadataMatcher<NamedEntry>;
+  private readonly entries: Map<number, T>;
+
+  constructor(entries: T[]) {
+    this.exact = new FilenameMetadataMatcher(entries);
+    this.entries = new Map(entries.map((entry) => [entry.id, entry]));
+    const phrases = new Map<string, { phrase: string; ids: Set<number> }>();
+    for (const entry of entries) for (const value of [entry.name, ...(entry.patterns ?? [])]) {
+      const phrase = englishText(value);
+      if (!phrase) continue;
+      const key = phrase.split(" ").sort().join(" ");
+      const existing = phrases.get(key) ?? { phrase, ids: new Set<number>() };
+      existing.ids.add(entry.id); phrases.set(key, existing);
+    }
+    this.linguistic = new FilenameMetadataMatcher([...phrases.values()].filter(({ ids }) => ids.size === 1)
+      .map(({ phrase, ids }) => ({ id: [...ids][0], name: phrase })));
+  }
+
+  match(filename: string, extension: string): T[] {
+    return this.matchNormalized(normalizeMetadataFilename(filename, extension));
+  }
+
+  matchNormalized(normalized: string): T[] {
+    const exact = this.exact.matchNormalized(normalized);
+    const ids = new Set(exact.map((entry) => entry.id));
+    const matches = [...exact];
+    for (const inferred of this.linguistic.matchNormalized(englishText(normalized))) {
+      if (!ids.has(inferred.id)) { ids.add(inferred.id); matches.push(this.entries.get(inferred.id)!); }
     }
     return matches;
   }

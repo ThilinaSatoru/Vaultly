@@ -186,19 +186,22 @@ app.post("/api/sources", async (request, reply) => {
   }
 });
 
-app.post("/api/sources/scan", async (_request, reply) => {
+const scanOptionsInput = z.object({ englishAttributes: z.boolean().default(false) });
+app.post("/api/sources/scan", async (request, reply) => {
+  const scanOptions = scanOptionsInput.parse(request.body ?? {});
   const sources = database.prepare("SELECT * FROM sources ORDER BY id").all() as unknown as SourceRow[];
   if (sources.some((source) => isSourceConverting(source.id))) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
-  for (const source of sources) void scanSource(source.id, source.root_path, { generateThumbnails: true }).catch((error) => app.log.error(error, "Source scan failed"));
+  for (const source of sources) void scanSource(source.id, source.root_path, { generateThumbnails: true, ...scanOptions }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning", count: sources.length });
 });
 
 app.post("/api/sources/:id/scan", async (request, reply) => {
+  const scanOptions = scanOptionsInput.parse(request.body ?? {});
   const { id } = sourceIdInput.parse(request.params);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
   if (isSourceConverting(id)) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
-  void scanSource(source.id, source.root_path, { generateThumbnails: true }).catch((error) => app.log.error(error, "Source scan failed"));
+  void scanSource(source.id, source.root_path, { generateThumbnails: true, ...scanOptions }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning" });
 });
 

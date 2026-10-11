@@ -247,7 +247,8 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const [formats, setFormats] = useState<Array<{ extension: string; item_count: number }>>([]);
   const [seriesOptions, setSeriesOptions] = useState<SeriesSummary[]>([]);
   const [circleOptions, setCircleOptions] = useState<CircleSummary[]>([]);
-  const [sort, setSort] = useGalleryField<"title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "title");
+  const [sort, setSort] = useGalleryField<"auto" | "relevance" | "title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "auto");
+  const [searchMode, setSearchMode] = useGalleryField<"literal" | "fuzzy" | "english">("searchMode", "english");
   const [page, setPage] = useGalleryField("page", 0);
   const [result, setResult] = useState<ItemPage | null>(null);
   const [categoryOverview, setCategoryOverview] = useState<{ categories: Category[]; uncategorized_count: number } | null>(null);
@@ -258,7 +259,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   useEffect(() => {
     const timer = window.setTimeout(() => { setDebouncedFilename(filename); setDebouncedPath(pathText); setDebouncedSearch(search); }, 180);
     return () => window.clearTimeout(timer);
-  }, [filename, pathText, search]);
+  }, [filename, pathText, search, searchMode]);
 
   useEffect(() => {
     let active = true;
@@ -314,7 +315,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       previousFilterKey.current = filterKey;
       setPage(0);
     }
-  }, [filterKey]);
+  }, [filterKey, searchMode]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -323,7 +324,8 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       setLoading(false);
       return () => controller.abort();
     }
-    const params = new URLSearchParams({ page: String(page), sort });
+    const params = new URLSearchParams({ page: String(page), searchMode });
+    if (sort !== "auto") params.set("sort", sort);
     if (type || selectedType) params.set("type", type || selectedType);
     if (view === "favorites") params.set("favorite", "1");
     if (view === "categories" && browseCategory === "uncategorized") params.set("uncategorized", "1");
@@ -363,7 +365,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [view, browseCategory, type, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, page, refreshKey]);
+  }, [view, browseCategory, type, debouncedSearch, debouncedFilename, debouncedPath, selectedType, sourceId, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCategoryIds, selectedTagIds, selectedCastIds, selectedArtistIds, sort, searchMode, page, refreshKey]);
 
   const libraryTitle = type ? galleryNames[type] : "All media";
   const selectedCategoryName = browseCategory === "uncategorized" ? "Uncategorized" : categoryOverview?.categories.find((category) => category.id === browseCategory)?.name;
@@ -374,7 +376,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     setFilename(""); setPathText(""); setDebouncedFilename(""); setDebouncedPath("");
     setSelectedType(""); setSourceId(""); setExtension(""); setSeriesFilter(""); setCircleFilter("");
     setMinMb(""); setMaxMb(""); setModifiedFrom(""); setModifiedTo("");
-    setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSelectedCastIds([]); setSelectedArtistIds([]); setSort("title");
+    setUncategorized(false); setUntagged(false); setSelectedCategoryIds([]); setSelectedTagIds([]); setSelectedCastIds([]); setSelectedArtistIds([]); setSort("auto");
   };
   const toggleItem = (id: number) => setSelectedItemIds((current) => current.includes(id)
     ? current.filter((value) => value !== id) : current.length < 500 ? [...current, id] : current);
@@ -425,12 +427,15 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       </div>}
 
       {view === "browse" && <div className="gallery-toolbar">
+        <label className="gallery-filter-field"><span>Search mode</span><select aria-label="Search mode" value={searchMode} onChange={(event) => { setSearchMode(event.target.value as typeof searchMode); setDebouncedSearch(search); setPage(0); }}><option value="english">English forms & synonyms</option><option value="literal">Literal / phrases</option><option value="fuzzy">Typo tolerant</option></select></label>
         <label className="gallery-filter-field"><span>File name</span><input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Search filenames" aria-label="File name contains" /></label>
         <TagCombobox attributeKind="category" label="Categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized} placeholder="All categories" />
         <TagCombobox attributeKind="tag" label="Tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged} placeholder="All tags" />
         <label className="select-wrap">
           <span>Sort</span>
           <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+            <option value="auto">Automatic</option>
+            <option value="relevance">Best match</option>
             <option value="title">Title A–Z</option>
             <option value="filename">Filename A–Z</option>
             <option value="recent">Recently modified</option>

@@ -35,7 +35,19 @@ Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian pa
 
 Desktop builds generate the application PNG and Windows ICO from `apps/web/public/favicon.svg`, and include them in the app window, executable, and installer. Edit that SVG to update the branding; generated icons live in `apps/desktop/build/`.
 
-## Current scope
+## English search and attribute matching
+
+The gallery defaults to **English forms & synonyms**, searching titles and filenames only. A bundled [winkNLP English lite model](https://winkjs.org/wink-nlp/language-models.html) handles word forms, irregular plurals/verb tenses and British/American spellings. A small built-in synonym dictionary adds equivalences such as `movie`/`film`, `holiday`/`vacation`, and `car`/`automobile`. For example, `child holiday` finds a title containing `Children on vacations`; `run film` finds `Running movies.pdf`. The filename filter uses the same matching but only checks filenames. This is a lightweight NLP model plus dictionary, rather than vector similarity or a generative LLM; synonym coverage is limited to the built-in groups and does not infer every possible meaning.
+
+Everything runs offline after dependency installation. The model is included in the desktop bundle, requires no GPU, API key or Ollama installation, and downloads nothing at runtime. A versioned SQLite FTS5 index stores normalized title/filename tokens; startup backfills it once, dictionary version changes rebuild it, and scans, edits, renames, deletes and backup restores maintain it through triggers. A bounded in-memory cache reuses normalization. **Automatic** sorting uses title-weighted BM25 relevance in English/typo-tolerant mode, or title order in literal mode. Other gallery filters and sorts still apply.
+
+Use quotes to require literal phrases and suppress English expansion, such as `"summer trip"`. **Literal / phrases** retains substring searching across titles, paths and assigned attributes. **Typo tolerant** retains edit-distance matching with adjacent transpositions, up to eight alternatives per word of 4–40 characters (one edit, or two for words of eight or more characters). All unquoted terms must match. Quoted terms are never typo-expanded. The API retains literal mode when `searchMode` is omitted; request `searchMode=english` to use the embedded matcher.
+
+For attribute scans, use **Sources → English matching scan** for all sources, or a source's **Scan with English matching** menu action. This reuses English word forms and synonyms for existing tags/categories and their aliases. It adds assignments without clearing manual ones, requires complete words/phrases, excludes file extensions and parent directories, and skips inferred phrases that normalize to multiple different attributes. Exact names/aliases still match. Cast/artist names and explicit sidecar metadata remain exact. Ordinary **Scan again**, **Rescan all**, and initial scans retain their existing matching rules. The scan API accepts `{ "englishAttributes": true }` on `POST /api/sources/scan` or `POST /api/sources/:id/scan`; programmatic scans can pass the same option to `scanSource`.
+
+To extend synonym coverage, update `englishSynonymGroups` in `apps/api/src/english-matching.ts`, increment `englishMatchingVersion`, and add representative positive and negative tests. For library-specific or ambiguous terminology, use explicit attribute patterns instead.
+
+## Library features
 
 - Set people's profile images by upload or image URL from Cast & artists. Images are resized to at most 512 pixels and stored in `profile-images` beside the database (the desktop app's user-data directory).
 - For sites that require a referrer, enter the gallery or source page URL alongside the image URL. Desktop downloads use Chromium networking for system-proxy support; connection failures and HTTP refusals show recovery guidance.

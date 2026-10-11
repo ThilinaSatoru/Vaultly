@@ -8,6 +8,9 @@ import { z } from "zod";
 import { database } from "./database.js";
 import { substringFilter } from "./search-index.js";
 import { gallerySearchFilters } from "./gallery-search.js";
+import { expandSearchTerms, rankedMatch } from "./advanced-search.js";
+import { englishSearchFilters } from "./english-search.js";
+import { englishMatch } from "./english-matching.js";
 import { getScanProgress, isVideoFile } from "./scanner.js";
 import { getPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
 import { openVideoInDefaultPlayer } from "./open-video.js";
@@ -24,6 +27,7 @@ const dateInput = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 const listInput = z.object({
   type: z.enum(["comic", "video", "story"]).optional(),
   q: z.string().trim().max(200).optional(),
+  searchMode: z.enum(["literal", "fuzzy", "english"]).default("literal"),
   filename: z.string().trim().max(200).optional(),
   path: z.string().trim().max(200).optional(),
   source: z.coerce.number().int().positive().optional(),
@@ -43,7 +47,7 @@ const listInput = z.object({
   artists: idListInput.optional(),
   people: idListInput.optional(),
   favorite: z.enum(["1"]).optional(),
-  sort: z.enum(["title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
+  sort: z.enum(["relevance", "title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
 }).refine((value) => value.minMb === undefined || value.maxMb === undefined || value.minMb <= value.maxMb,
   { message: "Minimum size must not exceed maximum size." });
@@ -238,6 +242,7 @@ export async function registerMediaRoutes(
 
   app.get("/api/items", async (request) => {
     const input = listInput.parse(request.query);
+    if (!(request.query as Record<string, unknown>).sort && input.searchMode !== "literal") input.sort = "relevance";
     const conditions = ["m.available = 1"];
     const values: Array<string | number> = [];
     let indexedSearch = false;
@@ -252,10 +257,13 @@ export async function registerMediaRoutes(
       values.push(input.source);
     }
     if (input.filename) {
-      const filter = substringFilter(input.filename, ["filename"]);
-      indexedSearch ||= filter.indexed;
-      conditions.push(filter.sql);
-      values.push(...filter.values);
+      const filters = input.searchMode === "english" ? englishSearchFilters(input.filename, ["filename"])
+        : [substringFilter(input.filename, ["filename"])];
+      for (const filter of filters) {
+        indexedSearch ||= filter.indexed;
+        conditions.push(filter.sql);
+        values.push(...filter.values);
+      }
     }
     if (input.path) {
       const filter = substringFilter(input.path, ["relative_path"]);
@@ -304,8 +312,11 @@ export async function registerMediaRoutes(
       conditions.push("EXISTS (SELECT 1 FROM effective_item_categories ic WHERE ic.item_id = m.id AND ic.category_id = ?)");
       values.push(categoryId);
     }
+    const searchGroups = input.q ? expandSearchTerms(database, input.q, input.searchMode === "fuzzy") : [];
     if (input.q) {
-      for (const filter of gallerySearchFilters(input.q)) {
+      const filters = input.searchMode === "english" ? englishSearchFilters(input.q)
+        : gallerySearchFilters(input.q, input.searchMode === "fuzzy", searchGroups);
+      for (const filter of filters) {
         indexedSearch ||= filter.indexed;
         conditions.push(filter.sql);
         values.push(...filter.values);
@@ -329,7 +340,17 @@ export async function registerMediaRoutes(
     }
 
     const where = conditions.join(" AND ");
-    const order = input.sort === "recent" ? "m.modified_at_ms DESC, m.id DESC"
+    const wordMatch = rankedMatch(searchGroups);
+    const match = wordMatch && input.searchMode === "english" ? `{title filename} : (${wordMatch})` : wordMatch;
+    const normalizedMatch = input.searchMode === "english" ? englishMatch(input.q || input.filename || "", input.q ? ["title", "filename"] : ["filename"]) : "";
+    const relevance = input.sort === "relevance" && (match || normalizedMatch);
+    const rankValues = relevance ? [...(match ? [match] : []), ...(normalizedMatch ? [normalizedMatch] : [])] : [];
+    const rankSql = [
+      ...(match ? ["COALESCE((SELECT bm25(media_words, 8.0, 3.0, 1.0) FROM media_words WHERE rowid = m.id AND media_words MATCH ?), 0)"] : []),
+      ...(normalizedMatch ? ["COALESCE((SELECT bm25(media_english, 8.0, 3.0) FROM media_english WHERE rowid = m.id AND media_english MATCH ?), 0)"] : []),
+    ].join(" + ");
+    const order = relevance ? `(${rankSql}) ASC, m.title COLLATE NOCASE ASC, m.id ASC`
+      : input.sort === "recent" ? "m.modified_at_ms DESC, m.id DESC"
       : input.sort === "oldest" ? "m.modified_at_ms ASC, m.id ASC"
         : input.sort === "size" ? "m.size_bytes DESC, m.id DESC"
           : input.sort === "smallest" ? "m.size_bytes ASC, m.id ASC"
@@ -343,7 +364,7 @@ export async function registerMediaRoutes(
     `).get(...values) as { count: number };
     const rows = database.prepare(`
       ${itemSelect(indexedSearch)} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
-    `).all(...values, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
+    `).all(...values, ...rankValues, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
     const tags = tagsByItem(rows.map((row) => row.id));
     const categories = categoriesByItem(rows.map((row) => row.id));
     const memberships = seriesByItem(rows.map((row) => row.id));

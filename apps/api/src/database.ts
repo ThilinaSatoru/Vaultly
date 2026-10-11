@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializeSearchIndex } from "./search-index.js";
+import { registerEnglishMatchingFunction } from "./english-search-index.js";
 
 export const runtimeDirectory = process.env.VAULTLY_RUNTIME_DIR
   ? path.resolve(process.env.VAULTLY_RUNTIME_DIR)
@@ -10,6 +11,8 @@ export const runtimeDirectory = process.env.VAULTLY_RUNTIME_DIR
 mkdirSync(runtimeDirectory, { recursive: true });
 
 export const database = new DatabaseSync(path.join(runtimeDirectory, "vaultly.db"));
+// Persisted triggers can run during migrations, before search initialization.
+registerEnglishMatchingFunction(database);
 
 database.exec("PRAGMA journal_mode = WAL");
 database.exec("PRAGMA foreign_keys = ON");

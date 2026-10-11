@@ -1,9 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
+import { initializeEnglishSearchIndex } from "./english-search-index.js";
 
 // External content keeps the text in media_items only. Trigrams support infix
 // filename/path searches; omitting positions and token counts keeps it compact.
 export function initializeSearchIndex(db: DatabaseSync): void {
   const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'media_search'").get();
+  const wordsExist = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'media_words'").get();
   db.exec("BEGIN IMMEDIATE");
   try {
     db.exec(`
@@ -31,6 +33,25 @@ export function initializeSearchIndex(db: DatabaseSync): void {
     `);
     // One-time backfill for existing libraries. Later startups reuse the index.
     if (!exists) db.exec("INSERT INTO media_search(media_search) VALUES ('rebuild')");
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS media_words USING fts5(
+        title, filename, relative_path, content='media_items', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
+      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS media_word_vocabulary USING fts5vocab(media_words, 'row');
+      CREATE TRIGGER IF NOT EXISTS media_words_insert AFTER INSERT ON media_items BEGIN
+        INSERT INTO media_words(rowid, title, filename, relative_path) VALUES (new.id, new.title, new.filename, new.relative_path);
+      END;
+      CREATE TRIGGER IF NOT EXISTS media_words_delete AFTER DELETE ON media_items BEGIN
+        INSERT INTO media_words(media_words, rowid, title, filename, relative_path) VALUES ('delete', old.id, old.title, old.filename, old.relative_path);
+      END;
+      CREATE TRIGGER IF NOT EXISTS media_words_update AFTER UPDATE OF title, filename, relative_path ON media_items
+      WHEN old.title IS NOT new.title OR old.filename IS NOT new.filename OR old.relative_path IS NOT new.relative_path BEGIN
+        INSERT INTO media_words(media_words, rowid, title, filename, relative_path) VALUES ('delete', old.id, old.title, old.filename, old.relative_path);
+        INSERT INTO media_words(rowid, title, filename, relative_path) VALUES (new.id, new.title, new.filename, new.relative_path);
+      END;
+    `);
+    if (!wordsExist) db.exec("INSERT INTO media_words(media_words) VALUES ('rebuild')");
+    initializeEnglishSearchIndex(db);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
