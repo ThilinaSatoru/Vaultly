@@ -5,6 +5,14 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-11
+
+### Changed
+
+- fix control hiding in fullscreen, add a global playback-position option, simplify card paths, exclude movie samples, add profile deletion, and update auto-scroll mouse and Space-key behavior. (f1610f0)
+- Compact controls, instant hide, tiny shortcut feedback, optional seek previews. (dc134bf)
+- Added Active vault and + controls in the top bar (ac0a81a)
+
 ## [0.1.1] - 2026-10-11
 
 ### Added
