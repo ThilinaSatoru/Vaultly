@@ -16,6 +16,18 @@ pnpm dev
 
 Open `http://127.0.0.1:5173`. The API listens only on `127.0.0.1:4400` by default. Set `VAULTLY_API_PORT` before running `pnpm dev` to use another port; the API and Vite proxy will both use it. SQLite data is stored in `runtime/vaultly.db`, which is ignored by Git. Adding a source indexes files in place. Scans remove `#` favourite markers from filenames; explicit rename and conversion actions also modify source files. See the library features below.
 
+## Vault profiles
+
+Use **Active vault** in the top bar to switch profiles, or the **+** button beside it to create one. A new profile opens a blank vault with no sources, media, attributes, collections, or inherited preferences. Your existing library becomes **Default** and stays at its original location. The selected profile is remembered when the app restarts.
+
+Each profile uses its own SQLite database, thumbnail cache, people images, scan report, and browser preferences. New vaults are stored in `vaults/<profile-id>/` under the runtime directory (the desktop app's user-data directory); Default retains `vaultly.db` at the runtime root. `vault-profiles.json` stores profile names and the active selection.
+
+Switching returns to Home and closes viewers and management drafts. Finish or cancel background work before switching. An older browser window must reload after another window changes the active vault. Source media remains in its original folders; adding the same folder to two vaults indexes the same physical files.
+
+Settings backups include only the active vault, and their filenames identify that profile. Restore replaces only the active vault's metadata and preferences, so create a blank profile first when importing a backup as a separate library. Older backups remain supported. A backup contains library data and people images, not the original media files or other profiles.
+
+The API exposes `GET /api/vault-profiles`, `POST /api/vault-profiles` with `{ "name": "Comics" }`, and `POST /api/vault-profiles/:id/activate`. Library requests can send `vaultProfile=<profile-id>` in the query string or `X-Vaultly-Profile` in a header to reject requests when the active profile has changed.
+
 ## Desktop app
 
 Vaultly also runs as a native desktop app on Windows, macOS, and Linux. The Electron shell starts the local API on loopback, stores its database and thumbnail cache in the operating system's application-data directory, and uses native folder and file-reveal dialogs.

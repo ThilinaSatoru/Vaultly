@@ -2,6 +2,7 @@ import { registerAttributeRoutes, sourceAttributesInput, sourceAttributes, inval
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import { installVaultProfileRoutes } from "./vault-profile-routes.js";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
@@ -36,6 +37,7 @@ export async function buildVaultlyServer(options: VaultlyServerOptions = {}) {
 await removeLegacyPlaybackCache().catch(() => undefined);
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
+installVaultProfileRoutes(app);
 app.setErrorHandler((error, _request, reply) => {
   if (error instanceof z.ZodError) {
     return reply.code(400).send({ message: error.issues[0]?.message ?? "Invalid request." });

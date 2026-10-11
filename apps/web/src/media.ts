@@ -1,3 +1,4 @@
+import { vaultFetch } from "./vault-session";
 export type MediaType = "comic" | "video" | "story";
 
 export interface MediaItem {
@@ -131,7 +132,7 @@ export interface CircleDetail extends CircleSummary {
 }
 
 export const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
-  const response = await fetch(url, {
+  const response = await vaultFetch(url, {
     ...options,
     headers: options?.body ? { "Content-Type": "application/json", ...options.headers } : options?.headers,
   });

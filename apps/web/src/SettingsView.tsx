@@ -1,3 +1,4 @@
+import { vaultStorage, vaultFetch, getActiveProfile, exportVaultPreferences, restoreVaultPreferences } from "./vault-session";
 import { Download, Keyboard, RotateCcw, Settings2, Upload, X } from "lucide-react";
 import { type ChangeEvent, useRef, useState } from "react";
 import { api } from "./media";
@@ -35,32 +36,28 @@ export function SettingsView() {
   const [keySensitivity, setKeySensitivity] = useState(() => readNumberPreference("vaultly.reader.keySensitivity", 100, 25, 300));
   const [videoVolume, setVideoVolume] = useState(() => Math.round(readNumberPreference("vaultly.video.volume", 1, 0, 1) * 100));
   const [videoMuted, setVideoMuted] = useState(() => readBooleanPreference("vaultly.video.muted", false));
-  const [pdfFit, setPdfFit] = useState(() => window.localStorage.getItem("vaultly.pdf.fit") ?? "page");
+  const [pdfFit, setPdfFit] = useState(() => vaultStorage.getItem("vaultly.pdf.fit") ?? "page");
   const [pdfZoom, setPdfZoom] = useState(() => readNumberPreference("vaultly.pdf.zoom", 100, 25, 400));
-  const [comicFit, setComicFit] = useState(() => window.localStorage.getItem("vaultly.comic.fit") ?? "screen");
+  const [comicFit, setComicFit] = useState(() => vaultStorage.getItem("vaultly.comic.fit") ?? "screen");
   const [comicZoom, setComicZoom] = useState(() => readNumberPreference("vaultly.comic.zoom", 100, 25, 400));
   const [seekAmount, setSeekAmount] = useState(() => readNumberPreference("vaultly.video.seekAmount", 5, .25, 999));
-  const [seekUnit, setSeekUnit] = useState(() => window.localStorage.getItem("vaultly.video.seekUnit") === "minutes" ? "minutes" : "seconds");
+  const [seekUnit, setSeekUnit] = useState(() => vaultStorage.getItem("vaultly.video.seekUnit") === "minutes" ? "minutes" : "seconds");
   const [largeSeekAmount, setLargeSeekAmount] = useState(() => readNumberPreference("vaultly.video.seekLargeAmount", 1, .25, 999));
-  const [largeSeekUnit, setLargeSeekUnit] = useState(() => window.localStorage.getItem("vaultly.video.seekLargeUnit") === "seconds" ? "seconds" : "minutes");
+  const [largeSeekUnit, setLargeSeekUnit] = useState(() => vaultStorage.getItem("vaultly.video.seekLargeUnit") === "seconds" ? "seconds" : "minutes");
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupMessage, setBackupMessage] = useState("");
   const restoreInput = useRef<HTMLInputElement>(null);
 
-  const preferences = () => Object.fromEntries(Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
-    .filter((key): key is string => Boolean(key?.startsWith("vaultly.")))
-    .map((key) => [key, window.localStorage.getItem(key) ?? ""]));
-
   const createBackup = async () => {
     setBackupBusy(true); setBackupMessage("");
     try {
-      const response = await fetch("/api/backup/archive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferences: preferences() }) });
+      const response = await vaultFetch("/api/backup/archive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferences: exportVaultPreferences() }) });
       if (!response.ok) throw new Error((await response.json()).message || "Could not create the backup.");
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `vaultly-backup-${new Date().toISOString().slice(0, 10)}.json.gz`;
+      link.download = `vaultly-${getActiveProfile()?.name.replace(/[^a-z0-9_-]+/gi, "-") || "Default"}-backup-${new Date().toISOString().slice(0, 10)}.json.gz`;
       link.click();
       URL.revokeObjectURL(url);
       setBackupMessage("Backup created successfully.");
@@ -72,21 +69,13 @@ export function SettingsView() {
   const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = "";
-    if (!file || !window.confirm("Restore this backup? Current Vaultly metadata and preferences will be replaced.")) return;
+    if (!file || !window.confirm("Restore this backup? Metadata and preferences in the active vault will be replaced.")) return;
     setBackupBusy(true); setBackupMessage("");
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const compressed = bytes[0] === 0x1f && bytes[1] === 0x8b;
       const restored = await api<{ preferences?: Record<string, unknown> }>("/api/backup/restore", { method: "POST", headers: { "Content-Type": compressed ? "application/gzip" : "application/json" }, body: compressed ? file : new TextDecoder().decode(bytes) });
-      for (let index = window.localStorage.length - 1; index >= 0; index -= 1) {
-        const key = window.localStorage.key(index);
-        if (key?.startsWith("vaultly.")) window.localStorage.removeItem(key);
-      }
-      if (restored.preferences && typeof restored.preferences === "object") {
-        for (const [key, value] of Object.entries(restored.preferences)) {
-          if (key.startsWith("vaultly.") && typeof value === "string") window.localStorage.setItem(key, value);
-        }
-      }
+      restoreVaultPreferences(restored.preferences);
       window.location.reload();
     } catch (requestError) {
       setBackupMessage(requestError instanceof Error ? requestError.message : "Could not restore the backup.");
@@ -108,7 +97,7 @@ export function SettingsView() {
 
   return <section className="settings-view">
     <div className="page-heading"><div><p className="eyebrow">Vaultly preferences</p><h1>Settings & controls</h1><p>Preferences stay on this computer and remain active until you change them.</p></div></div>
-    <details className="settings-panel"><summary className="settings-panel-heading"><Download size={18} /><div><h2>Backup and migration</h2><p>Save or restore your library and preferences.</p></div></summary>
+    <details className="settings-panel"><summary className="settings-panel-heading"><Download size={18} /><div><h2>Backup and migration</h2><p>Save or restore only the active vault and its preferences.</p></div></summary>
       <div className="backup-actions"><button className="primary-button" type="button" disabled={backupBusy} onClick={() => void createBackup()}><Download size={17} /> Create backup</button><button className="secondary-button" type="button" disabled={backupBusy} onClick={() => restoreInput.current?.click()}><Upload size={17} /> Restore backup</button><input ref={restoreInput} className="visually-hidden" type="file" accept="application/gzip,application/json,.gz,.json" onChange={(event) => void restoreBackup(event)} /></div>
       <p className="backup-note">After moving to another computer, restore the backup and use <strong>Sources → Relocate source</strong> for any drive or folder paths that changed. Rescanning preserves matched metadata.</p>
       {backupMessage && <p className="backup-message" role="status">{backupMessage}</p>}

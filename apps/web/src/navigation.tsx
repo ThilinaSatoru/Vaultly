@@ -1,3 +1,4 @@
+import { getActiveProfile } from "./vault-session";
 import { createContext, useContext, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
 export interface NavigationEntry {
@@ -39,7 +40,11 @@ export function useNavigation() {
     window.history.scrollRestoration = "manual";
     window.history.replaceState({ ...window.history.state, vaultly: current.current }, "");
     const pop = (event: PopStateEvent) => {
-      if (event.state?.vaultly) {
+      if (getActiveProfile() && event.state?.vaultProfile !== getActiveProfile()?.id) {
+        const fresh: NavigationEntry = { id: crypto.randomUUID(), label: "Home", fields: {}, scroll: { x: 0, y: 0 }, breadcrumbs: [] };
+        window.history.replaceState({ vaultProfile: getActiveProfile()?.id, vaultly: fresh }, "");
+        current.current = fresh; setEntry(fresh);
+      } else if (event.state?.vaultly) {
         current.current = event.state.vaultly;
         setEntry(event.state.vaultly);
       }

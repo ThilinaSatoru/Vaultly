@@ -1,3 +1,5 @@
+import { vaultUrl } from "./vault-session";
+import { vaultStorage } from "./vault-session";
 import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
@@ -10,7 +12,7 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 type FitMode = "width" | "page" | "custom";
 
 const storedFitMode = (): FitMode => {
-  const value = window.localStorage.getItem("vaultly.pdf.fit");
+  const value = vaultStorage.getItem("vaultly.pdf.fit");
   return value === "width" || value === "custom" ? value : "page";
 };
 
@@ -32,8 +34,8 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   const canvasRef = useRef<HTMLCanvasElement>(null);
   useContinuousReaderScroll(scrollRef, Boolean(pdfDocument), `${itemId}:${pageNumber}:${fitMode}`);
 
-  useEffect(() => { window.localStorage.setItem("vaultly.pdf.fit", fitMode); }, [fitMode]);
-  useEffect(() => { window.localStorage.setItem("vaultly.pdf.zoom", String(zoomPercent)); }, [zoomPercent]);
+  useEffect(() => { vaultStorage.setItem("vaultly.pdf.fit", fitMode); }, [fitMode]);
+  useEffect(() => { vaultStorage.setItem("vaultly.pdf.zoom", String(zoomPercent)); }, [zoomPercent]);
 
   useEffect(() => {
     const container = scrollRef.current;
@@ -58,7 +60,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
     setHasPage(false);
     setPageNumber(1);
     const task = getDocument({
-      url: `/api/items/${itemId}/file`,
+      url: vaultUrl(`/api/items/${itemId}/file`),
       rangeChunkSize: 64 * 1024,
       disableAutoFetch: true,
       disableStream: true,

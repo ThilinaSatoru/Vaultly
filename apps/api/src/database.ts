@@ -1,16 +1,19 @@
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { initializeSearchIndex } from "./search-index.js";
 import { registerEnglishMatchingFunction } from "./english-search-index.js";
 
-export const runtimeDirectory = process.env.VAULTLY_RUNTIME_DIR
-  ? path.resolve(process.env.VAULTLY_RUNTIME_DIR)
-  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../runtime");
-mkdirSync(runtimeDirectory, { recursive: true });
+import { getActiveVaultProfile, vaultDirectory, saveActiveVaultProfile } from "./vault-profiles.js";
 
-export const database = new DatabaseSync(path.join(runtimeDirectory, "vaultly.db"));
+export let runtimeDirectory = vaultDirectory(getActiveVaultProfile().id);
+const vaultChangeListeners = new Set<() => void>();
+export function onVaultChanged(listener: () => void) { vaultChangeListeners.add(listener); }
+
+function openDatabase(directory: string): DatabaseSync {
+  mkdirSync(directory, { recursive: true });
+  const database = new DatabaseSync(path.join(directory, "vaultly.db"));
+  try {
 // Persisted triggers can run during migrations, before search initialization.
 registerEnglishMatchingFunction(database);
 
@@ -286,6 +289,29 @@ database.exec("PRAGMA optimize");
 // A previous process may have exited mid-scan. Keep its index and wait for a manual rescan.
 database.exec(`UPDATE sources SET status = CASE WHEN last_scanned_at IS NULL THEN 'idle' ELSE 'ready' END,
   last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE status = 'scanning'`);
+
+    return database;
+  } catch (error) { database.close(); throw error; }
+}
+
+export let database = openDatabase(runtimeDirectory);
+
+export function initializeVaultDatabase(id: string) {
+  openDatabase(vaultDirectory(id)).close();
+}
+
+// Called only after requests and background work have finished.
+export function activateVaultDatabase(id: string) {
+  const directory = vaultDirectory(id);
+  if (directory === runtimeDirectory) return;
+  const next = openDatabase(directory);
+  try { saveActiveVaultProfile(id); }
+  catch (error) { next.close(); throw error; }
+  database.close();
+  database = next;
+  runtimeDirectory = directory;
+  for (const listener of vaultChangeListeners) listener();
+}
 
 export type SourceStatus = "idle" | "scanning" | "ready" | "error";
 

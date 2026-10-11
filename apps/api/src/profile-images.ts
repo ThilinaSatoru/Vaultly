@@ -2,9 +2,10 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { runtimeDirectory } from "./database.js";
+import { runtimeDirectory, onVaultChanged } from "./database.js";
 
-export const profileImageDirectory = path.join(runtimeDirectory, "profile-images");
+export let profileImageDirectory = path.join(runtimeDirectory, "profile-images");
+onVaultChanged(() => { profileImageDirectory = path.join(runtimeDirectory, "profile-images"); });
 export const maxProfileImageBytes = 10 * 1024 * 1024;
 export function profileImagePath(filename: string) {
   if (!/^[0-9a-f-]{36}\.png$/.test(filename)) throw new Error("Invalid profile image filename.");

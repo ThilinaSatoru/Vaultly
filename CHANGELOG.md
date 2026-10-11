@@ -9,6 +9,7 @@ and edit them into user-facing notes before starting a release when needed.
 
 ### Added
 
+- Separate vault profiles with blank new libraries, independent databases, caches, preferences, and backups, plus a profile switcher.
 - Manual GitHub Actions releases with synchronized versions, changelogs, cross-platform installers, and SHA-256 checksums.
 
 ### Changed

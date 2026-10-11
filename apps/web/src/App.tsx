@@ -1,3 +1,5 @@
+import { VaultProfiles } from "./VaultProfiles";
+import type { VaultProfiles as ProfileList } from "./vault-session";
 import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
 import { SourceConversion } from "./SourceConversion";
 import { SourcesBrowser } from "./SourcesBrowser";
@@ -367,12 +369,12 @@ function HomeView({ sources, categories, onOpenLibrary, onOpenCategories, onAddS
   </>;
 }
 
-export function App() {
+export function App({ profiles }: { profiles: ProfileList }) {
   const navigation = useNavigation();
-  return <NavigationContext.Provider value={navigation}><LibraryApp /></NavigationContext.Provider>;
+  return <NavigationContext.Provider value={navigation}><LibraryApp profiles={profiles} /></NavigationContext.Provider>;
 }
 
-function LibraryApp() {
+function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const navigation = useContext(NavigationContext)!;
   const [section] = useNavigationField<Section>("section", "home");
   const [libraryView] = useNavigationField<LibraryView>("libraryView", "browse");
@@ -620,6 +622,7 @@ function LibraryApp() {
             else setSearch(nextSearch);
           }} /></div>
           <div className="topbar-actions">
+            <VaultProfiles initial={profiles} />
             {temporaryPlaylist.length > 0 && <button className="playlist-launch" type="button" onClick={() => openItem(temporaryPlaylist[0].id)}><ListVideo size={17} /> Temporary playlist <strong>{temporaryPlaylist.length}</strong></button>}
             <div className="local-pill"><span /> Local only</div>
           </div>

@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
-import { database } from "./database.js";
+import { database, onVaultChanged } from "./database.js";
 import { video2mp4Script } from "./video2mp4-script.js";
 import { withMediaProcess } from "./process-resources.js";
 
@@ -19,6 +19,7 @@ export interface ConversionProgress {
   failed: number;
 }
 const jobs = new Map<number, { root: string; progress: ConversionProgress; controller: AbortController; promise: Promise<void> }>();
+onVaultChanged(() => jobs.clear());
 export const getConversionProgress = (id: number) => {
   const job = jobs.get(id);
   if (!job) return null;

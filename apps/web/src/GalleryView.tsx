@@ -1,3 +1,4 @@
+import { vaultUrl } from "./vault-session";
 import { ArrowLeft, BookOpen, Check, ChevronDown, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useContext, type Dispatch, type SetStateAction } from "react";
@@ -83,10 +84,10 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
     playPoint(pointIndexRef.current + 1);
   };
 
-  if (failed) return <img src={`/api/items/${itemId}/thumbnail`} alt="" />;
+  if (failed) return <img src={vaultUrl(`/api/items/${itemId}/thumbnail`)} alt="" />;
   return <video
     ref={videoRef}
-    src={`/api/items/${itemId}/file`}
+    src={vaultUrl(`/api/items/${itemId}/file`)}
     muted
     playsInline
     preload="metadata"
@@ -169,12 +170,12 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
     >
       <div className={`media-art media-art-${item.media_type}`}>
         {item.media_type === "comic" && !archive ? (
-          <img src={`/api/items/${item.id}/pages/0`} alt="" loading="lazy" />
+          <img src={vaultUrl(`/api/items/${item.id}/pages/0`)} alt="" loading="lazy" />
         ) : item.media_type === "video" && hovered ? (
           <VideoHoverPreview itemId={item.id} knownDuration={duration} />
         ) : (item.media_type === "video" || item.media_type === "story") && !thumbnailFailed ? (
           <img
-            src={`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&attempt=${thumbnailAttempt}`}
+            src={vaultUrl(`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&attempt=${thumbnailAttempt}`)}
             alt=""
             loading="lazy"
             onError={handleThumbnailError}
@@ -210,7 +211,7 @@ function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; 
   const cover = series.has_cover ? `/api/series/${series.id}/cover` : fallback;
   return <article className="media-card collection-media-card">
     <button className="media-card-open" type="button" onClick={onOpen} aria-label={`Open collection ${series.title}`}>
-      <div className={`media-art collection-art${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={cover} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
+      <div className={`media-art collection-art${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={vaultUrl(cover)} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
     </button>
     <div className="media-card-body"><h3 title={series.title}><button className="card-title-open" type="button" onClick={onOpen}>{series.title}</button></h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{series.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{series.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
   </article>;

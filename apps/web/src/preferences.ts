@@ -1,3 +1,4 @@
+import { vaultStorage } from "./vault-session";
 export type ShortcutAction =
   | "viewer.close" | "series.previous" | "series.next"
   | "video.playPause" | "video.fullscreen" | "video.seekBack" | "video.seekForward"
@@ -41,13 +42,13 @@ export function eventBinding(event: KeyboardEvent): string {
 
 export function readBindings(): Record<ShortcutAction, string[]> {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(bindingKey) ?? "{}") as Partial<Record<ShortcutAction, string[]>>;
+    const stored = JSON.parse(vaultStorage.getItem(bindingKey) ?? "{}") as Partial<Record<ShortcutAction, string[]>>;
     return Object.fromEntries(Object.entries(defaultBindings).map(([action, defaults]) => [action, Array.isArray(stored[action as ShortcutAction]) ? stored[action as ShortcutAction] : defaults])) as Record<ShortcutAction, string[]>;
   } catch { return { ...defaultBindings }; }
 }
 
 export function writeBindings(bindings: Record<ShortcutAction, string[]>) {
-  window.localStorage.setItem(bindingKey, JSON.stringify(bindings));
+  vaultStorage.setItem(bindingKey, JSON.stringify(bindings));
   window.dispatchEvent(new Event("vaultly-preferences-changed"));
 }
 
@@ -56,19 +57,19 @@ export function matchesShortcut(event: KeyboardEvent, action: ShortcutAction): b
 }
 
 export function readBooleanPreference(key: string, fallback: boolean): boolean {
-  const value = window.localStorage.getItem(key);
+  const value = vaultStorage.getItem(key);
   return value === null ? fallback : value === "true";
 }
 
 export function readNumberPreference(key: string, fallback: number, min: number, max: number): number {
-  const stored = window.localStorage.getItem(key);
+  const stored = vaultStorage.getItem(key);
   if (stored === null || stored.trim() === "") return fallback;
   const value = Number(stored);
   return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
 }
 
 export function writePreference(key: string, value: string | number | boolean) {
-  window.localStorage.setItem(key, String(value));
+  vaultStorage.setItem(key, String(value));
   window.dispatchEvent(new Event("vaultly-preferences-changed"));
 }
 

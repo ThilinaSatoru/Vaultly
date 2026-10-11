@@ -119,12 +119,17 @@ export function createPeopleProfileScanner(options: { createBrowser?: PeopleProf
 }
 
 export async function registerPeopleProfileScanRoutes(app: FastifyInstance, options: { createBrowser?: PeopleProfileBrowserFactory; fetchProfileImage?: ProfileImageFetch }) {
-  const scanner = createPeopleProfileScanner(options);
-  app.get("/api/people/profile-scan", scanner.status);
+  const scanners = new Map<string, ReturnType<typeof createPeopleProfileScanner>>();
+  const currentScanner = () => {
+    let scanner = scanners.get(runtimeDirectory);
+    if (!scanner) { scanner = createPeopleProfileScanner(options); scanners.set(runtimeDirectory, scanner); }
+    return scanner;
+  };
+  app.get("/api/people/profile-scan", async () => currentScanner().status());
   app.post("/api/people/profile-scan", async (_request, reply) => {
-    try { return reply.code(202).send(await scanner.start()); }
+    try { return reply.code(202).send(await currentScanner().start()); }
     catch (error) { return reply.code(options.createBrowser ? 409 : 501).send({ message: error instanceof Error ? error.message : "Could not start profile scan." }); }
   });
-  app.post("/api/people/profile-scan/cancel", scanner.cancel);
-  app.addHook("onClose", async () => { await scanner.cancel(); });
+  app.post("/api/people/profile-scan/cancel", async () => currentScanner().cancel());
+  app.addHook("onClose", async () => { await Promise.all([...scanners.values()].map((scanner) => scanner.cancel())); });
 }
