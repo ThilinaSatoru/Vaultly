@@ -35,6 +35,28 @@ Installer targets are NSIS on Windows, DMG on macOS, and AppImage plus Debian pa
 
 Desktop builds generate the application PNG and Windows ICO from `apps/web/public/favicon.svg`, and include them in the app window, executable, and installer. Edit that SVG to update the branding; generated icons live in `apps/desktop/build/`.
 
+## Manual GitHub releases
+
+Releases run only when you start **Actions → Manual release → Run workflow**, selecting the repository's default branch. There are no automatic push/tag triggers and no release PRs. Set the repository Actions **secret** `GH_TOKEN` to a GitHub token with **Contents: read and write** access to this repository. It is used to push the release commit/tag and publish release assets; keep the token out of ordinary repository variables and source files.
+
+Choose `patch`, `minor`, `major`, or an exact version such as `0.2.0-beta.1`. Versions follow SemVer and stay synchronized in the root, API, web and desktop manifests. `patch` makes backward-compatible fixes, `minor` adds backward-compatible features, and `major` marks breaking changes. An exact prerelease version publishes a GitHub prerelease without making it the latest stable release. The default is `patch`; use `0.1.0` explicitly to publish the current initial version.
+
+Add user-facing notes under **Unreleased** in [CHANGELOG.md](CHANGELOG.md) before running the workflow, or provide extra Markdown in its **notes** input. New releases move these notes into a dated version entry and append commit summaries since the previous reachable version tag. Conventional Commit subjects such as `feat:`, `fix:`, `docs:` and `feat!:` are grouped into change categories; other subjects appear under Changed. With no prior version tag, the first generated entry includes the repository's history. Existing-version retries keep the tagged notes unchanged.
+
+The workflow validates versions/notes, runs release-tooling tests, production typechecks and application tests, then commits `chore(release): vX.Y.Z` directly to the default branch and pushes an annotated tag atomically. It never force-pushes. Native runners build Windows x64 NSIS, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/Debian installers. All builds must succeed before publication. The release starts as a draft, receives all five installers plus `SHA256SUMS.txt`, and becomes public only after every upload succeeds. Artifact names include version, operating system and architecture. Installers are currently unsigned and macOS builds are not notarized.
+
+If a build/upload fails after tagging, rerun **Manual release** with the same **exact version** (for example `0.1.1`), rather than `patch`. It reuses the original tagged source, replaces matching draft assets and finishes publication. Published releases cannot be overwritten; use a new version for further changes. A concurrent default-branch change causes the atomic push to fail safely; rerun against the updated default branch.
+
+The same version/changelog tools are available locally on a clean checkout:
+
+```powershell
+pnpm release:prepare minor
+pnpm release:check v0.2.0
+pnpm release:notes v0.2.0
+```
+
+Local preparation edits manifests/changelog only; it does not commit, tag, push or publish. Normally let the manual workflow prepare the release so the tagged commit and installers match.
+
 ## English search and attribute matching
 
 The gallery defaults to **English forms & synonyms**, searching titles and filenames only. A bundled [winkNLP English lite model](https://winkjs.org/wink-nlp/language-models.html) handles word forms, irregular plurals/verb tenses and British/American spellings. A small built-in synonym dictionary adds equivalences such as `movie`/`film`, `holiday`/`vacation`, and `car`/`automobile`. For example, `child holiday` finds a title containing `Children on vacations`; `run film` finds `Running movies.pdf`. The filename filter uses the same matching but only checks filenames. This is a lightweight NLP model plus dictionary, rather than vector similarity or a generative LLM; synonym coverage is limited to the built-in groups and does not infer every possible meaning.

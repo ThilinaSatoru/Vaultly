@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "A local-first media library for comics, videos and PDF stories.",
+  "author": "Vaultly contributors",
+  "homepage": "https://github.com/ThilinaSatoru/Vaultly",
+  "repository": { "type": "git", "url": "https://github.com/ThilinaSatoru/Vaultly.git" },
   "main": "dist/main.cjs",
   "scripts": {
     "build:main": "node build.mjs",
@@ -50,6 +54,7 @@
   "build": {
     "appId": "com.vaultly.app",
     "productName": "Vaultly",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "icon": "build/icon.png",
     "directories": {
       "output": "release",
@@ -68,6 +73,6 @@
     ],
     "win": { "target": "nsis", "icon": "build/icon.ico" },
     "mac": { "target": "dmg", "category": "public.app-category.entertainment" },
-    "linux": { "target": ["AppImage", "deb"], "category": "AudioVideo" }
+    "linux": { "target": ["AppImage", "deb"], "category": "AudioVideo", "maintainer": "Vaultly contributors" }
   }
 }

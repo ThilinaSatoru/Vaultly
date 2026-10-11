@@ -1,0 +1,240 @@
+name: Manual release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "patch, minor, major, or an exact version (use the same exact version to retry a failed release)"
+        required: true
+        default: patch
+        type: string
+      notes:
+        description: "Optional extra Markdown change notes for a new version"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Version, notes and validation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.commit.outputs.sha }}
+    env:
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_NOTES: ${{ inputs.notes }}
+    steps:
+      - name: Require default branch and release token
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          test "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" || { echo "Run this workflow on $DEFAULT_BRANCH."; exit 1; }
+          test -n "$GH_TOKEN" || { echo "Add the repository Actions secret GH_TOKEN with Contents write permission."; exit 1; }
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          token: ${{ secrets.GH_TOKEN }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+      - name: Prepare synchronized versions and changelog
+        id: version
+        run: node scripts/release.mjs prepare "$RELEASE_VERSION"
+      - name: Select original source when retrying an existing tag
+        if: steps.version.outputs.existing == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: git checkout --detach "$RELEASE_TAG"
+      - name: Install pinned dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate the release version and notes
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: node scripts/release.mjs check "$RELEASE_TAG"
+      - name: Test release tooling
+        run: node --test scripts/*.test.mjs
+      - name: Typecheck production code
+        run: pnpm typecheck
+      - name: Run application tests
+        env:
+          VAULTLY_RUNTIME_DIR: ${{ runner.temp }}/vaultly-tests
+        run: pnpm -r --workspace-concurrency=1 exec vitest run --passWithNoTests --maxWorkers=1 --no-file-parallelism --testTimeout=30000
+      - name: Commit and tag the release on the default branch
+        id: commit
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          EXISTING_TAG: ${{ steps.version.outputs.existing }}
+        run: |
+          if [ "$EXISTING_TAG" != true ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package.json apps/api/package.json apps/web/package.json apps/desktop/package.json CHANGELOG.md
+            if ! git diff --cached --quiet; then
+              git commit -m "chore(release): $RELEASE_TAG"
+            fi
+            git tag -a "$RELEASE_TAG" -m "Vaultly $RELEASE_TAG"
+            # A concurrent default-branch update fails safely; no force pushes.
+            git push --atomic origin "HEAD:refs/heads/$DEFAULT_BRANCH" "refs/tags/$RELEASE_TAG"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: win
+            arch: x64
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
+          - os: macos-15
+            platform: mac
+            arch: arm64
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+    defaults:
+      run:
+        shell: bash
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      npm_config_user_agent: pnpm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      # Node must be installed before pnpm 11 on Intel macOS.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v6
+      - run: pnpm install --frozen-lockfile
+      - name: Validate packaged version
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: node scripts/release.mjs check "$RELEASE_TAG"
+      - name: Build desktop application and web assets
+        run: pnpm desktop:build
+      - name: Package installers without publishing
+        working-directory: apps/desktop
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+        run: node node_modules/electron-builder/cli.js "--$PLATFORM" "--$ARCH" --publish never
+      - name: Save release installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}-${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+
+  publish:
+    name: Publish installers and change notes
+    needs: [prepare, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: release-assets
+          merge-multiple: true
+      - name: Extract versioned change notes
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: node scripts/release.mjs notes "$RELEASE_TAG" > release-notes.md
+      - name: Publish complete release using GH_TOKEN
+        uses: actions/github-script@v8
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const fs = require('node:fs');
+            const crypto = require('node:crypto');
+            const path = require('node:path');
+            const { owner, repo } = context.repo;
+            const tag = process.env.RELEASE_TAG;
+            const version = process.env.RELEASE_VERSION;
+            const directory = 'release-assets';
+            const files = fs.readdirSync(directory).filter(name => /\.(exe|dmg|AppImage|deb)$/.test(name)).sort();
+            const expected = [
+              `Vaultly-${version}-win-x64.exe`,
+              `Vaultly-${version}-mac-x64.dmg`,
+              `Vaultly-${version}-mac-arm64.dmg`,
+              `Vaultly-${version}-linux-x64.AppImage`,
+              `Vaultly-${version}-linux-x64.deb`,
+            ];
+            if (files.length !== expected.length || expected.some(name => !files.includes(name))) {
+              throw new Error(`Incomplete release installers: ${files.join(', ')}`);
+            }
+            const checksums = [];
+            for (const name of files) {
+              const hash = crypto.createHash('sha256');
+              for await (const chunk of fs.createReadStream(path.join(directory, name))) hash.update(chunk);
+              checksums.push(`${hash.digest('hex')}  ${name}`);
+            }
+            fs.writeFileSync(path.join(directory, 'SHA256SUMS.txt'), checksums.join('\n') + '\n');
+            files.push('SHA256SUMS.txt');
+            const prerelease = version.includes('-');
+            const notes = fs.readFileSync('release-notes.md', 'utf8').trim();
+            const body = `${notes}\n\n### Downloads\n\nWindows: NSIS installer. macOS: choose x64 (Intel) or arm64 (Apple Silicon). Linux: AppImage or Debian package.\n\nInstallers are unsigned; macOS builds are not notarized. Verify downloads with SHA256SUMS.txt.\n`;
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              if (!release.draft) throw new Error(`${tag} is already published; use a new version instead of replacing it.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({
+                owner, repo, tag_name: tag, target_commitish: process.env.RELEASE_SHA,
+                name: `Vaultly ${tag}`, body, draft: true, prerelease,
+              })).data;
+            }
+            for (const name of files) {
+              const existing = release.assets.find(asset => asset.name === name);
+              if (existing) await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: existing.id });
+              const data = fs.readFileSync(path.join(directory, name));
+              await github.rest.repos.uploadReleaseAsset({
+                owner, repo, release_id: release.id, name, data,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': data.length },
+              });
+            }
+            await github.rest.repos.updateRelease({
+              owner, repo, release_id: release.id, body, draft: false, prerelease,
+              make_latest: prerelease ? 'false' : 'legacy',
+            });
+            core.notice(`Published Vaultly ${tag}`);
