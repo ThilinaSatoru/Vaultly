@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { VideoCoverEditor } from "./VideoCoverEditor";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
@@ -13,6 +14,8 @@ import { api, formatDuration, formatSize, type Category, type MediaDetail, type 
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 import { viewerNavigationItems, type GalleryVideoContext } from "./video-playlist";
+import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
+import { ActionMenu } from "./ActionMenu";
 
 const EbookReader = lazy(async () => ({ default: (await import("./EbookReader")).EbookReader }));
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
@@ -58,6 +61,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const comicStageRef = useRef<HTMLDivElement>(null);
   const [item, setItem] = useState<MediaDetail | null>(null);
   const [pages, setPages] = useState<string[]>([]);
+  const [appearance, setAppearance] = useReaderAppearance();
   const [comicContinuous, setComicContinuous] = useState(false);
   const [archive, setArchive] = useState(false);
   const [page, setPage] = useState(0);
@@ -110,7 +114,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     const focusViewer = () => viewerRef.current?.focus({ preventScroll: true });
     const frame = window.requestAnimationFrame(focusViewer);
     const keepFocusInside = (event: FocusEvent) => {
-      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .dialog-backdrop, .viewer-floating")) return;
+      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .select-menu, .context-menu, .dialog-backdrop, .viewer-floating")) return;
       if (viewerRef.current && event.target instanceof Node && !viewerRef.current.contains(event.target)) focusViewer();
     };
     document.addEventListener("focusin", keepFocusInside);
@@ -223,9 +227,10 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("[role='combobox'], .context-menu, .select-menu"))) return;
       if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".management-drawer, .management-editor-window, .management-dock")) return;
       if (event.key === "Tab" && viewerRef.current) {
-        const focusable = Array.from(viewerRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"));
+        const focusable = Array.from(viewerRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled):not([aria-hidden]), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"));
         if (!focusable.length) { event.preventDefault(); viewerRef.current.focus(); return; }
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
@@ -386,18 +391,19 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           )}
           {item?.media_type === "comic" && item.file_extension !== "pdf" && (
             pages.length > 0 ? (
-              <div className="comic-stage" ref={comicStageRef}>
+              <div className={`comic-stage page-tone-${appearance}`} ref={comicStageRef}>
                 <div className="comic-toolbar">
-                  {item.file_extension && <button type="button" onClick={() => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open file.")); }}>Open in desktop app</button>}
+                  <ReaderAppearance value={appearance} onChange={setAppearance} />
                   <label><input type="checkbox" checked={comicContinuous} onChange={(event) => { setComicContinuous(event.target.checked); changeComicFit("width"); }} /> Continuous view</label>
                   <ReaderAutoScroll scrollRef={comicScrollRef} enabled={comicContinuous || fit !== "screen"} contentKey={`${itemId}:${comicContinuous}:${page}`} />
                   <button type="button" onClick={previousComicPage} disabled={page === 0 && (!continuousReading || !previousItem)}><ChevronLeft size={18} /> Previous</button>
                   <span>Page {page + 1} / {pages.length}</span>
                   <button type="button" onClick={nextComicPage} disabled={page === pages.length - 1 && (!continuousReading || !nextItem)}>Next <ChevronRight size={18} /></button>
-                  <label><ZoomIn size={17} /><select value={fit} onChange={(event) => { changeComicFit(event.target.value as typeof fit); window.requestAnimationFrame(() => viewerRef.current?.focus({ preventScroll: true })); }}><option value="screen">Fit screen</option><option value="width">Fit width</option><option value="custom">{comicZoom}%</option></select></label>
+                  <label><ZoomIn size={17} /><Select aria-label="Comic page fit" value={fit} onChange={(event) => { changeComicFit(event.target.value as typeof fit); window.requestAnimationFrame(() => viewerRef.current?.focus({ preventScroll: true })); }}><option value="screen">Fit screen</option><option value="width">Fit width</option><option value="custom">{comicZoom}%</option></Select></label>
                   <button type="button" onClick={() => changeComicZoom(-25)} aria-label="Zoom out"><Minus size={17} /></button>
                   <button type="button" onClick={() => changeComicZoom(25)} aria-label="Zoom in"><Plus size={17} /></button>
                   <button type="button" onClick={toggleComicFullscreen} aria-label={comicFullscreen ? "Exit comic fullscreen" : "Open comic fullscreen"}>{comicFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+                  <ActionMenu label="Reader options" actions={[{ label: comicContinuous ? "Use single page view" : "Use continuous view", icon: <BookOpen size={16} />, onSelect: () => { setComicContinuous(!comicContinuous); changeComicFit(comicContinuous ? "screen" : "width"); } }, { label: "Reset zoom and fit", icon: <ZoomIn size={16} />, onSelect: () => changeComicFit("screen") }, { label: "Open in desktop reader", icon: <FolderOpen size={16} />, disabled: !item.file_extension, onSelect: () => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open file.")); } }]} />
                 </div>
                 <div
                   className="comic-page-scroll"

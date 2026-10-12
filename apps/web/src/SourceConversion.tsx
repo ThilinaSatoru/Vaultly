@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./media";
 import { LogView } from "./LogView";
@@ -62,13 +63,13 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
   };
   return <>
     <div className="source-operations">
-      <select aria-label="Scan or convert source" value={selection} onChange={(event) => setSelection(event.target.value)} disabled={busy || scanBusy || running}>
+      <Select aria-label="Scan or convert source" value={selection} onChange={(event) => setSelection(event.target.value)} disabled={busy || scanBusy || running}>
         <option value="scan-all" disabled={!scanEnabled}>Scan again with all (ML matching)</option>
         <option value="scan-normal" disabled={!scanEnabled}>Scan again (normal scan)</option>
         <option value="quick" disabled={!enabled}>Convert media (quick method only)</option>
         <option value="slow" disabled={!enabled}>Convert media (slow method)</option>
         <option value="both" disabled={!enabled}>Convert media (slow and quick both)</option>
-      </select>
+      </Select>
       <button className="secondary-button" type="button" disabled={busy || scanBusy || running || (selection.startsWith("scan-") ? !scanEnabled : !enabled)} onClick={() => void action()}>
         {busy || scanBusy ? "Working…" : "Run"}
       </button>

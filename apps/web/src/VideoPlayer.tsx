@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { trackVideoPosition } from "./video-position";
 import { VideoAudioTrack } from "./VideoAudioTrack";
 import { VideoSeekPreview } from "./VideoSeekPreview";
@@ -202,6 +203,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   const scheduleHide = (_isPlaying: boolean) => {
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
+      if (document.activeElement?.getAttribute?.("role") === "combobox" && document.activeElement.getAttribute("aria-expanded") === "true") { scheduleHide(_isPlaying); return; }
       if (containerRef.current?.querySelector(".video-controls")?.contains(document.activeElement)) containerRef.current.focus({ preventScroll: true });
       setShowControls(false); setOptionsOpen(false); setHoverSeek(null);
     }, 1500);
@@ -224,6 +226,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     seekPeekTimer.current = window.setTimeout(() => setActionFeedback(null), 750);
   };
   const hideControls = () => {
+    if (document.activeElement?.getAttribute?.("role") === "combobox" && document.activeElement.getAttribute("aria-expanded") === "true") return;
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     setShowControls(false); setOptionsOpen(false); setHoverSeek(null);
   };
@@ -471,16 +474,16 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
           </div>
           <div className="video-controls-spacer" />
           <div className="video-track-switchers">
-            <label className="video-track-switcher">Audio<select aria-label="Audio track" disabled={!audioTracks.length} value={audio} onChange={(event) => { const value = Number(event.target.value); setLaunchMessage(""); setAudio(value); const track = audioTracks.find((track) => track.index === value); if (track) writePreference("vaultly.video.audioTrack", JSON.stringify(trackPreference(track))); }}>
+            <label className="video-track-switcher">Audio<Select aria-label="Audio track" disabled={!audioTracks.length} value={audio} onChange={(event) => { const value = Number(event.target.value); setLaunchMessage(""); setAudio(value); const track = audioTracks.find((track) => track.index === value); if (track) writePreference("vaultly.video.audioTrack", JSON.stringify(trackPreference(track))); }}>
               {!audioTracks.length && <option value={-1}>Default</option>}{audioTracks.map((track) => <option key={track.index} value={track.index}>{track.title || `Track ${audioTracks.indexOf(track) + 1}`} · {track.language}</option>)}
-            </select></label>
-            <label className="video-track-switcher">CC<select aria-label="Subtitles" value={subtitle} onChange={(event) => { const value = Number(event.target.value); setSubtitle(value); if (value >= 0) writePreference("vaultly.video.subtitleTrack", JSON.stringify(trackPreference(subtitles[value]!))); }}><option value={-1}>{subtitles.length ? "Off" : "None"}</option>{subtitles.map((track) => <option key={track.index} value={track.index}>{track.title} · {track.language}</option>)}</select></label>
+            </Select></label>
+            <label className="video-track-switcher">CC<Select aria-label="Subtitles" value={subtitle} onChange={(event) => { const value = Number(event.target.value); setSubtitle(value); if (value >= 0) writePreference("vaultly.video.subtitleTrack", JSON.stringify(trackPreference(subtitles[value]!))); }}><option value={-1}>{subtitles.length ? "Off" : "None"}</option>{subtitles.map((track) => <option key={track.index} value={track.index}>{track.title} · {track.language}</option>)}</Select></label>
           </div>
           <button type="button" className="icon-button" aria-label="Player options" aria-expanded={optionsOpen} onClick={() => setOptionsOpen(!optionsOpen)}><Settings2 size={18} /></button>
           {optionsOpen && <div className="video-options" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); hideControls(); containerRef.current?.focus(); } }}>
-            <label>Speed<select aria-label="Playback speed" value={rate} onChange={(event) => { const value = Number(event.target.value); setRate(value); writePreference("vaultly.video.rate", value); }}>{[.25, .5, .75, 1, 1.25, 1.5, 2, 3].map((value) => <option key={value} value={value}>{value}×</option>)}</select></label>
+            <label>Speed<Select aria-label="Playback speed" value={rate} onChange={(event) => { const value = Number(event.target.value); setRate(value); writePreference("vaultly.video.rate", value); }}>{[.25, .5, .75, 1, 1.25, 1.5, 2, 3].map((value) => <option key={value} value={value}>{value}×</option>)}</Select></label>
             <label className="video-subtitle-size">Subtitle size <output>{subtitleSize}%</output><input type="range" aria-label="Subtitle size" min={50} max={200} step={5} value={subtitleSize} onChange={(event) => { const value = Number(event.target.value); setSubtitleSize(value); writePreference("vaultly.video.subtitleSize", value); }} /></label>
-            <label>Picture<select aria-label="Video fit" value={fit} onChange={(event) => { setFit(event.target.value); writePreference("vaultly.video.fit", event.target.value); }}><option value="contain">Fit</option><option value="cover">Fill</option></select></label>
+            <label>Picture<Select aria-label="Video fit" value={fit} onChange={(event) => { setFit(event.target.value); writePreference("vaultly.video.fit", event.target.value); }}><option value="contain">Fit</option><option value="cover">Fill</option></Select></label>
             <label>Repeat<input type="checkbox" aria-label="Repeat video" checked={loop} onChange={(event) => { setLoop(event.target.checked); writePreference("vaultly.video.loop", event.target.checked); }} /></label>
             <label>Seek previews<input type="checkbox" aria-label="Seek previews" checked={previews} onChange={(event) => { setPreviews(event.target.checked); writePreference("vaultly.video.seekPreviews", event.target.checked); }} /></label>
             <button type="button" className="video-hide-button" onClick={hideControls}>Hide controls now</button>

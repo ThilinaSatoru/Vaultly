@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { VaultProfiles } from "./VaultProfiles";
 import type { VaultProfiles as ProfileList } from "./vault-session";
 import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
@@ -37,6 +38,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings2,
   Tag as TagIcon,
   Trash2,
   X,
@@ -149,7 +151,7 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
 
         <form onSubmit={submit}>
           <label htmlFor="source-media-type">Media type</label>
-          <select id="source-media-type" required value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="" disabled>Choose a media type…</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></select>
+          <Select id="source-media-type" required value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="" disabled>Choose a media type…</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></Select>
           <label htmlFor="source-path">Folder path</label>
           <div className="path-control">
             <input
@@ -298,7 +300,7 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
 
       <SourceConversion sourceId={source.id} enabled={source.video_count > 0 && source.path_available && source.status !== "scanning" && Boolean(source.last_scanned_at)} scanEnabled={source.path_available && source.status !== "scanning"} scanBusy={working} expanded={expanded} onScan={rescan} onExpand={onToggle} onChanged={onChanged} onRunning={setConverting} />
       <div id={`source-details-${source.id}`} className="source-details" hidden={!expanded}>
-      <label>Media type <select aria-label={`Media type for ${source.name}`} value={source.media_type ?? "mixed"} disabled={working || converting || source.status === "scanning"} onChange={(event) => { const mediaType = event.target.value; setWorking(true); void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, mediaType }) }).then(onChanged).catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change media type.")).finally(() => setWorking(false)); }}><option value="mixed">Legacy mixed media</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></select></label>
+      <label>Media type <Select aria-label={`Media type for ${source.name}`} value={source.media_type ?? "mixed"} disabled={working || converting || source.status === "scanning"} onChange={(event) => { const mediaType = event.target.value; setWorking(true); void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, mediaType }) }).then(onChanged).catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change media type.")).finally(() => setWorking(false)); }}><option value="mixed">Legacy mixed media</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></Select></label>
       <div className="source-common-attributes">
         <div className="attribute-badges">{(source.tags ?? []).map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{(source.categories ?? []).map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>
         <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
@@ -634,6 +636,9 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
           <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics & pictures" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
           <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
           <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="E-books" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
+          <p>Workspace</p>
+          <button className={managementOpen && !managementMinimized && managementTab === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => openManagement("sources")}><HardDrive size={19} /> Sources</button>
+          <button className={managementOpen && !managementMinimized && managementTab === "settings" ? "nav-active" : "nav-link"} type="button" onClick={() => openManagement("settings")}><Settings2 size={19} /> Settings</button>
         </nav>
         <BackgroundStatus onOpen={openManagement} />
       </aside>

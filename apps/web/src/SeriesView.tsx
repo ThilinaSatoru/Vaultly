@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { vaultUrl, vaultFetch } from "./vault-session";
 import { useContext } from "react";
 import { NavigationContext, useNavigationField } from "./navigation";
@@ -301,7 +302,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
           {editing ? <form className="series-edit" onSubmit={updateDetails}>
             <input aria-label="Set title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
             <textarea aria-label="Set description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
-            <select aria-label="Preferred content type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></select>
+            <Select aria-label="Preferred content type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></Select>
             <div><button className="primary-button" type="submit" disabled={busy}>Save</button><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button></div>
           </form> : <><h1>{detail.title}</h1><p>{detail.description || "A set for related comics, videos, PDFs, and sequels."}</p></>}
           <div className="series-actions">
@@ -370,7 +371,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       <button className="icon-button dialog-close" type="button" onClick={() => setShowCreate(false)} aria-label="Close"><X size={19} /></button><div className="dialog-icon"><Layers3 size={24} /></div><h2>New series or set</h2><p className="dialog-intro">Group any mix of videos, comics, and PDFs without moving your files.</p>
       <form onSubmit={create}><label htmlFor="series-title">Title</label><input id="series-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required />
         <label htmlFor="series-description">Description</label><textarea id="series-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
-        <label htmlFor="series-type">Content type</label><select id="series-type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></select>
+        <label htmlFor="series-type">Content type</label><Select id="series-type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></Select>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>Create set</button></div></form>
     </section></div>}

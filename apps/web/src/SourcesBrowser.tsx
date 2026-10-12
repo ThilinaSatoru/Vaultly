@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 
@@ -39,9 +40,9 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
   return <section className="sources-browser" aria-label="Browse sources">
     <div className="source-filter-tools">
       <label className="source-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find folder or path…" aria-label="Search sources" /></label>
-      <select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter sources by status">
+      <Select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter sources by status">
         <option value="all">All statuses</option><option value="ready">Ready</option><option value="scanning">Scanning</option><option value="unavailable">Unavailable</option><option value="error">Errors</option><option value="idle">Not scanned</option>
-      </select>
+      </Select>
     </div>
     <div className="source-media-filters" role="group" aria-label="Filter sources by media type">
       {filters.map((filter) => <button key={filter.value} type="button" aria-pressed={media === filter.value} onClick={() => setMedia(filter.value)}>

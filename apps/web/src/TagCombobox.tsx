@@ -1,4 +1,4 @@
-import { Check, Plus, Search, SlidersHorizontal, X } from "lucide-react";
+import { Check, ChevronDown, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Tag } from "./media";
@@ -23,6 +23,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const managerKind = attributeKind === "tag" ? "tags" : attributeKind === "category" ? "categories" : attributeKind === "cast" || attributeKind === "artist" ? "people" : null;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
   const [placement, setPlacement] = useState<{ top: number; left: number; width: number; maxHeight: number; above: boolean } | null>(null);
@@ -33,6 +34,8 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const selected = tags.filter((tag) => selectedIds.includes(tag.id));
   const filtered = tags.filter((tag) => matchesAttribute(tag, query));
   const canCreate = Boolean(onCreate && query.trim() && !tags.some((tag) => tag.name.toLocaleLowerCase() === query.trim().toLocaleLowerCase()));
+  useEffect(() => { setActiveIndex(0); }, [query, tags]);
+  useEffect(() => { menuRef.current?.querySelector(`[data-option-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" }); }, [activeIndex]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -91,7 +94,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   return (
     <div className="tag-combobox" ref={rootRef}>
       <div className="tag-combobox-heading"><span className="tag-combobox-label">{label}</span>{manager && managerKind && <button type="button" className="attribute-manage-link" disabled={disabled} aria-label={`Manage ${managerKind === "people" ? "cast and artists" : managerKind}`} onClick={() => { setOpen(false); manager.open(managerKind); }}><SlidersHorizontal size={13} /> Manage</button>}</div>
-      <div className={`tag-combobox-control${open ? " is-open" : ""}`} onClick={() => { if (!disabled) inputRef.current?.focus(); }}>
+      <div className={`tag-combobox-control${open ? " is-open" : ""}${disabled ? " is-disabled" : ""}`} onClick={() => { if (!disabled) inputRef.current?.focus(); }}>
         {selected.map((tag) => (
           <span className="tag-badge-selected" key={tag.id}>
             <AttributeBadge kind={attributeKind} {...tag} disabled={disabled} onBrowse={() => setOpen(false)} />
@@ -106,14 +109,18 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
           aria-autocomplete="list"
           aria-controls={listId}
           aria-expanded={open}
+          aria-activedescendant={open && filtered[activeIndex] ? `${listId}-${activeIndex}` : undefined}
           value={query}
           onFocus={() => setOpen(true)}
           onChange={(event) => { setQuery(event.target.value); setOpen(true); setError(""); }}
           onKeyDown={(event) => {
+            if (["ArrowDown", "ArrowUp", "Enter", "Escape"].includes(event.key)) event.stopPropagation();
+            if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); setActiveIndex((value) => Math.max(0, Math.min(filtered.length - 1, value + (event.key === "ArrowDown" ? 1 : -1)))); }
+            if (event.key === "Tab") setOpen(false);
             if (event.key === "Escape") { event.stopPropagation(); setOpen(false); inputRef.current?.blur(); }
             if (event.key === "Enter") {
               event.preventDefault();
-              if (filtered.length > 0) toggle(filtered[0].id);
+              if (filtered.length > 0) toggle(filtered[Math.min(activeIndex, filtered.length - 1)].id);
               else if (canCreate) void create();
             }
             if (event.key === "Backspace" && !query && selectedIds.length > 0) toggle(selectedIds[selectedIds.length - 1]);
@@ -121,12 +128,13 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
           placeholder={selected.length ? "Add more…" : placeholder}
           disabled={disabled || creating}
         />
+        <button className="tag-combobox-toggle" type="button" disabled={disabled || creating} aria-label={`Show ${label.toLowerCase()} options`} aria-expanded={open} onClick={(event) => { event.stopPropagation(); if (open) setOpen(false); else { setOpen(true); inputRef.current?.focus(); } }}><ChevronDown size={15} /></button>
       </div>
       {open && !disabled && placement && createPortal(
         <div className="tag-combobox-menu" ref={menuRef} id={listId} role="listbox" aria-multiselectable="true" style={{ position: "fixed", top: placement.top, left: placement.left, right: "auto", width: placement.width, maxHeight: placement.maxHeight, transform: placement.above ? "translateY(-100%)" : undefined }}>
           {filtered.length === 0 && !canCreate && <p className="tag-combobox-empty">No matching options</p>}
-          {filtered.map((tag) => (
-            <button key={tag.id} type="button" role="option" aria-selected={selectedIds.includes(tag.id)} onClick={() => toggle(tag.id)}>
+          {filtered.map((tag, index) => (
+            <button key={tag.id} id={`${listId}-${index}`} data-option-index={index} className={activeIndex === index ? "is-active" : undefined} type="button" role="option" aria-selected={selectedIds.includes(tag.id)} onMouseDown={(event) => event.preventDefault()} onPointerMove={() => setActiveIndex(index)} onClick={() => toggle(tag.id)}>
               <span>{tag.name}</span>{selectedIds.includes(tag.id) && <Check size={16} />}
             </button>
           ))}

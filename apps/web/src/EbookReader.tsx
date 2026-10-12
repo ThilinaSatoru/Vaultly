@@ -4,6 +4,7 @@ import { api } from "./media";
 import { vaultUrl } from "./vault-session";
 import { ReaderAutoScroll } from "./ReaderAutoScroll";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
+import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 
 interface Chapter { html?: string; text?: string; base?: string }
 function safeBlocks(chapter: Chapter, itemId: number) {
@@ -33,6 +34,7 @@ function safeBlocks(chapter: Chapter, itemId: number) {
 }
 
 export function EbookReader({ itemId, extension }: { itemId: number; extension: string }) {
+  const [appearance, setAppearance] = useReaderAppearance();
   const [chapters, setChapters] = useState<Chapter[] | null>(null);
   const [error, setError] = useState("");
   const [fontSize, setFontSize] = useState(19);
@@ -49,5 +51,5 @@ export function EbookReader({ itemId, extension }: { itemId: number; extension: 
     api<{ chapters: Chapter[] }>(`/api/items/${itemId}/ebook`, { signal: controller.signal }).then((book) => setChapters(book.chapters)).catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not read this book."); });
     return () => controller.abort();
   }, [itemId, extension]);
-  return <div className="ebook-reader"><div className="ebook-toolbar"><ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(chapters)} contentKey={itemId} /><label>Text size <input type="range" aria-label="Book text size" min="14" max="36" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} /></label><button type="button" onClick={() => { void api(`/api/items/${itemId}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open book.")); }}><ExternalLink size={16} /> Open in desktop reader</button></div><div className="ebook-scroll" ref={scrollRef} tabIndex={0} style={{ fontSize }}>{!chapters && !error && <p><LoaderCircle className="spin" size={22} /> Opening book…</p>}{error && <p role="alert"><BookOpen size={24} /> {error}</p>}{content}</div></div>;
+  return <div className={`ebook-reader page-tone-${appearance}`}><div className="ebook-toolbar"><ReaderAppearance value={appearance} onChange={setAppearance} /><ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(chapters)} contentKey={itemId} /><label>Text size <input type="range" aria-label="Book text size" min="14" max="36" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} /></label><button type="button" onClick={() => { void api(`/api/items/${itemId}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open book.")); }}><ExternalLink size={16} /> Open in desktop reader</button></div><div className="ebook-scroll" ref={scrollRef} tabIndex={0} style={{ fontSize }}>{!chapters && !error && <p><LoaderCircle className="spin" size={22} /> Opening book…</p>}{error && <p role="alert"><BookOpen size={24} /> {error}</p>}{content}</div></div>;
 }

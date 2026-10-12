@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
 import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
@@ -8,6 +9,7 @@ import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./
 import { ReaderAutoScroll } from "./ReaderAutoScroll";
 import { PdfContinuousPage } from "./PdfContinuousPage";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
+import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -23,6 +25,7 @@ const storedZoom = () => {
 };
 
 export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: number; onPreviousItem?: () => void; onNextItem?: () => void }) {
+  const [appearance, setAppearance] = useReaderAppearance();
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [fitMode, setFitMode] = useState<FitMode>(storedFitMode);
@@ -144,7 +147,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
 
   useEffect(() => {
     if (!pdfDocument) return;
-    const onKey = (event: KeyboardEvent) => {
+    const onKey = (event: KeyboardEvent) => { if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("[role=combobox], .context-menu, .select-menu"))) return;
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
       if (targetElement?.closest(".viewer") && targetElement.closest(".viewer") !== scrollRef.current?.closest(".viewer")) return;
       if (targetElement?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
@@ -179,8 +182,9 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   };
 
   return (
-    <div className="pdf-reader">
+    <div className={`pdf-reader page-tone-${appearance}`}>
       <div className="pdf-toolbar">
+        <ReaderAppearance value={appearance} onChange={setAppearance} />
         <label><input type="checkbox" checked={continuous} onChange={(event) => { setContinuous(event.target.checked); setFitMode("width"); }} /> Continuous view</label>
         <ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(pdfDocument) && !rendering && (continuous || fitMode !== "page")} contentKey={`${itemId}:${continuous}:${pageNumber}`} />
         <button type="button" onClick={() => pageNumber > 1 ? setPageNumber(pageNumber - 1) : onPreviousItem?.()} disabled={!pdfDocument || (pageNumber <= 1 && !onPreviousItem)} aria-label="Previous page"><ChevronLeft size={18} /></button>
@@ -194,11 +198,11 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
         </label>
         <button type="button" onClick={() => pdfDocument && pageNumber < pdfDocument.numPages ? setPageNumber(pageNumber + 1) : onNextItem?.()} disabled={!pdfDocument || (pageNumber >= pdfDocument.numPages && !onNextItem)} aria-label="Next page"><ChevronRight size={18} /></button>
         <div className="pdf-toolbar-divider" />
-        <select aria-label="Page fit" value={fitMode} onChange={(event) => { setFitMode(event.target.value as FitMode); window.requestAnimationFrame(() => scrollRef.current?.focus({ preventScroll: true })); }}>
+        <Select aria-label="Page fit" value={fitMode} onChange={(event) => { setFitMode(event.target.value as FitMode); window.requestAnimationFrame(() => scrollRef.current?.focus({ preventScroll: true })); }}>
           <option value="page">Fit page</option>
           <option value="width">Fit width</option>
           <option value="custom">{zoomPercent}%</option>
-        </select>
+        </Select>
         <button type="button" onClick={() => changeZoom(-25)} aria-label="Zoom out"><Minus size={17} /></button>
         <button type="button" onClick={() => changeZoom(25)} aria-label="Zoom in"><Plus size={17} /></button>
       </div>

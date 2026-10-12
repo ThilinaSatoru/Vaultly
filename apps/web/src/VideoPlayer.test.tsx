@@ -23,6 +23,7 @@ vi.mock("./preferences", () => ({ readNumberPreference: (_key: string, fallback:
 import { writePreference } from "./preferences";
 import { api } from "./media";
 import { VideoPlayer } from "./VideoPlayer";
+import { Select } from "./Select";
 
 function find(node: ReactNode, predicate: (element: ReactElement<any>) => boolean): ReactElement<any> {
   if (isValidElement<any>(node)) {
@@ -80,9 +81,9 @@ test("a native playback error offers the original download and default player", 
 test("track switchers are directly on the toolbar and subtitle size persists from the menu", () => {
   const view = render();
   const toolbar = find(view, (node) => node.props.className === "video-controls-row");
-  expect(find(toolbar, (node) => node.props["aria-label"] === "Audio track").type).toBe("select");
+  expect(find(toolbar, (node) => node.props["aria-label"] === "Audio track").type).toBe(Select);
   const subtitles = find(toolbar, (node) => node.props["aria-label"] === "Subtitles");
-  expect(subtitles.type).toBe("select");
+  expect(subtitles.type).toBe(Select);
   subtitles.props.onChange({ target: { value: "-1" } });
   expect(writePreference).not.toHaveBeenCalled();
   find(view, (node) => node.props["aria-label"] === "Player options").props.onClick();

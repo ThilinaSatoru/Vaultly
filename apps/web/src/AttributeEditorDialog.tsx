@@ -40,7 +40,7 @@ export function AttributeEditorDialog({ title, children, onClose, busy = false, 
       event.stopPropagation();
       if (event.key === "Escape" && !busy) onClose();
       if (event.key === "Tab" && !management) {
-        const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex='0']") ?? []).filter((control) => control.getClientRects().length > 0);
+        const controls = Array.from(dialog.current?.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled):not([aria-hidden]), textarea:not(:disabled), a[href], [tabindex='0']") ?? []).filter((control) => control.getClientRects().length > 0);
         const first = controls[0], last = controls[controls.length - 1];
         if (!first) { event.preventDefault(); dialog.current?.focus(); }
         else if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last.focus(); }

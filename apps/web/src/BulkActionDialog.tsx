@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { LoaderCircle, X } from "lucide-react";
 import { useState } from "react";
 import { TagCombobox } from "./TagCombobox";
@@ -56,8 +57,8 @@ export function BulkActionDialog({ itemIds, mediaType, tags, categories, people,
       <h2>Bulk edit {itemIds.length} {itemIds.length === 1 ? "item" : "items"}</h2>
       <p className="dialog-intro">Add or remove the chosen values on every selected item. Existing unrelated metadata stays intact.</p>
       <div className="bulk-action-fields">
-        <label>Action<select value={mode} onChange={(event) => { setMode(event.target.value as "add" | "remove"); setValueIds([]); }}><option value="add">Add</option><option value="remove">Remove</option></select></label>
-        <label>Metadata<select value={field} onChange={(event) => { setField(event.target.value as BulkField); setValueIds([]); }}><option value="tags">Tags</option><option value="categories">Categories</option><option value="series">Series & sets</option><option value="people">{mediaType ? mediaType === "video" ? "Cast" : "Artists" : "Cast & artists"}</option></select></label>
+        <label>Action<Select value={mode} onChange={(event) => { setMode(event.target.value as "add" | "remove"); setValueIds([]); }}><option value="add">Add</option><option value="remove">Remove</option></Select></label>
+        <label>Metadata<Select value={field} onChange={(event) => { setField(event.target.value as BulkField); setValueIds([]); }}><option value="tags">Tags</option><option value="categories">Categories</option><option value="series">Series & sets</option><option value="people">{mediaType ? mediaType === "video" ? "Cast" : "Artists" : "Cast & artists"}</option></Select></label>
       </div>
       <TagCombobox attributeKind={field === "tags" ? "tag" : field === "categories" ? "category" : field === "people" ? mediaType === "video" ? "cast" : "artist" : "series"} label={`Choose ${fieldLabel.toLowerCase()}`} tags={options} selectedIds={valueIds} onChange={setValueIds} onCreate={onCreate} disabled={busy} placeholder={`Search ${fieldLabel.toLowerCase()}`} />
       {field === "people" && <p className="attribute-help">People are credited as Cast on videos and Artists on comics and stories.</p>}
