@@ -5,6 +5,12 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-12
+
+### Changed
+
+- UI Overhaul | Updated to flat near-black backgrounds, vivid lime/mint/violet accents, and stronger text contrast. Removed panel gradients and card shadows. (be0ca70)
+
 ## [0.1.2] - 2026-10-11
 
 ### Changed
