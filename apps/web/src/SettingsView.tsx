@@ -4,34 +4,13 @@ import { Download, Keyboard, RotateCcw, Settings2, Upload, X } from "lucide-reac
 import { type ChangeEvent, useRef, useState } from "react";
 import { api } from "./media";
 import { defaultBindings, eventBinding, formatBinding, readBindings, readBooleanPreference, readNumberPreference, type ShortcutAction, writeBindings, writePreference } from "./preferences";
-import { readTheme, saveTheme, type Theme } from "./theme";
+import { readPaletteMode, readTheme, savePaletteMode, saveTheme, type Theme } from "./theme";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
-
-const shortcutGroups: Array<{ title: string; actions: Array<{ action: ShortcutAction; label: string }> }> = [
-  { title: "Viewer and collections", actions: [
-    { action: "viewer.close", label: "Close viewer" }, { action: "series.previous", label: "Previous collection item" }, { action: "series.next", label: "Next collection item" },
-  ] },
-  { title: "Video player", actions: [
-    { action: "video.playPause", label: "Play / pause" }, { action: "video.fullscreen", label: "Toggle fullscreen" },
-    { action: "video.seekBack", label: "Seek backward" }, { action: "video.seekForward", label: "Seek forward" },
-    { action: "video.seekBackLarge", label: "Large seek backward" }, { action: "video.seekForwardLarge", label: "Large seek forward" },
-    { action: "video.volumeUp", label: "Volume up 5%" }, { action: "video.volumeDown", label: "Volume down 5%" }, { action: "video.mute", label: "Mute" },
-  ] },
-  { title: "PDF reader", actions: [
-    { action: "reader.previousPage", label: "Previous page" }, { action: "reader.nextPage", label: "Next page" },
-    { action: "reader.scrollUp", label: "Scroll up" }, { action: "reader.scrollDown", label: "Scroll down" },
-    { action: "reader.autoScroll", label: "Play / pause auto-scroll" },
-    { action: "reader.zoomIn", label: "Zoom in" }, { action: "reader.resetFit", label: "Reset to fit" },
-  ] },
-  { title: "Comic reader", actions: [
-    { action: "comic.zoomIn", label: "Zoom in" }, { action: "comic.zoomOut", label: "Zoom out" },
-    { action: "comic.fitWidth", label: "Fit to width" }, { action: "comic.resetFit", label: "Reset to fit screen" },
-    { action: "comic.fullscreen", label: "Toggle fullscreen" },
-  ] },
-];
+import { shortcutGroups } from "./shortcut-help";
 
 export function SettingsView() {
   const [theme, setTheme] = useState(readTheme);
+  const [paletteMode, setPaletteMode] = useState(readPaletteMode);
   const [appearance, setAppearance] = useReaderAppearance();
   const [bindings, setBindings] = useState(readBindings);
   const [capturing, setCapturing] = useState<ShortcutAction | null>(null);
@@ -106,7 +85,8 @@ export function SettingsView() {
   return <section className="settings-view">
     <div className="page-heading"><div><p className="eyebrow">Vaultly preferences</p><h1>Settings & controls</h1><p>Preferences stay on this computer and remain active until you change them.</p></div></div>
     <details className="settings-panel" open><summary className="settings-panel-heading"><Settings2 size={18} /><div><h2>Appearance</h2><p>A quieter workspace, made for your library.</p></div></summary>
-      <div className="theme-picker" role="group" aria-label="App theme">{([{ id: "midnight", label: "Midnight", description: "Black & electric lime" }, { id: "forest", label: "Forest", description: "Black & vivid mint" }, { id: "dusk", label: "Dusk", description: "Black & bright violet" }] as const).map((option) => <button type="button" key={option.id} className={`theme-swatch theme-${option.id}`} aria-pressed={theme === option.id} onClick={() => { setTheme(option.id as Theme); saveTheme(option.id); }}><span className="theme-preview"><i /><i /><i /></span><strong>{option.label}</strong><small>{option.description}</small></button>)}</div>
+      <label className="setting-toggle"><input type="checkbox" role="switch" checked={paletteMode === "dark"} onChange={(event) => { const next = event.target.checked ? "dark" : "light"; setPaletteMode(next); savePaletteMode(next); }} /><span><strong>Dark palette</strong><small>Deep charcoal surfaces with soft pastel accents. Turn off for the light palette.</small></span></label>
+      <div className="theme-picker" role="group" aria-label="App theme">{([{ id: "midnight", label: "Cloud", description: "Soft blue & pearl" }, { id: "forest", label: "Mint", description: "Sage & soft green" }, { id: "dusk", label: "Lavender", description: "Lilac & soft violet" }] as const).map((option) => <button type="button" key={option.id} className={`theme-swatch theme-${option.id}`} aria-pressed={theme === option.id} onClick={() => { setTheme(option.id as Theme); saveTheme(option.id); }}><span className="theme-preview"><i /><i /><i /></span><strong>{option.label}</strong><small>{option.description}</small></button>)}</div>
       <div className="setting-select"><span><strong>Reader page tone</strong><small>Soft dim reduces bright artwork. Night ink inverts document pages; original preserves their colors.</small></span><ReaderAppearance value={appearance} onChange={setAppearance} /></div>
     </details>
     <details className="settings-panel"><summary className="settings-panel-heading"><Download size={18} /><div><h2>Backup and migration</h2><p>Save or restore only the active vault and its preferences.</p></div></summary>

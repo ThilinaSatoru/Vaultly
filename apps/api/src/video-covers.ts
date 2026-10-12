@@ -3,19 +3,20 @@ import { readdir, realpath, readFile, stat } from "node:fs/promises";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 
 const imagePattern = /\.(?:jpe?g|png|webp|avif)$/i;
-export function coverCandidates(videoName: string, filenames: string[]) {
-  const stem = path.basename(videoName, path.extname(videoName)).toLowerCase();
+export function coverCandidates(mediaName: string, filenames: string[], isDirectory = false) {
+  const fullName = path.basename(mediaName).toLowerCase();
+  const stem = isDirectory ? fullName : path.basename(mediaName, path.extname(mediaName)).toLowerCase();
+  const suffixes = ["poster", "cover", "front", "front-cover", "front_cover", "fanart", "banner", "thumb", "thumbnail"];
+  const generic = ["poster", "cover", "folder", "front", "front-cover", "front_cover", "cover-front", "cover_front", "book", "movie", "series", "albumart", "albumartsmall", "fanart", "banner", "thumb", "thumbnail"];
   const rank = (name: string) => {
     const title = path.basename(name, path.extname(name)).toLowerCase();
     if (title === stem) return 0;
-    if ([`${stem}-poster`, `${stem}.poster`, `${stem}-cover`, `${stem}.cover`].includes(title)) return 1;
-    if (title === "poster") return 2;
-    if (title === "cover") return 3;
-    if (title === "folder") return 4;
-    return 10;
+    if ([stem, fullName].some((base) => suffixes.some((suffix) => ["-", ".", "_", " "].some((separator) => title === `${base}${separator}${suffix}`)))) return 1;
+    const index = generic.indexOf(title);
+    return index < 0 ? Infinity : index + 2;
   };
   const images = filenames.filter((name) => imagePattern.test(name));
-  return images.filter((name) => rank(name) < 10)
+  return images.filter((name) => Number.isFinite(rank(name)))
     .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
 }
 
@@ -41,24 +42,40 @@ export async function normalizeVideoCover(bytes: Buffer) {
   return { data: canvas.toBuffer("image/png"), width, height };
 }
 
-export async function findVideoCover(rootPath: string, videoPath: string, dimensions = new Map<string, { width: number; height: number }>()) {
+export async function findMediaCover(rootPath: string, mediaPath: string, dimensions = new Map<string, { width: number; height: number }>(), isDirectory = false, directories = new Map<string, string[]>()) {
   const root = await realpath(rootPath);
-  const directory = path.dirname(videoPath);
-  const entries = await readdir(directory, { withFileTypes: true });
-  const candidates = coverCandidates(path.basename(videoPath), entries.filter((entry) => entry.isFile()).map((entry) => entry.name));
-  for (const name of candidates) {
-    try {
-      const filename = await realpath(path.join(directory, name));
-      const relative = path.relative(root, filename);
-      if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
-      const info = await stat(filename);
-      if (info.size > 5 * 1024 * 1024) continue;
-      const signature = `${info.size}:${info.mtimeMs}`;
-      const cacheKey = `${filename}:${signature}`;
-      let size = dimensions.get(cacheKey);
-      if (!size) { const image = await decodeVideoCover(await readFile(filename)); size = { width: image.width, height: image.height }; dimensions.set(cacheKey, size); }
-      return { path: relative, ...size, signature };
-    } catch { /* Try the next recognised cover if an image is damaged. */ }
+  let directory = await realpath(isDirectory ? mediaPath : path.dirname(mediaPath));
+  while (true) {
+    const relativeDirectory = path.relative(root, directory);
+    if (relativeDirectory === ".." || relativeDirectory.startsWith(`..${path.sep}`) || path.isAbsolute(relativeDirectory)) break;
+    let filenames = directories.get(directory);
+    if (!filenames) {
+      const entries = await readdir(directory, { withFileTypes: true });
+      filenames = entries.filter((entry) => entry.isFile()).map((entry) => entry.name);
+      directories.set(directory, filenames);
+    }
+    const candidates = new Set([
+      ...coverCandidates(path.basename(mediaPath), filenames, isDirectory),
+      ...coverCandidates(path.basename(directory), filenames, true),
+    ]);
+    for (const name of candidates) {
+      try {
+        const filename = await realpath(path.join(directory, name));
+        const relative = path.relative(root, filename);
+        if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+        const info = await stat(filename);
+        if (info.size > 5 * 1024 * 1024) continue;
+        const signature = `${relative}:${info.size}:${info.mtimeMs}`;
+        const cacheKey = `${filename}:${signature}`;
+        let size = dimensions.get(cacheKey);
+        if (!size) { const image = await decodeVideoCover(await readFile(filename)); size = { width: image.width, height: image.height }; dimensions.set(cacheKey, size); }
+        return { path: relative, ...size, signature };
+      } catch { /* Try the next recognised cover if an image is damaged. */ }
+    }
+    if (!relativeDirectory) break;
+    directory = path.dirname(directory);
   }
   return null;
 }
+
+export const findVideoCover = findMediaCover;

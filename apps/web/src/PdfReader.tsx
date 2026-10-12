@@ -10,6 +10,7 @@ import { ReaderAutoScroll } from "./ReaderAutoScroll";
 import { PdfContinuousPage } from "./PdfContinuousPage";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
+import { ShortcutHelp } from "./ShortcutHelp";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -147,7 +148,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
 
   useEffect(() => {
     if (!pdfDocument) return;
-    const onKey = (event: KeyboardEvent) => { if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("[role=combobox], .context-menu, .select-menu"))) return;
+    const onKey = (event: KeyboardEvent) => { if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("[role=combobox], .context-menu, .select-menu, .shortcut-help-popover"))) return;
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
       if (targetElement?.closest(".viewer") && targetElement.closest(".viewer") !== scrollRef.current?.closest(".viewer")) return;
       if (targetElement?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
@@ -184,6 +185,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   return (
     <div className={`pdf-reader page-tone-${appearance}`}>
       <div className="pdf-toolbar">
+        <ShortcutHelp kind="pdf" />
         <ReaderAppearance value={appearance} onChange={setAppearance} />
         <label><input type="checkbox" checked={continuous} onChange={(event) => { setContinuous(event.target.checked); setFitMode("width"); }} /> Continuous view</label>
         <ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(pdfDocument) && !rendering && (continuous || fitMode !== "page")} contentKey={`${itemId}:${continuous}:${pageNumber}`} />

@@ -21,6 +21,7 @@ import {
   BookOpen,
   Check,
   ChevronRight,
+  CircleHelp,
   Clapperboard,
   Folder,
   FolderOpen,
@@ -48,6 +49,7 @@ import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
+import { HelpView } from "./HelpView";
 import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
 import { api, formatCount, type Category, type MediaItem, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
 
@@ -72,7 +74,7 @@ interface LibrarySource {
   path_error: string | null;
 }
 
-type Section = "home" | "all" | MediaType | "categories" | "tags" | "people" | "sources" | "settings";
+type Section = "home" | "all" | MediaType | "categories" | "tags" | "people" | "sources" | "settings" | "help";
 export type LibraryView = "browse" | "categories" | "favorites" | "series" | "circles";
 
 function LibraryNav({ active, view, icon, label, count, onBrowse, onView }: { active: boolean; view: LibraryView; icon: ReactNode; label: string; count?: string; onBrowse: () => void; onView: (view: LibraryView) => void }) {
@@ -534,7 +536,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
 
   const attributeOptions: SourceAttributeOptions = { tags, categories, onTagCreated: createTag, onCategoryCreated: createCategory };
   const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
-  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics & pictures", video: "Videos", story: "E-books", categories: "Categories", tags: "Tags", people: "Cast & artists", sources: "Sources", settings: "Settings" };
+  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics & pictures", video: "Videos", story: "E-books", categories: "Categories", tags: "Tags", people: "Cast & artists", sources: "Sources", settings: "Settings", help: "Help & shortcuts" };
   const selectSection = (nextSection: Section) => {
     navigation.reset({ section: nextSection, libraryView: "browse", search: "" }, sectionNames[nextSection]);
   };
@@ -639,6 +641,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
           <p>Workspace</p>
           <button className={managementOpen && !managementMinimized && managementTab === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => openManagement("sources")}><HardDrive size={19} /> Sources</button>
           <button className={managementOpen && !managementMinimized && managementTab === "settings" ? "nav-active" : "nav-link"} type="button" onClick={() => openManagement("settings")}><Settings2 size={19} /> Settings</button>
+          <button className={section === "help" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("help")}><CircleHelp size={19} /> Help</button>
         </nav>
         <BackgroundStatus onOpen={openManagement} />
       </aside>
@@ -665,7 +668,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
           </nav>
           {section === "home" ? (
             <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={addSource} />
-          ) : section === "categories" || section === "tags" || section === "people" || section === "sources" || section === "settings" ? null
+          ) : section === "help" ? <HelpView onOpenSources={() => openManagement("sources")} onOpenSettings={() => openManagement("settings")} />
+          : section === "categories" || section === "tags" || section === "people" || section === "sources" || section === "settings" ? null
           : libraryView === "series" || libraryView === "circles" ? (
             <SeriesView key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}-${selectedSeriesId ?? "list"}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
           ) : (

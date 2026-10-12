@@ -1,5 +1,5 @@
 import { Select } from "./Select";
-import { videoCardOrientation } from "./video-preferences";
+import { mediaCardOrientation, useArtworkOrientation } from "./artwork";
 import { vaultUrl } from "./vault-session";
 import { ArrowLeft, BookOpen, Check, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Search, SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -115,9 +115,10 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
 function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQueue }: { item: MediaItem; selected: boolean; queued: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void; onQueue: () => void }) {
   const cardRef = useRef<HTMLElement>(null);
   const [hovered, setHovered] = useState(false);
-  const [orientation, setOrientation] = useState(() => videoCardOrientation(item));
   const [thumbnailFailed, setThumbnailFailed] = useState(false);
   const [thumbnailAttempt, setThumbnailAttempt] = useState(0);
+  const thumbnail = `/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&cover=${encodeURIComponent(item.cover_signature ?? "")}&attempt=${thumbnailAttempt}`;
+  const { orientation, onLoad: artworkLoaded } = useArtworkOrientation(thumbnail, mediaCardOrientation(item));
   const [duration, setDuration] = useState(item.duration_seconds);
   const hoverTimer = useRef<number | null>(null);
   const retryTimer = useRef<number | null>(null);
@@ -146,7 +147,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
     return () => { active = false; };
   }, [item.id, item.media_type, duration]);
 
-  useEffect(() => { setThumbnailFailed(false); setThumbnailAttempt(0); setOrientation(videoCardOrientation(item)); }, [item.id, item.cover_signature, item.video_width, item.video_height]);
+  useEffect(() => { setThumbnailFailed(false); setThumbnailAttempt(0); }, [item.id, item.cover_signature, item.video_width, item.video_height]);
 
   const handleThumbnailError = () => {
     if (item.file_extension !== "pdf" || thumbnailAttempt >= 8) {
@@ -161,7 +162,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
   };
 
   return (
-    <article ref={cardRef} className={`media-card media-card-selectable${item.media_type === "video" ? ` media-card-video media-card-${orientation}` : ""}${selected ? " is-selected" : ""}`}>
+    <article ref={cardRef} className={`media-card media-card-selectable media-card-${orientation}${item.media_type === "video" ? " media-card-video" : ""}${selected ? " is-selected" : ""}`}>
       <div className="media-card-menu"><ActionMenu label={`Actions for ${item.title}`} contextTarget={cardRef} actions={[{ label: "Open media", icon: <BookOpen size={16} />, onSelect: onOpen }, { label: item.favorite ? "Remove from favorites" : "Add to favorites", icon: <Heart size={16} />, onSelect: onFavorite }, { label: selected ? "Deselect item" : "Select item", icon: <Check size={16} />, onSelect }, ...(item.media_type === "video" ? [{ label: queued ? "Already in playlist" : "Add to playlist", icon: <ListPlus size={16} />, onSelect: onQueue, disabled: queued }] : [])]} /></div>
       <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
       <button className={`media-card-favorite${item.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>
@@ -175,18 +176,18 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
       onBlur={stopPreview}
       aria-label={`Open ${item.title}`}
     >
-      <div className={`media-art media-art-${item.media_type}${item.media_type === "video" ? ` media-art-${orientation}` : ""}`}>
+      <div className={`media-art media-art-${item.media_type} media-art-${orientation}`}>
         {item.media_type === "comic" && !thumbnailFailed ? (
-          <img src={vaultUrl(`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&cover=${encodeURIComponent(item.cover_signature ?? "")}&attempt=${thumbnailAttempt}`)} alt="" loading="lazy" onError={handleThumbnailError} />
+          <img src={vaultUrl(thumbnail)} alt="" loading="lazy" onLoad={artworkLoaded} onError={handleThumbnailError} />
         ) : item.media_type === "video" && hovered ? (
           <VideoHoverPreview itemId={item.id} knownDuration={duration} />
         ) : (item.media_type === "video" || item.media_type === "story") && !thumbnailFailed ? (
           <img
-            src={vaultUrl(`/api/items/${item.id}/thumbnail?modified=${item.modified_at_ms}&cover=${encodeURIComponent(item.cover_signature ?? "")}&attempt=${thumbnailAttempt}`)}
+            src={vaultUrl(thumbnail)}
             alt=""
             loading="lazy"
             onError={handleThumbnailError}
-            onLoad={(event) => { if (item.media_type === "video") setOrientation(event.currentTarget.naturalHeight > event.currentTarget.naturalWidth ? "portrait" : "landscape"); }}
+            onLoad={artworkLoaded}
           />
         ) : (
           item.media_type === "video" ? <Clapperboard size={42} /> : item.media_type === "story" ? <BookOpen size={42} /> : <Image size={42} />
@@ -212,14 +213,12 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
 function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; onOpen: () => void; mediaType?: MediaType }) {
   const contentTypes = (["video", "comic", "story"] as const).filter((type) => series[`${type}_count`] > 0);
   const badgeType = mediaType ?? (contentTypes.length === 1 ? contentTypes[0] : contentTypes.length === 0 && series.preferred_type !== "mixed" ? series.preferred_type : undefined);
-  const fallback = series.cover_item_id === null || !series.cover_item_type ? null
-    : series.cover_item_type === "comic" && !/\.(pdf|cbz|zip)$/i.test(series.cover_item_path ?? "")
-      ? `/api/items/${series.cover_item_id}/pages/0`
-      : `/api/items/${series.cover_item_id}/thumbnail`;
+  const fallback = series.cover_item_id === null ? null : `/api/items/${series.cover_item_id}/thumbnail`;
   const cover = series.has_cover ? `/api/series/${series.id}/cover` : fallback;
-  return <article className={`media-card collection-media-card${badgeType === "video" ? " media-card-video" : ""}`}>
+  const { orientation, onLoad } = useArtworkOrientation(cover, badgeType === "video" ? "landscape" : "portrait");
+  return <article className={`media-card collection-media-card media-card-${orientation}${badgeType === "video" ? " media-card-video" : ""}`}>
     <button className="media-card-open" type="button" onClick={onOpen} aria-label={`Open collection ${series.title}`}>
-      <div className={`media-art collection-art${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={vaultUrl(cover)} alt="" loading="lazy" />}<span className="media-type-badge">Collection</span></div>
+      <div className={`media-art collection-art media-art-${orientation}${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={vaultUrl(cover)} alt="" loading="lazy" onLoad={onLoad} />}<span className="media-type-badge">Collection</span></div>
     </button>
     <div className="media-card-body"><h3 title={series.title}><button className="card-title-open" type="button" onClick={onOpen}>{series.title}</button></h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{series.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{series.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
   </article>;

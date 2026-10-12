@@ -41,6 +41,7 @@ function render() {
 }
 beforeEach(() => {
   vi.clearAllMocks(); hooks.states = []; hooks.refs = [];
+  video.querySelector.mockReset();
   vi.stubGlobal("window", { localStorage: { getItem: () => null } });
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -101,7 +102,7 @@ test.each([false, true])("controls hide after mouse inactivity even with focused
   window.setTimeout = globalThis.setTimeout as typeof window.setTimeout;
   window.clearTimeout = globalThis.clearTimeout as typeof window.clearTimeout;
   vi.stubGlobal("document", { activeElement: {}, fullscreenElement: fullscreen ? video : null });
-  video.querySelector.mockReturnValue({ contains: () => true });
+  video.querySelector.mockImplementation((selector) => selector === ".video-controls" ? { contains: () => true } : null);
   render().props.onMouseMove();
   expect(render().props.className).toContain("controls-visible");
   vi.advanceTimersByTime(1400);
@@ -111,4 +112,21 @@ test.each([false, true])("controls hide after mouse inactivity even with focused
   vi.advanceTimersByTime(100);
   expect(render().props.className).toContain("controls-hidden");
   expect(video.focus).toHaveBeenCalled();
+});
+
+test("shortcut help keeps controls visible until the guide closes", () => {
+  vi.useFakeTimers();
+  window.setTimeout = globalThis.setTimeout as typeof window.setTimeout;
+  window.clearTimeout = globalThis.clearTimeout as typeof window.clearTimeout;
+  vi.stubGlobal("document", { activeElement: {}, fullscreenElement: null });
+  let helpOpen = true;
+  video.querySelector.mockImplementation((selector) => selector === ".shortcut-help-popover" && helpOpen ? {} : null);
+  render().props.onMouseMove();
+  vi.advanceTimersByTime(4500);
+  expect(render().props.className).toContain("controls-visible");
+  render().props.onMouseLeave();
+  expect(render().props.className).toContain("controls-visible");
+  helpOpen = false;
+  vi.advanceTimersByTime(1500);
+  expect(render().props.className).toContain("controls-hidden");
 });

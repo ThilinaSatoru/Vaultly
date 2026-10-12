@@ -671,7 +671,7 @@ export async function registerMediaRoutes(
   app.put("/api/items/:id/cover", { bodyLimit: 7 * 1024 * 1024 }, async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
-    if (!item || item.media_type !== "video") return reply.code(404).send({ message: "Video not found." });
+    if (!item) return reply.code(404).send({ message: "Media not found." });
     const { image } = z.object({ image: z.string().max(7 * 1024 * 1024) }).parse(request.body);
     try {
       const cover = await normalizeVideoCover(Buffer.from(image, "base64"));
@@ -684,8 +684,9 @@ export async function registerMediaRoutes(
   app.delete("/api/items/:id/cover", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
-    if (!item || item.media_type !== "video") return reply.code(404).send();
-    const cover = await findVideoCover(item.root_path, await resolveItemPath(item));
+    if (!item) return reply.code(404).send();
+    const mediaPath = await resolveItemPath(item);
+    const cover = await findVideoCover(item.root_path, mediaPath, undefined, (await stat(mediaPath)).isDirectory());
     database.prepare("UPDATE media_items SET cover_data = NULL, cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ? WHERE id = ?")
       .run(cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null, id);
     return { cover_width: cover?.width ?? null, cover_height: cover?.height ?? null, custom_cover: 0, has_cover: cover ? 1 : 0, cover_signature: cover?.signature ?? null };
@@ -694,7 +695,7 @@ export async function registerMediaRoutes(
   app.get("/api/items/:id/thumbnail", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
-    if (item?.media_type === "video") {
+    if (item) {
       const cover = database.prepare("SELECT cover_data, cover_path FROM media_items WHERE id = ?").get(id) as { cover_data: Uint8Array | null; cover_path: string | null };
       if (cover.cover_data) return reply.type("image/png").header("Cache-Control", "private, no-cache").send(Buffer.from(cover.cover_data));
       if (cover.cover_path) {
@@ -702,7 +703,7 @@ export async function registerMediaRoutes(
           const root = await realpath(item.root_path);
           const filename = await realpath(path.resolve(root, cover.cover_path));
           if (withinRoot(root, filename) && imageExtensions.has(path.extname(filename).toLowerCase())) return sendLocalFile(reply, filename, undefined);
-        } catch { /* Fall back to a video frame when a folder cover disappeared. */ }
+        } catch { /* Use the normal thumbnail when a sidecar cover disappeared. */ }
       }
     }
     if (item?.media_type === "comic" && path.extname(item.relative_path).toLowerCase() !== ".pdf") {

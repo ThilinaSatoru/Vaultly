@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { ShortcutHelp } from "./ShortcutHelp";
 import { trackVideoPosition } from "./video-position";
 import { VideoAudioTrack } from "./VideoAudioTrack";
 import { VideoSeekPreview } from "./VideoSeekPreview";
@@ -203,6 +204,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   const scheduleHide = (_isPlaying: boolean) => {
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
+      if (containerRef.current?.querySelector(".shortcut-help-popover")) { scheduleHide(_isPlaying); return; }
       if (document.activeElement?.getAttribute?.("role") === "combobox" && document.activeElement.getAttribute("aria-expanded") === "true") { scheduleHide(_isPlaying); return; }
       if (containerRef.current?.querySelector(".video-controls")?.contains(document.activeElement)) containerRef.current.focus({ preventScroll: true });
       setShowControls(false); setOptionsOpen(false); setHoverSeek(null);
@@ -226,6 +228,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     seekPeekTimer.current = window.setTimeout(() => setActionFeedback(null), 750);
   };
   const hideControls = () => {
+    if (containerRef.current?.querySelector(".shortcut-help-popover")) return;
     if (document.activeElement?.getAttribute?.("role") === "combobox" && document.activeElement.getAttribute("aria-expanded") === "true") return;
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     setShowControls(false); setOptionsOpen(false); setHoverSeek(null);
@@ -299,6 +302,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
+      if (event.defaultPrevented || target?.closest(".shortcut-help-popover")) return;
       if (compact && !containerRef.current?.contains(document.activeElement)) return;
       if (target?.closest(".viewer") && target.closest(".viewer") !== containerRef.current?.closest(".viewer")) return;
       if (target?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
@@ -407,6 +411,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
         </button>}
         {launchMessage && <small>{launchMessage}</small>}
         <a className="secondary-button" href={src} download>Download original</a>
+        <ShortcutHelp kind="video" />
       </div>}
 
       {!unsupported && launchMessage && <div className="video-launch-status" role="status">{launchMessage}</div>}
@@ -473,6 +478,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
             />
           </div>
           <div className="video-controls-spacer" />
+          <ShortcutHelp kind="video" />
           <div className="video-track-switchers">
             <label className="video-track-switcher">Audio<Select aria-label="Audio track" disabled={!audioTracks.length} value={audio} onChange={(event) => { const value = Number(event.target.value); setLaunchMessage(""); setAudio(value); const track = audioTracks.find((track) => track.index === value); if (track) writePreference("vaultly.video.audioTrack", JSON.stringify(trackPreference(track))); }}>
               {!audioTracks.length && <option value={-1}>Default</option>}{audioTracks.map((track) => <option key={track.index} value={track.index}>{track.title || `Track ${audioTracks.indexOf(track) + 1}`} · {track.language}</option>)}

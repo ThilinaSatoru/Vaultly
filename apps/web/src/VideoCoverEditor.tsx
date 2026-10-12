@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { api, type MediaItem } from "./media";
 import { vaultUrl } from "./vault-session";
 
-export function VideoCoverEditor({ item, onChanged }: { item: MediaItem; onChanged: (changes: Partial<MediaItem>) => void }) {
+export function MediaCoverEditor({ item, onChanged }: { item: MediaItem; onChanged: (changes: Partial<MediaItem>) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -23,12 +23,12 @@ export function VideoCoverEditor({ item, onChanged }: { item: MediaItem; onChang
     finally { setBusy(false); }
   };
   return <div className="video-cover-editor">
-    <h3>Video cover</h3>
+    <h3>Cover image</h3>
     {item.has_cover ? <img alt={`${item.title} cover`} src={vaultUrl(`/api/items/${item.id}/thumbnail?cover=${encodeURIComponent(item.cover_signature ?? "")}`)} /> : null}
     <div><button className="secondary-button" type="button" disabled={busy} onClick={() => input.current?.click()}>{busy ? "Saving…" : "Choose cover"}</button>
-      {Boolean(item.custom_cover) && <button className="secondary-button" type="button" disabled={busy} onClick={() => void save()}>Use folder cover / video frame</button>}</div>
-    <input ref={input} type="file" className="visually-hidden" accept="image/png,image/jpeg,image/webp,image/avif" aria-label="Video cover image" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void save(file); }} />
-    <p className="detail-hint">Folder covers: matching video name, poster, cover or folder. Covers and thumbnails fit the same card size without cropping.</p>
+      {Boolean(item.custom_cover) && <button className="secondary-button" type="button" disabled={busy} onClick={() => void save()}>Use scanned cover / thumbnail</button>}</div>
+    <input ref={input} type="file" className="visually-hidden" accept="image/png,image/jpeg,image/webp,image/avif" aria-label="Cover image" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void save(file); }} />
+    <p className="detail-hint">Scans look for cover, poster, folder, front, fanart, banner or a matching media name in PNG, JPEG, WebP or AVIF. Gallery cards follow the cover’s portrait or landscape shape.</p>
     {error && <p role="alert">{error}</p>}
   </div>;
 }

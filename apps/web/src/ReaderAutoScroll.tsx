@@ -14,7 +14,7 @@ export function ReaderAutoScroll({ scrollRef, enabled = true, contentKey }: { sc
       if (event.defaultPrevented || !matchesShortcut(event, "reader.autoScroll")) return;
       const target = event.target as HTMLElement | null;
       if (typeof target?.closest === "function") {
-        if (target.closest("input, textarea, select, button, a, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
+        if (target.closest("input, textarea, select, button, a, .shortcut-help-popover, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
         const viewer = target.closest(".viewer");
         if (viewer && viewer !== scrollRef.current?.closest(".viewer")) return;
       }

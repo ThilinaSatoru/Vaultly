@@ -1,5 +1,5 @@
 import { Select } from "./Select";
-import { VideoCoverEditor } from "./VideoCoverEditor";
+import { MediaCoverEditor } from "./VideoCoverEditor";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
 import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
@@ -16,6 +16,7 @@ import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 import { viewerNavigationItems, type GalleryVideoContext } from "./video-playlist";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 import { ActionMenu } from "./ActionMenu";
+import { ShortcutHelp } from "./ShortcutHelp";
 
 const EbookReader = lazy(async () => ({ default: (await import("./EbookReader")).EbookReader }));
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
@@ -227,7 +228,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("[role='combobox'], .context-menu, .select-menu"))) return;
+      if (event.defaultPrevented || (event.target instanceof HTMLElement && event.target.closest("[role='combobox'], .context-menu, .select-menu, .shortcut-help-popover"))) return;
       if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".management-drawer, .management-editor-window, .management-dock")) return;
       if (event.key === "Tab" && viewerRef.current) {
         const focusable = Array.from(viewerRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled):not([aria-hidden]), textarea:not(:disabled), [tabindex]:not([tabindex='-1'])"));
@@ -372,7 +373,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
             {manager && <button type="button" onClick={() => manager.open("tags")} title="Manage attributes without leaving this media" aria-label="Manage attributes"><SlidersHorizontal size={17} /><span className="viewer-manage-label">Attributes</span></button>}
             {item && <button className={item.favorite ? "is-favorite" : ""} type="button" onClick={() => void toggleFavorite()} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} title={item.favorite ? "Remove from favorites" : "Add to favorites"}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>}
             {navigationItems && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file"><ChevronLeft size={17} /> Previous</button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file">Next <ChevronRight size={17} /></button></>}
-            {item?.media_type === "video" && <button type="button" onClick={onToggleFloating} title={floating ? "Return to full player" : "Keep playing while browsing"}>{floating ? <Maximize2 size={17} /> : <PictureInPicture2 size={17} />}{floating ? "Full view" : "Float"}</button>}
+            {item?.media_type === "video" && <button className="viewer-float-toggle" type="button" onClick={onToggleFloating} title={floating ? "Return to full player" : "Keep playing while browsing"} aria-pressed={floating}>{floating ? <Maximize2 size={18} /> : <PictureInPicture2 size={18} />}{floating ? "Full view" : "Float"}</button>}
             <button className="icon-button" type="button" onClick={onClose} aria-label="Close viewer"><X size={21} /></button>
           </div>
         </header>
@@ -403,6 +404,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                   <button type="button" onClick={() => changeComicZoom(-25)} aria-label="Zoom out"><Minus size={17} /></button>
                   <button type="button" onClick={() => changeComicZoom(25)} aria-label="Zoom in"><Plus size={17} /></button>
                   <button type="button" onClick={toggleComicFullscreen} aria-label={comicFullscreen ? "Exit comic fullscreen" : "Open comic fullscreen"}>{comicFullscreen ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+                  <ShortcutHelp kind="comic" />
                   <ActionMenu label="Reader options" actions={[{ label: comicContinuous ? "Use single page view" : "Use continuous view", icon: <BookOpen size={16} />, onSelect: () => { setComicContinuous(!comicContinuous); changeComicFit(comicContinuous ? "screen" : "width"); } }, { label: "Reset zoom and fit", icon: <ZoomIn size={16} />, onSelect: () => changeComicFit("screen") }, { label: "Open in desktop reader", icon: <FolderOpen size={16} />, disabled: !item.file_extension, onSelect: () => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open file.")); } }]} />
                 </div>
                 <div
@@ -415,7 +417,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                 </div>
               </div>
             ) : archive ? (
-              <div className="archive-state"><BookOpen size={40} /><h2>Open in your comic reader</h2><p>This archive format uses your associated desktop reader.</p><button className="secondary-button" type="button" onClick={() => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open comic.")); }}>Open in desktop reader</button><a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download>Open the archive <Download size={17} /></a></div>
+              <div className="archive-state"><BookOpen size={40} /><h2>Open in your comic reader</h2><p>This archive format uses your associated desktop reader.</p><ShortcutHelp kind="comic" /><button className="secondary-button" type="button" onClick={() => { void api(`/api/items/${item.id}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open comic.")); }}>Open in desktop reader</button><a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download>Open the archive <Download size={17} /></a></div>
             ) : <div className="viewer-loading"><LoaderCircle className="spin" size={28} /> Loading pages…</div>
           )}
         </div>
@@ -452,7 +454,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
               <button className="secondary-button" type="button" onClick={() => setShowRename(true)} disabled={saving}><Pencil size={16} /> Rename title</button>
               <button className="secondary-button" type="button" onClick={() => void revealInExplorer()}><FolderOpen size={16} /> Open located folder</button>
               {item.media_type !== "comic" && <a className="secondary-button" href={vaultUrl(`/api/items/${item.id}/file`)} download><Download size={16} /> Download file</a>}
-              {item.media_type === "video" && <VideoCoverEditor key={item.id} item={item} onChanged={(changes) => { setItem((current) => current?.id === item.id ? { ...current, ...changes } : current); onChanged(); }} />}
+              <MediaCoverEditor key={item.id} item={item} onChanged={(changes) => { setItem((current) => current?.id === item.id ? { ...current, ...changes } : current); onChanged(); }} />
               <h3>Categories</h3>
               {item.source_attributes && (item.source_attributes.tags.length > 0 || item.source_attributes.categories.length > 0) && <div className="attribute-help">Common source attributes:<div className="attribute-badges">{item.source_attributes.tags.map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{item.source_attributes.categories.map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>These apply to every file; edit them in Sources.</div>}
               <TagCombobox attributeKind="category" label="Item categories" tags={categories} selectedIds={item.category_ids} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={saving} placeholder="Search or create categories" />

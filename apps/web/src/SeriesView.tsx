@@ -7,6 +7,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from "react"
 import { TagCombobox } from "./TagCombobox";
 import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { CircleView } from "./CircleView";
+import { useArtworkOrientation } from "./artwork";
 import { api, type Category, type CircleSummary, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 import type { LibraryView } from "./App";
 
@@ -24,7 +25,7 @@ interface SeriesViewProps {
   onOpenItem: (id: number, context: SeriesViewerContext) => void;
 }
 
-function PreviewImage({ src, retry }: { src: string; retry: boolean }) {
+function PreviewImage({ src, retry, onLoad }: { src: string; retry: boolean; onLoad?: React.ReactEventHandler<HTMLImageElement> }) {
   const [attempt, setAttempt] = useState(0);
   const [hidden, setHidden] = useState(false);
   const timer = useRef<number | null>(null);
@@ -35,7 +36,7 @@ function PreviewImage({ src, retry }: { src: string; retry: boolean }) {
   }, [src]);
   if (hidden) return null;
   const url = retry ? `${src}${src.includes("?") ? "&" : "?"}attempt=${attempt}` : src;
-  return <img key={url} src={vaultUrl(url)} alt="" onError={() => {
+  return <img key={url} src={vaultUrl(url)} alt="" onLoad={onLoad} onError={() => {
     if (!retry || attempt >= 8) { setHidden(true); return; }
     setHidden(true);
     timer.current = window.setTimeout(() => { timer.current = null; setAttempt((value) => value + 1); setHidden(false); }, 3000);
@@ -46,14 +47,14 @@ function Cover({ series, version = 0, mediaType }: { series: SeriesSummary; vers
   const fallback = series.cover_item_id === null || !series.cover_item_type ? null
     : itemArtwork(series.cover_item_id, series.cover_item_type, series.cover_item_path ?? "");
   const cover = series.has_cover ? `/api/series/${series.id}/cover?v=${version}` : fallback;
-  return <div className={`series-cover${(mediaType ?? setType(series)) === "video" ? " series-cover-video" : ""}`}>
+  const { orientation, onLoad } = useArtworkOrientation(cover, (mediaType ?? setType(series)) === "video" ? "landscape" : "portrait");
+  return <div className={`series-cover series-cover-${orientation}`}>
     <Layers3 size={48} />
-    {cover && <PreviewImage src={cover} retry={!series.has_cover && series.cover_item_type === "story"} />}
+    {cover && <PreviewImage src={cover} retry={!series.has_cover && series.cover_item_type === "story"} onLoad={onLoad} />}
   </div>;
 }
 
-function itemArtwork(id: number, type: MediaType, relativePath: string) {
-  if (type === "comic" && !/\.(pdf|cbz|zip)$/i.test(relativePath)) return `/api/items/${id}/pages/0`;
+function itemArtwork(id: number, _type: MediaType, _relativePath: string) {
   return `/api/items/${id}/thumbnail`;
 }
 

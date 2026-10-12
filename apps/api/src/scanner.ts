@@ -1,4 +1,4 @@
-import { findVideoCover } from "./video-covers.js";
+import { findMediaCover } from "./video-covers.js";
 import { ebookExtensions, pictureExtensions, folderCollection, type SourceMediaType } from "./source-media.js";
 import { withAttributePatterns } from "./attribute-routes.js";
 import { isSourceConverting } from "./source-conversion.js";
@@ -622,15 +622,15 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         }));
         for (const result of results) if (result.status === "rejected") throw result.reason;
       }
-      // Cover images are rescanned even when the video itself has not changed.
+      // Sidecar and folder covers are rescanned even when the media is unchanged.
       const coverDimensions = new Map<string, { width: number; height: number }>();
+      const coverDirectories = new Map<string, string[]>();
       const saveCover = database.prepare(`UPDATE media_items SET cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ? WHERE id = ? AND cover_data IS NULL`);
       for (const { id, item } of indexedItems) {
-        if (item.mediaType !== "video") continue;
         signal.throwIfAborted();
         const custom = database.prepare("SELECT cover_data IS NOT NULL AS custom FROM media_items WHERE id = ?").get(id) as { custom: number };
         if (custom.custom) continue;
-        const cover = await findVideoCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions);
+        const cover = await findMediaCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions, !item.fileExtension, coverDirectories);
         signal.throwIfAborted();
         saveCover.run(cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null, id);
       }
