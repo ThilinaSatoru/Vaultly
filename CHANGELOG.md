@@ -5,6 +5,13 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-12
+
+### Changed
+
+- build fix (ec3ed85)
+- Updated the UI with soft pastel colors, gentle gradients, and rounded elements that blend with the background. + Help Page, Key Bindings (1a70df8)
+
 ## [0.2.2] - 2026-10-12
 
 ### Changed
