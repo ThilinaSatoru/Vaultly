@@ -1,5 +1,5 @@
-import { app, BrowserWindow, dialog, net, shell } from "electron";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { app, BrowserWindow, dialog, ipcMain, net, shell } from "electron";
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -9,6 +9,36 @@ let mainWindow: BrowserWindow | null = null;
 let closeServer: (() => Promise<void>) | null = null;
 let serverAddress: string | null = null;
 let shuttingDown = false;
+let preferences: Record<string, string> | undefined;
+function readPreferences() {
+  if (!preferences) {
+    const file = path.join(app.getPath("userData"), "preferences.json");
+    const stored = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+    preferences = Object.fromEntries(Object.entries(stored).filter(([key, value]) => key.startsWith("vaultly.") && typeof value === "string")) as Record<string, string>;
+  }
+  return preferences;
+}
+function trustedPreferencesSender(event: Electron.IpcMainEvent) {
+  return event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame;
+}
+ipcMain.on("preferences:read", (event) => {
+  event.returnValue = trustedPreferencesSender(event) ? readPreferences() : {};
+});
+ipcMain.on("preferences:write", (event, key, value) => {
+  if (!trustedPreferencesSender(event) || typeof key !== "string" || !key.startsWith("vaultly.") || (value !== null && typeof value !== "string")) {
+    event.returnValue = "Invalid preference request.";
+    return;
+  }
+  try {
+    const next = { ...readPreferences() };
+    if (value === null) delete next[key]; else next[key] = value;
+    const file = path.join(app.getPath("userData"), "preferences.json");
+    writeFileSync(`${file}.tmp`, JSON.stringify(next), "utf8");
+    renameSync(`${file}.tmp`, file);
+    preferences = next;
+    event.returnValue = null;
+  } catch (error) { event.returnValue = String(error); }
+});
 function recordCrash(details: string) {
   const snapshot = `RSS=${Math.round(process.memoryUsage().rss / 1024 ** 2)}MB free=${Math.round(os.freemem() / 1024 ** 2)}MB`;
   try { appendFileSync(path.join(app.getPath("userData"), "crash-error.log"), `${new Date().toISOString()} ${snapshot}\n${details}\n`, "utf8"); }
@@ -60,7 +90,7 @@ async function createWindow() {
     backgroundColor: "#111315",
     icon: path.join(currentDirectory, process.platform === "win32" ? "icon.ico" : "icon.png"),
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(currentDirectory, "preload.cjs") },
   });
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());

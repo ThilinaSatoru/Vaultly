@@ -1,6 +1,6 @@
 import { vaultStorage } from "./vault-session";
 
-export type Theme = "midnight" | "forest" | "dusk";
+export type Theme = "midnight" | "forest" | "dusk" | "rose" | "ocean" | "amber";
 export type PaletteMode = "light" | "dark";
 
 export function readPaletteMode(): PaletteMode {
@@ -9,7 +9,7 @@ export function readPaletteMode(): PaletteMode {
 
 export function readTheme(): Theme {
   const value = vaultStorage.getItem("vaultly.theme");
-  return value === "forest" || value === "dusk" ? value : "midnight";
+  return value === "forest" || value === "dusk" || value === "rose" || value === "ocean" || value === "amber" ? value : "midnight";
 }
 export function applyTheme(theme = readTheme(), palette = readPaletteMode()) {
   document.documentElement.dataset.theme = theme;
