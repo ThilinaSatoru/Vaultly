@@ -625,14 +625,17 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
       // Sidecar and folder covers are rescanned even when the media is unchanged.
       const coverDimensions = new Map<string, { width: number; height: number }>();
       const coverDirectories = new Map<string, string[]>();
-      const saveCover = database.prepare(`UPDATE media_items SET cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ? WHERE id = ? AND cover_data IS NULL`);
+      const saveCover = database.prepare(`UPDATE media_items SET cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ?
+        WHERE id = ? AND cover_data IS NULL
+          AND (cover_path IS NOT ? OR cover_width IS NOT ? OR cover_height IS NOT ? OR cover_signature IS NOT ?)`);
       for (const { id, item } of indexedItems) {
         signal.throwIfAborted();
         const custom = database.prepare("SELECT cover_data IS NOT NULL AS custom FROM media_items WHERE id = ?").get(id) as { custom: number };
         if (custom.custom) continue;
         const cover = await findMediaCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions, !item.fileExtension, coverDirectories);
         signal.throwIfAborted();
-        saveCover.run(cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null, id);
+        const coverValues = [cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null] as const;
+        saveCover.run(...coverValues, id, ...coverValues);
       }
       if (options.generateThumbnails || options.regenerateThumbnails) {
         signal.throwIfAborted();

@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
+import { createCanvas } from "@napi-rs/canvas";
 import { mkdir, mkdtemp, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -66,17 +67,36 @@ test("unchanged rescans avoid media writes while removed and returning files upd
   let sourceId = 0;
   try {
     await writeFile(path.join(root, "Stable.pdf"), "stable fixture");
-    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)").run(token, root, root).lastInsertRowid);
+    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path, media_type) VALUES (?, ?, ?, 'ebooks')").run(token, root, root).lastInsertRowid);
     await scanSource(sourceId, root);
     const item = database.prepare("SELECT id FROM media_items WHERE source_id = ?").get(sourceId) as { id: number };
     database.exec(`CREATE TEMP TABLE scan_writes(id INTEGER);
       CREATE TEMP TRIGGER count_scan_writes AFTER UPDATE ON media_items BEGIN INSERT INTO scan_writes VALUES (new.id); END;`);
     await scanSource(sourceId, root);
     expect(database.prepare("SELECT * FROM scan_writes").all()).toEqual([]);
-    await rename(path.join(root, "Stable.pdf"), path.join(root, "Stable.txt"));
+    const coverPath = path.join(root, "Stable-cover.png");
+    for (const [width, height] of [[120, 180], [180, 120]]) {
+      await writeFile(coverPath, createCanvas(width, height).toBuffer("image/png"));
+      await scanSource(sourceId, root);
+      expect(database.prepare("SELECT cover_path, cover_width, cover_height FROM media_items WHERE id = ?").get(item.id))
+        .toEqual({ cover_path: "Stable-cover.png", cover_width: width, cover_height: height });
+      expect(database.prepare("SELECT * FROM scan_writes").all()).toEqual([{ id: item.id }]);
+      database.exec("DELETE FROM scan_writes");
+      await scanSource(sourceId, root);
+      expect(database.prepare("SELECT * FROM scan_writes").all()).toEqual([]);
+    }
+    await rm(coverPath);
+    await scanSource(sourceId, root);
+    expect(database.prepare("SELECT cover_path, cover_width, cover_height, cover_signature FROM media_items WHERE id = ?").get(item.id))
+      .toEqual({ cover_path: null, cover_width: null, cover_height: null, cover_signature: null });
+    expect(database.prepare("SELECT * FROM scan_writes").all()).toEqual([{ id: item.id }]);
+    database.exec("DELETE FROM scan_writes");
+    await scanSource(sourceId, root);
+    expect(database.prepare("SELECT * FROM scan_writes").all()).toEqual([]);
+    await rename(path.join(root, "Stable.pdf"), path.join(root, "Stable.unsupported"));
     await scanSource(sourceId, root);
     expect(database.prepare("SELECT indexed, available FROM media_items WHERE id = ?").get(item.id)).toEqual({ indexed: 0, available: 0 });
-    await rename(path.join(root, "Stable.txt"), path.join(root, "Stable.pdf"));
+    await rename(path.join(root, "Stable.unsupported"), path.join(root, "Stable.pdf"));
     await scanSource(sourceId, root);
     expect(database.prepare("SELECT indexed, available FROM media_items WHERE id = ?").get(item.id)).toEqual({ indexed: 1, available: 1 });
     database.exec("INSERT INTO media_search(media_search, rank) VALUES ('integrity-check', 1)");
