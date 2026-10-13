@@ -15,6 +15,7 @@ import { TagsView } from "./TagsView";
 import { CategoriesView } from "./CategoriesView";
 import { PeopleView } from "./PeopleView";
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
+import { Select } from "./Select";
 
 function find(node: ReactNode, predicate: (element: ReactElement<any>) => boolean): ReactElement<any> | undefined {
   if (isValidElement<any>(node)) return predicate(node) ? node : find((node.props as { children?: ReactNode }).children, predicate);
@@ -67,4 +68,44 @@ test.each(["tags", "categories", "people"] as const)("%s renders at most 100 of 
   node = render(component);
   expect(rows()).toHaveLength(1);
   expect(find(node, (element) => element.props["aria-label"] === "Attribute pages")).toBeUndefined();
+});
+
+test("people credit filters combine with exact-first search and reset when reopened in another library", () => {
+  const people = [
+    { id: 1, name: "Alice extended", cast_count: 1, artist_count: 0 },
+    { id: 2, name: "Alice", cast_count: 1, artist_count: 0 },
+    { id: 3, name: "Painter", cast_count: 0, artist_count: 2 },
+    { id: 4, name: "Unused", cast_count: 0, artist_count: 0 },
+  ];
+  let creditFilterRequest = { filter: "cast" as "cast" | "artist", revision: 1 };
+  const component = () => PeopleView({ people, onChanged: vi.fn(), creditFilterRequest });
+  const collect = (node: ReactNode): ReactElement<any>[] => isValidElement<any>(node)
+    ? [node, ...collect(node.props.children)] : Array.isArray(node) ? node.flatMap(collect) : [];
+  const names = (node: ReactNode) => collect(node).filter((element) => element.props.className === "person-profile-name")
+    .map((element) => element.props.children.props.name);
+  let node = render(component);
+  expect(names(node)).toEqual(["Alice", "Alice extended"]);
+  find(node, (element) => element.props["aria-label"] === "Search attributes")!.props.onChange({ target: { value: "Alice" } });
+  node = render(component);
+  expect(names(node)[0]).toBe("Alice");
+  find(node, (element) => element.type === Select && element.props["aria-label"] === "Filter people by credits")!.props.onChange({ target: { value: "all" } });
+  node = render(component);
+  find(node, (element) => element.props["aria-label"] === "Search attributes")!.props.onChange({ target: { value: "" } });
+  node = render(component);
+  expect(names(node)).toHaveLength(4);
+  creditFilterRequest = { filter: "artist", revision: 2 };
+  render(component); // React retries a render after applying a new opening context.
+  node = render(component);
+  expect(names(node)).toEqual(["Painter"]);
+});
+
+test("an exact attribute match reaches the first page even after 150 partial matches", () => {
+  const tags = [...Array.from({ length: 150 }, (_, id) => ({ id: id + 1, name: `A sample ${id}` })), { id: 200, name: "Sample" }];
+  const component = () => TagsView({ tags, onChanged: vi.fn() });
+  let node = render(component);
+  find(node, (element) => element.props["aria-label"] === "Search attributes")!.props.onChange({ target: { value: "sample" } });
+  node = render(component);
+  const row = find(node, (element) => element.props.className === "category-row")!;
+  const name = find(row, (element) => element.props.name === "Sample");
+  expect(name).toBeDefined();
 });

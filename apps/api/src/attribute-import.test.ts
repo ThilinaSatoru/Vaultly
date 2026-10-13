@@ -3,6 +3,49 @@ import { expect, test, vi } from "vitest";
 import { database } from "./database.js";
 import { buildVaultlyServer } from "./server.js";
 
+test.each(["people", "tags", "categories"] as const)("%s existing-only import updates matching names and never creates unknown names", async (kind) => {
+  const token = randomUUID();
+  const name = `Ångström ${token}`;
+  const alias = `Import alias ${token}`;
+  const junk = `Unknown ${token}`;
+  const app = await buildVaultlyServer();
+  app.log.level = "silent";
+  const source = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)").run(token, token, token).lastInsertRowid);
+  const id = Number(database.prepare(`INSERT INTO ${kind}(name) VALUES (?)`).run(name).lastInsertRowid);
+  const item = Number(database.prepare("INSERT INTO media_items(source_id, media_type, title, filename, file_extension, relative_path) VALUES (?, 'video', ?, ?, 'mp4', ?)").run(source, alias, `${alias}.mp4`, `${alias}.mp4`).lastInsertRowid);
+  if (kind === "people") database.prepare("UPDATE people SET gender = 'female', country = 'Old country', profile_image = 'local-image' WHERE id = ?").run(id);
+  const upload = (records: unknown[]) => app.inject({ method: "POST", url: `/api/attributes/${kind}/import?existingOnly=true`, payload: { records } });
+  try {
+    const result = await upload([
+      { name: name.toUpperCase(), patterns: [alias], ...(kind === "people" ? { country: "New country", avatar_url: "https://example.com/photo.jpg" } : {}) },
+      { name: junk },
+      { name, patterns: ["Ignored duplicate"] },
+    ]);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json()).toMatchObject({ total: 3, created: 0, updated: 1, skipped: 2, indexed: 1 });
+    expect(database.prepare(`SELECT id FROM ${kind} WHERE name = ?`).get(junk)).toBeUndefined();
+    expect(database.prepare(`SELECT name FROM ${kind} WHERE id = ?`).get(id)).toEqual({ name });
+    expect((await app.inject(`/api/attributes/${kind}/${id}/patterns`)).json()).toEqual({ patterns: [alias] });
+    if (kind === "people") {
+      expect(database.prepare("SELECT gender, country, avatar_url, profile_image FROM people WHERE id = ?").get(id)).toEqual({ gender: "female", country: "New country", avatar_url: "https://example.com/photo.jpg", profile_image: "local-image" });
+      expect((await upload([{ name, country: null }])).json()).toMatchObject({ created: 0, updated: 1 });
+      expect(database.prepare("SELECT country, gender FROM people WHERE id = ?").get(id)).toEqual({ country: null, gender: "female" });
+      expect((await app.inject(`/api/attributes/${kind}/${id}/patterns`)).json()).toEqual({ patterns: [alias] });
+    }
+    // An alias is not an existing name; a file with no name matches changes nothing.
+    const skipped = await upload([{ name: alias }, { name: junk }]);
+    expect(skipped.json()).toEqual({ total: 2, created: 0, updated: 0, indexed: 0, skipped: 2 });
+    expect(database.prepare(`SELECT id FROM ${kind} WHERE name = ?`).get(alias)).toBeUndefined();
+    expect(database.prepare(`SELECT id FROM ${kind} WHERE name = ?`).get(junk)).toBeUndefined();
+    const assignment = kind === "people" ? "person_id" : kind === "tags" ? "tag_id" : "category_id";
+    expect(database.prepare(`SELECT item_id FROM item_${kind} WHERE ${assignment} = ?`).all(id)).toEqual([{ item_id: item }]);
+  } finally {
+    database.prepare("DELETE FROM sources WHERE id = ?").run(source);
+    database.prepare(`DELETE FROM ${kind} WHERE id = ?`).run(id);
+    await app.close();
+  }
+});
+
 test("prepared JSON imports skip duplicate people, validate atomically, index credits, and survive backups without downloads", async () => {
   const token = randomUUID();
   const name = `Import Person ${token}`;

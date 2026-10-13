@@ -6,13 +6,15 @@ import { AttributeBadge } from "./AttributeBadge";
 import { PersonImageDialog } from "./PersonImageDialog";
 import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { PeopleMatchingRepair } from "./PeopleMatchingRepair";
+import { Select } from "./Select";
+import { filterPeopleCredits, type PeopleCreditFilter } from "./people-filter";
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, formatCount, type Person } from "./media";
 
 const usageCount = (person: Person) => (person.cast_count ?? 0) + (person.artist_count ?? 0) + (person.set_count ?? 0);
 
-export function PeopleView({ people, onChanged, allowBrowse = true }: { people: Person[]; onChanged: () => void; allowBrowse?: boolean }) {
+export function PeopleView({ people, onChanged, allowBrowse = true, creditFilterRequest }: { people: Person[]; onChanged: () => void; allowBrowse?: boolean; creditFilterRequest?: { filter: PeopleCreditFilter; revision: number } }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
@@ -20,7 +22,14 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
   const [renaming, setRenaming] = useState<Person | null>(null);
   const [patternEntry, setPatternEntry] = useState<Person | null>(null);
   const [imagePerson, setImagePerson] = useState<Person | null>(null);
-  const { filtered, visible, tools, pagination } = useAttributeList(people, usageCount);
+  const [creditFilter, setCreditFilter] = useState<PeopleCreditFilter>(creditFilterRequest?.filter ?? "all");
+  const [previousRequest, setPreviousRequest] = useState(creditFilterRequest);
+  if (creditFilterRequest !== previousRequest) {
+    setPreviousRequest(creditFilterRequest);
+    setCreditFilter(creditFilterRequest?.filter ?? "all");
+  }
+  const creditPeople = filterPeopleCredits(people, creditFilter);
+  const { filtered, visible, tools, pagination } = useAttributeList(creditPeople, usageCount, creditFilter);
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -58,6 +67,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
     <AttributeBulkUpload kind="people" onChanged={onChanged} />
     <div className="people-cleanup"><button className="secondary-button" type="button" disabled={working} onClick={() => void cleanup()}><Trash2 size={16} /> Remove unused people</button><p>Remove records with no media or set assignments. Credits on offline sources are preserved.</p>{cleanupMessage && <p role="status">{cleanupMessage}</p>}</div>
     <PeopleMatchingRepair onChanged={onChanged} />
+    <label className="people-credit-filter"><span>People linked as</span><Select aria-label="Filter people by credits" value={creditFilter} onChange={(event) => setCreditFilter(event.target.value as PeopleCreditFilter)}><option value="all">All people</option><option value="cast">Cast · videos</option><option value="artist">Artists · comics & stories</option></Select></label>
     {tools}
     <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : visible.map((person) =>
       <article className="person-profile-card" key={person.id}>
@@ -66,7 +76,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
           <span className="person-profile-photo-edit"><Pencil size={14} />{person.profile_image ? "Edit photo" : "Add photo"}</span>
         </button>
         <div className="person-profile-details">
-          <h2 className="person-profile-name">{allowBrowse ? <AttributeBadge kind="artist" {...person} /> : <span>{person.name}</span>}</h2>
+          <h2 className="person-profile-name">{allowBrowse ? <AttributeBadge kind={creditFilter === "cast" ? "cast" : "artist"} {...person} mediaType={creditFilter === "cast" ? "video" : undefined} /> : <span>{person.name}</span>}</h2>
           <div className="person-profile-credits"><span><strong>{formatCount(person.cast_count ?? 0)}</strong> cast credits</span><span><strong>{formatCount(person.artist_count ?? 0)}</strong> artist credits</span></div>
           {!!person.set_count && <p>{formatCount(person.set_count)} shared set assignments</p>}
           <AttributePatternSummary patterns={person.patterns} />

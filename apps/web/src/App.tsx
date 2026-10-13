@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { defaultPeopleCreditFilter, type PeopleCreditFilter } from "./people-filter";
 import { VaultProfiles } from "./VaultProfiles";
 import type { VaultProfiles as ProfileList } from "./vault-session";
 import {
@@ -937,7 +938,16 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     [],
   );
   const [attributeRevision, setAttributeRevision] = useState(0);
-  const openManagement = useCallback((kind: ManagementTab) => {
+  const [peopleFilterRequest, setPeopleFilterRequest] = useState<{ filter: PeopleCreditFilter; revision: number }>({ filter: "all", revision: 0 });
+  const openManagement = useCallback((kind: ManagementTab, mediaType?: MediaType) => {
+    if (kind === "people") {
+      const fields = navigation.current.current.fields;
+      const section = fields.section;
+      const libraryType = mediaType ?? (section === "video" || section === "comic" || section === "story" ? section
+        : section === "all" ? fields[`gallery.all.${fields.libraryView ?? "browse"}.selectedType`] : undefined);
+      const filter = defaultPeopleCreditFilter(libraryType === "video" || libraryType === "comic" || libraryType === "story" ? libraryType : undefined);
+      setPeopleFilterRequest((current) => ({ filter, revision: current.revision + 1 }));
+    }
     setManagementTab(kind);
     setManagementVisited((current) =>
       current.includes(kind) ? current : [...current, kind],
@@ -946,7 +956,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     setManagementOpen(true);
   }, []);
   const openAttributeManager = useCallback(
-    (kind: AttributeManagerKind) => openManagement(kind),
+    (kind: AttributeManagerKind, mediaType?: MediaType) => openManagement(kind, mediaType),
     [openManagement],
   );
   const addSource = () => {
@@ -1828,7 +1838,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 />
               ),
               people: (
-                <PeopleView people={people} onChanged={attributesChanged} />
+                <PeopleView people={people} onChanged={attributesChanged} creditFilterRequest={peopleFilterRequest} />
               ),
               sources: sourcesPanel,
               settings: <SettingsView />,

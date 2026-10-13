@@ -95,6 +95,25 @@ it("bulk upload rejects malformed files and allows retrying", async () => {
   expect(onChanged).not.toHaveBeenCalled();
 });
 
+it.each(["people", "tags", "categories"] as const)("%s bulk upload sends existing-only mode for every chunk and reports skips", async (kind) => {
+  vi.mocked(api).mockResolvedValue({ created: 0, updated: 1, indexed: 0, skipped: 2 });
+  const onChanged = vi.fn();
+  const component = () => AttributeBulkUpload({ kind, onChanged });
+  let node = render(component);
+  find(node, (element) => element.type === "input" && element.props.type === "checkbox").props.onChange({ target: { checked: true } });
+  node = render(component);
+  const records = Array.from({ length: 10001 }, (_, id) => ({ name: `Record ${id}` }));
+  find(node, (element) => element.type === "input" && element.props.type === "file").props.onChange({ target: { files: [new Blob([JSON.stringify(records)])], value: "dump.json" } });
+  node = render(component);
+  expect(find(node, (element) => element.type === "input" && element.props.type === "checkbox").props.disabled).toBe(true);
+  await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  expect(api).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api).mock.calls.every(([url]) => url === `/api/attributes/${kind}/import?existingOnly=true`)).toBe(true);
+  node = render(component);
+  expect(find(node, (element) => element.props.role === "status").props.children).toBe("0 created, 2 updated, 4 records skipped, 0 new media assignments.");
+  expect(find(node, (element) => element.type === "input" && element.props.type === "checkbox").props.disabled).toBe(false);
+});
+
 it("refreshes committed attributes after a later chunk fails and allows retrying", async () => {
   vi.mocked(api).mockResolvedValueOnce({ created: 10000, updated: 0, indexed: 3 }).mockRejectedValueOnce(new Error("Invalid record"));
   const onChanged = vi.fn();

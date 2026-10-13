@@ -23,7 +23,7 @@ test("advanced searches preserve filters, rank titles, and synchronize the word 
       const response = await app.inject(`/api/items?source=${source}&q=${encodeURIComponent(q)}${extra}`);
       expect(response.statusCode, response.body).toBe(200); return response.json();
     };
-    expect((await search("holiday", "&sort=relevance")).items.map((item: { id: number }) => item.id)).toEqual([title, path]);
+    expect((await search("holiday", "&sort=relevance")).items.map((item: { id: number }) => item.id)).toEqual([path, title]);
     expect((await search('"summer trip"')).total).toBe(1);
     expect((await search('"trip summer"')).total).toBe(0);
     expect((await search("holidya", "&searchMode=fuzzy&sort=relevance")).total).toBe(2);

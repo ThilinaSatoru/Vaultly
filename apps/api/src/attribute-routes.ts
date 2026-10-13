@@ -68,6 +68,7 @@ export function withAttributePatterns<T extends { id: number }>(kind: keyof type
 export async function registerAttributeRoutes(app: FastifyInstance) {
   app.post("/api/attributes/:kind/import", { bodyLimit: 20 * 1024 * 1024 }, async (request) => {
     const { kind } = z.object({ kind: z.enum(["tags", "categories", "people"]) }).parse(request.params);
+    const { existingOnly } = z.object({ existingOnly: z.enum(["true", "false"]).default("false").transform((value) => value === "true") }).parse(request.query);
     const httpUrl = z.string().url().max(4096).refine((value) => /^https?:\/\//i.test(value), "Use an HTTP or HTTPS URL.");
     const record = z.object({
       name: z.string().trim().min(1).max(kind === "people" ? 100 : 80),
@@ -93,6 +94,8 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
     try {
       const ids = new Set<number>();
       const find = database.prepare(`SELECT id FROM ${kind} WHERE name = ? COLLATE NOCASE`);
+      const existingNames = existingOnly ? new Map((database.prepare(`SELECT id, name FROM ${kind}`).all() as Array<{ id: number; name: string }>).map((entry) => [entry.name.toLowerCase(), entry.id])) : null;
+      const seenNames = new Set<string>();
       const peopleNames = kind === "people" ? new Set((database.prepare("SELECT name FROM people").all() as Array<{ name: string }>).map((person) => person.name.toLowerCase())) : null;
       const create = database.prepare(`INSERT INTO ${kind}(name) VALUES (?)`);
       const clearPatterns = database.prepare(`DELETE FROM ${table} WHERE ${column} = ?`);
@@ -102,8 +105,11 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
       const updatePerson = kind === "people" ? database.prepare(`UPDATE people SET ${fields.map((field) => `${field} = CASE WHEN ? THEN ? ELSE ${field} END`).join(", ")}, scraped_at = CASE WHEN ? THEN ? ELSE scraped_at END WHERE id = ?`) : null;
       for (const entry of entries) {
         const key = entry.name.toLowerCase();
-        if (peopleNames?.has(key)) { skipped++; continue; }
-        const existing = find.get(entry.name) as { id: number } | undefined;
+        if (existingOnly) {
+          if (!existingNames?.has(key) || seenNames.has(key)) { skipped++; continue; }
+          seenNames.add(key);
+        } else if (peopleNames?.has(key)) { skipped++; continue; }
+        const existing = existingOnly ? { id: existingNames!.get(key)! } : find.get(entry.name) as { id: number } | undefined;
         const id = existing?.id ?? Number(create.run(entry.name).lastInsertRowid);
         if (existing) updated++; else created++;
         peopleNames?.add(key);

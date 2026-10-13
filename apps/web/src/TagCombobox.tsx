@@ -2,7 +2,7 @@ import { Check, ChevronDown, Plus, Search, SlidersHorizontal, X } from "lucide-r
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Tag } from "./media";
-import { AttributeBadge } from "./AttributeBadge";
+import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import type { AttributeKind } from "./attribute-navigation";
 import { searchAttributes } from "./attribute-search";
 import { AttributeManagerContext } from "./attribute-manager";
@@ -20,6 +20,7 @@ interface TagComboboxProps {
 
 export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disabled, attributeKind, placeholder = "Search tags" }: TagComboboxProps) {
   const manager = useContext(AttributeManagerContext);
+  const mediaType = useContext(AttributeMediaContext);
   const managerKind = attributeKind === "tag" ? "tags" : attributeKind === "category" ? "categories" : attributeKind === "cast" || attributeKind === "artist" ? "people" : null;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -30,6 +31,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const rootRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const restoreInputFocus = useRef(false);
   const listId = useRef(`tag-list-${Math.random().toString(36).slice(2)}`).current;
   const selectedSet = new Set(selectedIds);
   const selected = tags.filter((tag) => selectedSet.has(tag.id));
@@ -38,6 +40,11 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const canCreate = Boolean(onCreate && query.trim() && !tags.some((tag) => tag.name.toLocaleLowerCase() === query.trim().toLocaleLowerCase()));
   useEffect(() => { setActiveIndex(0); }, [query, tags]);
   useEffect(() => { menuRef.current?.querySelector(`[data-option-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" }); }, [activeIndex]);
+  useEffect(() => {
+    if (!restoreInputFocus.current || disabled || creating) return;
+    restoreInputFocus.current = false;
+    inputRef.current?.focus({ preventScroll: true });
+  }, [disabled, creating]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -85,7 +92,8 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
       const tag = await onCreate(query.trim());
       onChange([...selectedIds, tag.id]);
       setQuery("");
-      inputRef.current?.focus();
+      // Wait for React to enable the input after creation and any assignment save.
+      restoreInputFocus.current = true;
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Could not create tag.");
     } finally {
@@ -95,8 +103,8 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
 
   return (
     <div className="tag-combobox" ref={rootRef}>
-      <div className="tag-combobox-heading"><span className="tag-combobox-label">{label}</span>{manager && managerKind && <button type="button" className="attribute-manage-link" disabled={disabled} aria-label={`Manage ${managerKind === "people" ? "cast and artists" : managerKind}`} onClick={() => { setOpen(false); manager.open(managerKind); }}><SlidersHorizontal size={13} /> Manage</button>}</div>
-      <div className={`tag-combobox-control${open ? " is-open" : ""}${disabled ? " is-disabled" : ""}`} onClick={() => { if (!disabled) inputRef.current?.focus(); }}>
+      <div className="tag-combobox-heading"><span className="tag-combobox-label">{label}</span>{manager && managerKind && <button type="button" className="attribute-manage-link" disabled={disabled} aria-label={`Manage ${managerKind === "people" ? "cast and artists" : managerKind}`} onClick={() => { setOpen(false); manager.open(managerKind, mediaType ?? (attributeKind === "cast" ? "video" : undefined)); }}><SlidersHorizontal size={13} /> Manage</button>}</div>
+      <div className={`tag-combobox-control${open ? " is-open" : ""}${disabled ? " is-disabled" : ""}`} onClick={() => { if (!disabled && !creating) { setOpen(true); inputRef.current?.focus(); } }}>
         {selected.map((tag) => (
           <span className="tag-badge-selected" key={tag.id}>
             <AttributeBadge kind={attributeKind} {...tag} disabled={disabled} onBrowse={() => setOpen(false)} />

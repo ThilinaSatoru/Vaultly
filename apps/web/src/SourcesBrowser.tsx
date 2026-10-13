@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { rankSearchResults } from "./search-relevance";
 import { Fragment, type ReactNode, useMemo, useState } from "react";
 import { Folder, HardDrive, Search } from "lucide-react";
 
@@ -60,7 +61,7 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
   const [category, setCategory] = useState("all");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const visible = useMemo(() => sources.filter((source) => matchesSource(source, media, status, query) && (category === "all" || sourceMediaGroup(source) === category)), [sources, media, status, query, category]);
+  const visible = useMemo(() => rankSearchResults(sources.filter((source) => matchesSource(source, media, status, query) && (category === "all" || sourceMediaGroup(source) === category)), query, (source) => [source.name, source.root_path]), [sources, media, status, query, category]);
   const tree = useMemo(() => buildSourceTree(visible), [visible]);
   const categories = [...new Set(sources.map(sourceMediaGroup))].sort();
   const renderBranch = (node: SourceTreeNode<T>, depth: number): ReactNode => <li key={node.key}>
@@ -82,7 +83,7 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
       <Select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter sources by status">
         <option value="all">All statuses</option><option value="ready">Ready</option><option value="scanning">Scanning</option><option value="disabled">Disabled</option><option value="unavailable">Unavailable</option><option value="error">Errors</option><option value="idle">Not scanned</option>
       </Select>
-      <Select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter sources by category"><option value="all">All categories</option>{categories.map((name) => <option key={name} value={name}>{name}</option>)}</Select>
+      <Select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filter sources by source type"><option value="all">All source types</option>{categories.map((name) => <option key={name} value={name}>{name}</option>)}</Select>
     </div>
     <div className="source-media-filters" role="group" aria-label="Filter sources by media type">
       {filters.map((filter) => <button key={filter.value} type="button" aria-pressed={media === filter.value} onClick={() => setMedia(filter.value)}>
@@ -93,7 +94,7 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
       <button type="button" onClick={() => { setCollapsed(new Set()); setExpanded((current) => new Set([...current, ...visible.map((source) => source.id)])); }}>Expand all</button>
       <button type="button" onClick={() => { setCollapsed(new Set(tree.map((node) => node.key))); setExpanded(new Set()); }}>Collapse all</button>
     </div></div>
-    <ul className="source-tree">{tree.map((node) => renderBranch(node, 0))}</ul>
+    {query.trim() ? <div className="source-search-results">{visible.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.has(source.id), () => toggle(source.id))}</Fragment>)}</div> : <ul className="source-tree">{tree.map((node) => renderBranch(node, 0))}</ul>}
     {visible.length === 0 && <div className="source-filter-empty"><p>No sources match these filters.</p><button className="secondary-button" onClick={() => { setMedia("all"); setCategory("all"); setStatus("all"); setQuery(""); }}>Clear filters</button></div>}
   </section>;
 }

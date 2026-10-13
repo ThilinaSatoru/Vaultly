@@ -257,6 +257,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const [advancedOpen, setAdvancedOpen] = useGalleryField("advancedOpen", false);
   const [formats, setFormats] = useState<Array<{ extension: string; item_count: number }>>([]);
   const [seriesOptions, setSeriesOptions] = useState<SeriesSummary[]>([]);
+  const [seriesOptionsLoading, setSeriesOptionsLoading] = useState(true);
   const [circleOptions, setCircleOptions] = useState<CircleSummary[]>([]);
   const [sort, setSort] = useGalleryField<"auto" | "folders" | "relevance" | "title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "auto");
   const [searchMode, setSearchMode] = useGalleryField<"literal" | "fuzzy" | "english">("searchMode", "english");
@@ -274,6 +275,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
 
   useEffect(() => {
     let active = true;
+    setSeriesOptionsLoading(true);
     const effectiveType = type || selectedType;
     void Promise.all([
       api<Array<{ extension: string; item_count: number }>>(`/api/items/formats${effectiveType ? `?type=${effectiveType}` : ""}`),
@@ -284,7 +286,8 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       setFormats(nextFormats);
       setSeriesOptions(nextSeries);
       setCircleOptions(nextCircles);
-    }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load filter choices."); });
+    }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load filter choices."); })
+      .finally(() => { if (active) setSeriesOptionsLoading(false); });
     return () => { active = false; };
   }, [type, selectedType, refreshKey]);
 
@@ -335,7 +338,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       setLoading(false);
       return () => controller.abort();
     }
-    const params = new URLSearchParams({ page: String(page), searchMode });
+    const params = new URLSearchParams({ page: String(page), searchMode, groupSeries: "1" });
     if (sort !== "auto") params.set("sort", sort);
     if (sort === "folders") params.set("folder", folderPath);
     if (type || selectedType) params.set("type", type || selectedType);
@@ -348,7 +351,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     if (view !== "browse") {
       setLoading(true);
       api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
-        .then((data) => { setResult(data); setError(""); })
+        .then((data) => { if (!controller.signal.aborted) { setResult(data); setError(""); } })
         .catch((requestError) => { if (!controller.signal.aborted) { setResult(null); setError(requestError instanceof Error ? requestError.message : "Could not load media."); } })
         .finally(() => { if (!controller.signal.aborted) setLoading(false); });
       return () => controller.abort();
@@ -371,7 +374,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     if (personIds.length) params.set("people", personIds.join(","));
     setLoading(true);
     api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
-      .then((data) => { setResult(data); setError(""); })
+      .then((data) => { if (!controller.signal.aborted) { setResult(data); setError(""); } })
       .catch((requestError) => {
         if (controller.signal.aborted) return;
         setResult(null);
@@ -384,6 +387,9 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
   const libraryTitle = type ? galleryNames[type] : "All media";
   const selectedCategoryName = browseCategory === "uncategorized" ? "Uncategorized" : categoryOverview?.categories.find((category) => category.id === browseCategory)?.name;
   const title = view === "categories" ? selectedCategoryName ? `${libraryTitle} · ${selectedCategoryName}` : `${libraryTitle} categories` : view === "favorites" ? `${libraryTitle} favorites` : libraryTitle;
+  const folderItems = sort === "folders" ? result?.folders?.reduce((total, folder) => total + folder.item_count, 0) ?? 0 : 0;
+  const resultCount = result?.cards ? `${formatCount(result.total)} cards · ${formatCount((result.mediaTotal ?? result.total) + folderItems)} items` : `${formatCount((result?.total ?? 0) + folderItems)} items`;
+  const awaitingCollections = seriesOptionsLoading && Boolean(result?.cards?.some((card) => card.kind === "series" && !seriesOptions.some((series) => series.id === card.id)));
   const hasFilters = Boolean(searchMode !== "english" || filename || pathText || selectedType || sourceType || sourceId || folderPath || extension || seriesFilter || circleFilter || minMb || maxMb || modifiedFrom || modifiedTo || uncategorized || untagged || selectedCategoryIds.length || selectedTagIds.length || selectedCastIds.length || selectedArtistIds.length);
   const extraFilterCount = [searchMode !== "english", filename, pathText, selectedType, sourceType, sourceId, folderPath, extension, seriesFilter, circleFilter, minMb, maxMb, modifiedFrom, modifiedTo, uncategorized, untagged, selectedCastIds.length, selectedArtistIds.length].filter(Boolean).length;
   const clearFilters = () => {
@@ -408,21 +414,20 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       setResult((current) => current ? {
         ...current,
         items: view === "favorites" && !favorite ? current.items.filter((entry) => entry.id !== item.id) : current.items.map((entry) => entry.id === item.id ? { ...entry, favorite } : entry),
+        cards: view === "favorites" && !favorite ? current.cards?.filter((card) => card.kind !== "item" || card.id !== item.id) : current.cards,
+        mediaTotal: view === "favorites" && !favorite && current.mediaTotal !== undefined ? Math.max(0, current.mediaTotal - 1) : current.mediaTotal,
         total: view === "favorites" && !favorite ? Math.max(0, current.total - 1) : current.total,
       } : current);
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not update favorite."); }
   };
-  const renderCards = (items: MediaItem[], keyPrefix = "") => {
-    const shownSeries = new Set<number>();
-    return items.flatMap((item) => {
-      const memberships = (item.series_ids ?? []).map((id) => seriesOptions.find((series) => series.id === id)).filter((series): series is SeriesSummary => Boolean(series));
-      if (!memberships.length) return [<MediaCard key={`${keyPrefix}item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id, galleryVideoContext(result, item.id))} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} />];
-      return memberships.filter((series) => !shownSeries.has(series.id)).map((series) => {
-        shownSeries.add(series.id);
-        return <CollectionCard key={`${keyPrefix}series-${series.id}`} series={series} mediaType={type || selectedType || undefined} onOpen={() => onOpenSeries(series.id)} />;
-      });
-    });
-  };
+  const renderCards = () => (result?.cards ?? result?.items.map((item) => ({ kind: "item" as const, id: item.id })) ?? []).map((card) => {
+    if (card.kind === "series") {
+      const series = seriesOptions.find((entry) => entry.id === card.id);
+      return series ? <CollectionCard key={`series-${series.id}`} series={series} mediaType={type || selectedType || undefined} onOpen={() => onOpenSeries(series.id)} /> : null;
+    }
+    const item = result?.items.find((entry) => entry.id === card.id);
+    return item ? <MediaCard key={`item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id, galleryVideoContext(result, item.id))} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} /> : null;
+  });
   const paginationControls = result ? <div className="pagination">
     <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
     <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>
@@ -433,7 +438,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     <AttributeMediaContext.Provider value={type || selectedType || undefined}><section className="gallery-view">
       <div className="page-heading gallery-heading">
         <div>{view === "categories" && browseCategory !== null && <button className="category-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setBrowseCategory(null); setSelectedItemIds([]); } }}><ArrowLeft size={16} /> All categories</button>}<p className="eyebrow">Your library</p><h1>{title}</h1><p>{view === "categories" && browseCategory === null ? "Choose a category to open its media library." : search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
-        <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : `${formatCount((result?.total ?? 0) + (sort === "folders" ? result?.folders?.reduce((total, folder) => total + folder.item_count, 0) ?? 0 : 0))} items`}</span>
+        <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : resultCount}</span>
       </div>
 
       {view === "categories" && browseCategory === null && categoryOverview && <div className="category-selection-grid">
@@ -490,12 +495,12 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
       {sort === "folders" && <div className="folder-navigation"><button type="button" className="secondary-button" onClick={() => { setSourceId(""); setFolderPath(""); }}>All source folders</button>{sourceId && <><button type="button" className="secondary-button" onClick={() => { if (folderPath) setFolderPath(folderPath.split("/").slice(0, -1).join("/")); else setSourceId(""); }}><ArrowLeft size={16} /> Up</button><span>{sources.find((source) => String(source.id) === sourceId)?.name}{folderPath ? ` / ${folderPath}` : ""}</span></>}</div>}
       {sort === "folders" && !loading && Boolean(result?.folders?.length) && <div className="folder-grid">{result?.folders?.map((folder) => <button className="folder-card" type="button" key={`${folder.source_id}:${folder.path}`} onClick={() => { navigation.push({ [`gallery.${type ?? "all"}.${view}.sourceId`]: String(folder.source_id), [`gallery.${type ?? "all"}.${view}.folderPath`]: folder.path, [`gallery.${type ?? "all"}.${view}.page`]: 0 }, folder.name); }}><Folder size={30} /><strong>{folder.name}</strong><span>{formatCount(folder.item_count)} items</span></button>)}</div>}
       {error && <p className="page-error" role="alert">{error}</p>}
-      {view === "categories" && browseCategory === null ? (!categoryOverview && !error ? <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading categories…</span></div> : categoryOverview && categoryOverview.categories.length === 0 && categoryOverview.uncategorized_count === 0 ? <div className="gallery-empty"><Folder size={34} /><h2>No categorized media</h2><p>Assign categories to media, then return here.</p></div> : null) : loading ? (
+      {view === "categories" && browseCategory === null ? (!categoryOverview && !error ? <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading categories…</span></div> : categoryOverview && categoryOverview.categories.length === 0 && categoryOverview.uncategorized_count === 0 ? <div className="gallery-empty"><Folder size={34} /><h2>No categorized media</h2><p>Assign categories to media, then return here.</p></div> : null) : loading || awaitingCollections ? (
         <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading media…</span></div>
-      ) : result && result.items.length > 0 ? (
+      ) : result && (result.cards?.length ?? result.items.length) > 0 ? (
         <>
           {paginationControls}
-          <div className="media-grid">{renderCards(result.items)}</div>
+          <div className="media-grid">{renderCards()}</div>
           {paginationControls}
         </>
       ) : sort === "folders" && Boolean(result?.folders?.length) ? null : (

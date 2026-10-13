@@ -54,6 +54,7 @@ const listInput = z.object({
   artists: idListInput.optional(),
   people: idListInput.optional(),
   favorite: z.enum(["1"]).optional(),
+  groupSeries: z.enum(["1"]).optional(),
   folder: z.string().max(2000).default(""),
   sort: z.enum(["folders", "relevance", "title", "filename", "recent", "oldest", "size", "smallest"]).default("title"),
   page: z.coerce.number().int().nonnegative().default(0),
@@ -256,7 +257,7 @@ export async function registerMediaRoutes(
 
   app.get("/api/items", async (request) => {
     const input = listInput.parse(request.query);
-    if (!(request.query as Record<string, unknown>).sort && input.searchMode !== "literal") input.sort = "relevance";
+    if (!(request.query as Record<string, unknown>).sort && (input.q || input.filename || input.path)) input.sort = "relevance";
     const conditions = ["m.available = 1"];
     const values: Array<string | number> = [];
     let indexedSearch = false;
@@ -371,13 +372,15 @@ export async function registerMediaRoutes(
     const wordMatch = rankedMatch(searchGroups);
     const match = wordMatch && input.searchMode === "english" ? `{title filename} : (${wordMatch})` : wordMatch;
     const normalizedMatch = input.searchMode === "english" ? englishMatch(input.q || input.filename || "", input.q ? ["title", "filename"] : ["filename"]) : "";
-    const relevance = input.sort === "relevance" && (match || normalizedMatch);
-    const rankValues = relevance ? [...(match ? [match] : []), ...(normalizedMatch ? [normalizedMatch] : [])] : [];
+    const relevanceQuery = input.q || input.filename || input.path || "";
+    const relevance = input.sort === "relevance" && Boolean(relevanceQuery.trim());
+    const rankValues = relevance ? [relevanceQuery, ...(match ? [match] : []), ...(normalizedMatch ? [normalizedMatch] : [])] : [];
     const rankSql = [
       ...(match ? ["COALESCE((SELECT bm25(media_words, 8.0, 3.0, 1.0) FROM media_words WHERE rowid = m.id AND media_words MATCH ?), 0)"] : []),
       ...(normalizedMatch ? ["COALESCE((SELECT bm25(media_english, 8.0, 3.0) FROM media_english WHERE rowid = m.id AND media_english MATCH ?), 0)"] : []),
-    ].join(" + ");
-    const order = relevance ? `(${rankSql}) ASC, m.title COLLATE NOCASE ASC, m.id ASC`
+    ].join(" + ") || "CAST(0 AS REAL)";
+    const exactRank = `media_search_relevance(?, ${input.q ? "m.title" : "''"}, ${input.q || input.filename ? "m.filename" : "''"}, ${input.q || input.path ? "m.relative_path" : "''"})`;
+    const order = relevance ? `${exactRank} ASC, (${rankSql}) ASC, m.title COLLATE NOCASE ASC, m.id ASC`
       : input.sort === "recent" ? "m.modified_at_ms DESC, m.id DESC"
       : input.sort === "oldest" ? "m.modified_at_ms ASC, m.id ASC"
         : input.sort === "size" ? "m.size_bytes DESC, m.id DESC"
@@ -390,16 +393,47 @@ export async function registerMediaRoutes(
     const total = database.prepare(`
       SELECT COUNT(*) AS count FROM media_items m ${indexedSearch ? "NOT INDEXED" : ""} WHERE ${where}
     `).get(...values) as { count: number };
-    const rows = database.prepare(`
-      ${itemSelect(indexedSearch)} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
-    `).all(...values, ...rankValues, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
+    let cards: Array<{ kind: "item" | "series"; id: number }> | undefined;
+    let cardTotal = total.count;
+    let rows: Array<{ id: number } & Record<string, unknown>>;
+    if (input.groupSeries) {
+      // Group the complete filtered result before taking a page. Collapsing only
+      // 48 fetched files repeats collections across pages and leaves sparse grids.
+      const members = `card_members AS (
+        SELECT 'item' AS kind, m.id AS card_id, m.id AS item_id FROM matching m
+          WHERE NOT EXISTS (SELECT 1 FROM series_items si WHERE si.item_id = m.id)
+        UNION ALL
+        SELECT 'series' AS kind, si.series_id AS card_id, m.id AS item_id
+          FROM matching m JOIN series_items si ON si.item_id = m.id
+      )`;
+      cardTotal = (database.prepare(`WITH matching AS (
+        SELECT m.id FROM media_items m ${indexedSearch ? "NOT INDEXED" : ""} WHERE ${where}
+      ), ${members} SELECT COUNT(*) AS count FROM (
+        SELECT kind, card_id FROM card_members GROUP BY kind, card_id
+      )`).get(...values) as { count: number }).count;
+      cards = database.prepare(`WITH matching AS (
+        SELECT m.id, ROW_NUMBER() OVER (ORDER BY ${order}) AS position
+          FROM media_items m ${indexedSearch ? "NOT INDEXED" : ""} WHERE ${where}
+      ), ${members}
+      SELECT cm.kind, cm.card_id AS id FROM card_members cm JOIN matching m ON m.id = cm.item_id
+        GROUP BY cm.kind, cm.card_id ORDER BY MIN(m.position), cm.kind, cm.card_id
+        LIMIT 48 OFFSET ?`).all(...rankValues, ...values, input.page * 48) as typeof cards;
+      const ids = cards!.filter((card) => card.kind === "item").map((card) => card.id);
+      const byId = new Map((database.prepare(`${itemSelect()} WHERE m.id IN (SELECT value FROM json_each(?))`)
+        .all(JSON.stringify(ids)) as Array<{ id: number } & Record<string, unknown>>).map((row) => [row.id, row]));
+      rows = ids.map((id) => byId.get(id)!);
+    } else {
+      rows = database.prepare(`
+        ${itemSelect(indexedSearch)} WHERE ${where} ORDER BY ${order} LIMIT 48 OFFSET ?
+      `).all(...values, ...rankValues, input.page * 48) as Array<{ id: number } & Record<string, unknown>>;
+    }
     const tags = tagsByItem(rows.map((row) => row.id));
     const categories = categoriesByItem(rows.map((row) => row.id));
     const memberships = seriesByItem(rows.map((row) => row.id));
     const credits = creditsByItem(rows.map((row) => row.id));
     const items = rows.map((row) => ({ ...row, series_ids: memberships.get(row.id) ?? [], categories: categories.get(row.id) ?? [], tags: tags.get(row.id) ?? [],
       cast: credits.get(row.id)?.cast ?? [], artists: credits.get(row.id)?.artists ?? [] }));
-    return { items, folders, total: total.count, page: input.page, pageSize: 48 };
+    return { items, folders, total: cardTotal, page: input.page, pageSize: 48, ...(cards ? { cards, mediaTotal: total.count } : {}) };
   });
 
   app.get("/api/items/:id/similar", async (request, reply) => {

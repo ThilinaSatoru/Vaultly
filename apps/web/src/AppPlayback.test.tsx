@@ -3,6 +3,7 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 
 const state = vi.hoisted(() => ({ fields: {} as Record<string, unknown>, states: [] as unknown[], cursor: 0 }));
 const nav = vi.hoisted(() => ({
+  get current() { return { current: { fields: state.fields } }; },
   entry: { fields: state.fields, breadcrumbs: [], id: "page" },
   update: (fields: Record<string, unknown>) => { Object.assign(state.fields, fields); },
   push: (fields: Record<string, unknown>) => { Object.assign(state.fields, fields); },
@@ -29,6 +30,7 @@ vi.mock("./navigation", async (original) => ({
 }));
 import { App } from "./App";
 import { MediaViewer } from "./MediaViewer";
+import { ManagementDrawer } from "./ManagementDrawer";
 function viewers(node: ReactNode): ReactElement<any>[] {
   if (isValidElement<any>(node)) return node.type === MediaViewer ? [node] : viewers(node.props.children);
   return Array.isArray(node) ? node.flatMap(viewers) : [];
@@ -40,6 +42,26 @@ function render() {
   return viewers((child.type as (props: any) => ReactNode)(child.props));
 }
 beforeEach(() => { state.states = []; state.fields = {}; nav.entry.fields = state.fields; });
+test("opening people management defaults to the current library and updates on reopening", () => {
+  const findDrawer = (node: ReactNode): ReactElement<any> | undefined => {
+    if (isValidElement<any>(node)) return node.type === ManagementDrawer ? node : findDrawer(node.props.children);
+    if (Array.isArray(node)) for (const child of node) { const found = findDrawer(child); if (found) return found; }
+  };
+  const drawer = () => {
+    state.cursor = 0;
+    const app = App({ profiles: { activeId: "default", profiles: [{ id: "default", name: "Default" }] } });
+    const child = app.props.children as ReactElement<any>;
+    return findDrawer((child.type as (props: any) => ReactNode)(child.props))!;
+  };
+  for (const [section, expected] of [["video", "cast"], ["comic", "artist"], ["story", "artist"], ["all", "all"]]) {
+    nav.reset({ section });
+    drawer().props.onOpen("people");
+    expect(drawer().props.panels.people.props.creditFilterRequest.filter).toBe(expected);
+  }
+  nav.reset({ section: "all", "gallery.all.browse.selectedType": "video" });
+  drawer().props.onOpen("people");
+  expect(drawer().props.panels.people.props.creditFilterRequest.filter).toBe("cast");
+});
 test("floating playback and its playlist survive back navigation, library navigation, and opening another file until manually closed", () => {
   const gallery = { page: 0, videos: [{ id: 10, title: "Episode 1" }, { id: 11, title: "Episode 2" }] };
   nav.update({ selectedItemId: 10, viewerGalleryContext: gallery });

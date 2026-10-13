@@ -16,13 +16,14 @@ test("mixed sources appear in each matching media filter and search combines wit
   expect(sourceMediaGroup({ ...base, video_count: 0, item_count: 0 })).toBe("No indexed media");
 });
 
-test("sources follow drive paths and source details start compact with category filtering", () => {
+test("sources follow drive paths and source details start compact with source type filtering", () => {
   const html = renderToStaticMarkup(<SourcesBrowser sources={[base, { ...base, id: 2, name: "Books", video_count: 0, story_count: 5 }]} renderSource={(source, expanded) => <article data-expanded={expanded}>{source.name}</article>} />);
   expect(html).toContain('aria-label="Search sources"');
   expect(html).toContain('aria-label="Filter sources by status"');
   expect(html).toContain('aria-label="Filter sources by media type"');
   expect(html).toContain('class="source-tree-branch" open=""');
-  expect(html).toContain('aria-label="Filter sources by category"');
+  expect(html).toContain('aria-label="Filter sources by source type"');
+  expect(html).not.toContain('All categories');
   expect(html).not.toContain('class="source-group"');
   expect(html).toContain('data-expanded="false"');
   expect(html).toContain("Expand all");

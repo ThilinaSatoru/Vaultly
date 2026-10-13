@@ -85,6 +85,8 @@ export interface Person {
 
 export interface ItemPage {
   items: MediaItem[];
+  cards?: Array<{ kind: "item" | "series"; id: number }>;
+  mediaTotal?: number;
   total: number;
   page: number;
   pageSize: number;

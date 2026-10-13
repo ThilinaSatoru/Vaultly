@@ -154,17 +154,21 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .media-art-story { color: var(--tertiary-accent); }
 .empty-state { background: var(--panel); border-color: var(--border); }
 .media-card-body { padding: 16px; }
-.desktop-titlebar { position: fixed; z-index: 3000; inset: 0 0 auto; height: 38px; display: flex; align-items: center; gap: 9px; padding: 0 155px 0 16px; color: var(--text); background: var(--sidebar); border-bottom: 1px solid var(--border); -webkit-app-region: drag; user-select: none; font-size: .75rem; }
+:root[data-desktop] { --window-bar-height: 38px; }
+.desktop-titlebar { position: fixed; z-index: 3000; inset: 0 0 auto; height: var(--window-bar-height); display: flex; align-items: center; gap: 9px; padding: 0 155px 0 16px; color: var(--text); background: var(--sidebar); border-bottom: 1px solid var(--border); -webkit-app-region: drag; user-select: none; font-size: .75rem; }
 .desktop-titlebar > svg { flex-shrink: 0; color: var(--acid); }
 .desktop-titlebar > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .desktop-titlebar > small { margin-left: auto; color: var(--muted); font-size: .65rem; white-space: nowrap; }
-:root[data-desktop] body { padding-top: 38px; }
-:root[data-desktop] .app-shell { min-height: calc(100vh - 38px); }
-:root[data-desktop] .sidebar { top: 38px; }
-:root[data-desktop] .boot-loading { min-height: calc(100vh - 38px); }
+:root[data-desktop] body { padding-top: var(--window-bar-height); }
+:root[data-desktop] .app-shell { min-height: calc(100vh - var(--window-bar-height)); }
+:root[data-desktop] .sidebar { top: var(--window-bar-height); }
+:root[data-desktop] .boot-loading { min-height: calc(100vh - var(--window-bar-height)); }
 :root[data-desktop="darwin"] .desktop-titlebar { padding-left: 80px; padding-right: 16px; }
 .theme-toggle { flex-shrink: 0; gap: 7px; }
 .people-cleanup { margin: 16px 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.people-credit-filter { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 18px 0; color: var(--muted); font-size: .85rem; }
+.people-credit-filter .custom-select { min-width: 220px; }
+.source-search-results { display: grid; gap: 12px; }
 .people-cleanup p, .series-shared-people-hint { margin: 8px 0 0; color: var(--muted); font-size: .78rem; }
 .media-card h3 { font-weight: 650; font-size: .94rem; }
 .media-card p { font-size: .7rem; }

@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { rankSearchResults } from "./search-relevance";
 import { vaultUrl, vaultFetch } from "./vault-session";
 import { useContext } from "react";
 import { NavigationContext, useNavigationField } from "./navigation";
@@ -147,7 +148,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     if (!detail || !itemSearch.trim()) { setCandidates(null); return; }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      api<ItemPage>(`/api/items?q=${encodeURIComponent(itemSearch.trim())}&sort=title`, { signal: controller.signal })
+      api<ItemPage>(`/api/items?q=${encodeURIComponent(itemSearch.trim())}&sort=relevance`, { signal: controller.signal })
         .then(setCandidates)
         .catch((requestError) => { if (!controller.signal.aborted) setError(requestError instanceof Error ? requestError.message : "Could not search media."); });
     }, 180);
@@ -291,12 +292,12 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     finally { setBusy(false); }
   };
 
-  const visible = seriesList.filter((entry) => view !== "browse" || (
+  const visible = rankSearchResults(seriesList.filter((entry) => view !== "browse" || (
     (entry.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()) || entry.description.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
     && selectedTagIds.every((id) => (entry.card_attributes ?? entry).tags.some((tag) => tag.id === id))
     && selectedCategoryIds.every((id) => ((entry.card_attributes ?? entry).categories ?? []).some((category) => category.id === id))
     && (groupFilter === "all" || setType(entry) === groupFilter)
-    && (!mediaType || (mediaType === "video" ? entry.video_count : mediaType === "comic" ? entry.comic_count : entry.story_count) > 0)));
+    && (!mediaType || (mediaType === "video" ? entry.video_count : mediaType === "comic" ? entry.comic_count : entry.story_count) > 0))), view === "browse" ? search : "", (entry) => [entry.title, entry.description]);
   const categorySections = [
     ...categories.map((category) => ({
       id: `category-${category.id}`,
@@ -379,7 +380,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     {error && <p className="page-error" role="alert">{error}</p>}
     {loading ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading sets…</div> : visible.length ? (view === "categories" ? categorySections.map((section) =>
       <section className="category-card-section" key={section.id}><div className="category-card-heading"><h2>{section.categoryId === null ? section.title : <AttributeBadge kind="category" id={section.categoryId} name={section.title} mediaType={mediaType} />}</h2><span>{section.entries.length}</span></div><div className="series-grid">{section.entries.map((entry) =>
-        <SeriesCard key={`${section.id}-${entry.id}`} entry={entry} mediaType={mediaType} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>) : setSections.map((section) => {
+        <SeriesCard key={`${section.id}-${entry.id}`} entry={entry} mediaType={mediaType} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>) : search.trim() ? <div className="series-grid">{visible.map((entry) => <SeriesCard key={entry.id} entry={entry} mediaType={mediaType} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div> : setSections.map((section) => {
           const entries = visible.filter((entry) => setType(entry) === section.type);
           if (!entries.length) return null;
           return <section className="series-type-section" key={section.type}><h2>{section.title} <span>{entries.length}</span></h2><div className="series-grid">{entries.map((entry) => <SeriesCard key={entry.id} entry={entry} mediaType={mediaType} version={coverVersion} onOpen={() => setSelectedId(entry.id)} onFavorite={() => void toggleFavorite(entry)} />)}</div></section>;

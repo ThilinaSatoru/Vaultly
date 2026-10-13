@@ -5,6 +5,7 @@ import type { DesktopRequest, DesktopResponse } from "./server-ipc.js";
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { focusActiveRenderer, focusInputSender } from "./input-focus.js";
 
 const currentDirectory = __dirname;
 const developmentUrl = process.env.VAULTLY_DEV_SERVER_URL;
@@ -25,6 +26,9 @@ function readPreferences() {
 function trustedPreferencesSender(event: Electron.IpcMainEvent) {
   return event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame;
 }
+ipcMain.on("window:focus-input", (event) => {
+  focusInputSender(event, mainWindow);
+});
 ipcMain.on("preferences:read", (event) => {
   event.returnValue = trustedPreferencesSender(event) ? readPreferences() : {};
 });
@@ -122,6 +126,7 @@ async function createWindow() {
           const options = { title: "Choose a media library folder", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
           const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
           response.value = result.canceled ? null : result.filePaths[0] ?? null;
+          focusActiveRenderer(mainWindow);
         } else if (message.action === "reveal-path" && message.path) shell.showItemInFolder(message.path);
         else if (message.action === "open-video" && message.path) { const error = await shell.openPath(message.path); if (error) throw new Error(error); }
       } catch (error) { response.error = String(error); }

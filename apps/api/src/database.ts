@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { initializeSearchIndex } from "./search-index.js";
 import { registerEnglishMatchingFunction } from "./english-search-index.js";
+import { mediaSearchRelevance } from "./search-relevance.js";
 
 import { getActiveVaultProfile, vaultDirectory, saveActiveVaultProfile } from "./vault-profiles.js";
 
@@ -16,6 +17,8 @@ function openDatabase(directory: string): DatabaseSync {
   try {
 // Persisted triggers can run during migrations, before search initialization.
 registerEnglishMatchingFunction(database);
+database.function("media_search_relevance", { deterministic: true }, (query, title, filename, relativePath) =>
+  mediaSearchRelevance(String(query ?? ""), String(title ?? ""), String(filename ?? ""), String(relativePath ?? "")));
 
 database.exec("PRAGMA journal_mode = WAL");
 database.exec("PRAGMA foreign_keys = ON");

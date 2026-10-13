@@ -15,6 +15,7 @@ export function AttributeBulkUpload({
   const [error, setError] = useState("");
   const [result, setResult] = useState("");
   const [progress, setProgress] = useState("");
+  const [existingOnly, setExistingOnly] = useState(false);
   const example =
     kind === "people"
       ? {
@@ -52,7 +53,7 @@ export function AttributeBulkUpload({
     let saved = 0;
     const finish = beginRequestActivity(`Uploading ${kind}`, "Reading and validating JSON", kind === "people" ? "people" : "sources");
     try {
-      const report = await uploadAttributeFile(file, (body) => api<AttributeImportReport>(`/api/attributes/${kind}/import`, {
+      const report = await uploadAttributeFile(file, (body) => api<AttributeImportReport>(`/api/attributes/${kind}/import${existingOnly ? "?existingOnly=true" : ""}`, {
         method: "POST", body,
       }, false), (processed, total) => {
         saved = processed;
@@ -61,7 +62,7 @@ export function AttributeBulkUpload({
         finish.update("Importing and indexing attributes", processed, total);
       });
       setResult(
-        `${report.created} created, ${report.updated} updated${report.skipped ? `, ${report.skipped} duplicates skipped` : ""}, ${report.indexed} new media assignments.`,
+        `${report.created} created, ${report.updated} updated${report.skipped ? `, ${report.skipped} records skipped` : ""}, ${report.indexed} new media assignments.`,
       );
     } catch (failure) {
       setError(
@@ -84,9 +85,14 @@ export function AttributeBulkUpload({
           onChange={(event) => void upload(event)}
         />
       </label>
+      <label className="attribute-import-existing-only">
+        <input type="checkbox" checked={existingOnly} disabled={busy} onChange={(event) => setExistingOnly(event.target.checked)} />
+        Update existing names only
+      </label>
+      <p>{existingOnly ? "Update matching entries and skip names that are not already in your vault. No new entries are created. Supplied fields update existing entries; omitted fields are preserved." : "Enable this option to skip unfamiliar names and keep junk records out of your vault."}</p>
       <p>
         Upload a prepared JSON file. Existing names are matched without case
-        sensitivity. {kind === "people" ? "Duplicate people are skipped, including repeats within the upload; existing profiles and patterns are preserved." : "Supplied fields update existing entries; omitted fields are preserved."} Names and patterns are matched against indexed media
+        sensitivity. {!existingOnly && (kind === "people" ? "Duplicate people are skipped, including repeats within the upload; existing profiles and patterns are preserved." : "Supplied fields update existing entries; omitted fields are preserved.")} Names and patterns are matched against indexed media
         filenames.
       </p>
       <details>
