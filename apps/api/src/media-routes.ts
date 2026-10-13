@@ -342,7 +342,7 @@ export async function registerMediaRoutes(
       values.push(tagId);
     }
     for (const personId of new Set(input.people?.split(",").map(Number) ?? [])) {
-      conditions.push("EXISTS (SELECT 1 FROM item_people ip WHERE ip.item_id = m.id AND ip.person_id = ?)");
+      conditions.push("EXISTS (SELECT 1 FROM effective_item_people ip WHERE ip.item_id = m.id AND ip.person_id = ?)");
       values.push(personId);
     }
     for (const personId of new Set(input.cast?.split(",").map(Number) ?? [])) {

@@ -88,11 +88,12 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
     const entries = Array.isArray(input) ? input : input.records;
     const scrapedAt = Array.isArray(input) ? undefined : input.scraped_at;
     const { table, column } = definitions[kind];
-    let created = 0, updated = 0, indexed = 0;
+    let created = 0, updated = 0, indexed = 0, skipped = 0;
     database.exec("BEGIN IMMEDIATE");
     try {
       const ids = new Set<number>();
-      const find = database.prepare(`SELECT id FROM ${kind} WHERE name = ?`);
+      const find = database.prepare(`SELECT id FROM ${kind} WHERE name = ? COLLATE NOCASE`);
+      const peopleNames = kind === "people" ? new Set((database.prepare("SELECT name FROM people").all() as Array<{ name: string }>).map((person) => person.name.toLowerCase())) : null;
       const create = database.prepare(`INSERT INTO ${kind}(name) VALUES (?)`);
       const clearPatterns = database.prepare(`DELETE FROM ${table} WHERE ${column} = ?`);
       const addPattern = database.prepare(`INSERT INTO ${table}(${column}, pattern) VALUES (?, ?)`);
@@ -100,9 +101,12 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
       // A presence flag preserves omitted fields while permitting explicit nulls.
       const updatePerson = kind === "people" ? database.prepare(`UPDATE people SET ${fields.map((field) => `${field} = CASE WHEN ? THEN ? ELSE ${field} END`).join(", ")}, scraped_at = CASE WHEN ? THEN ? ELSE scraped_at END WHERE id = ?`) : null;
       for (const entry of entries) {
+        const key = entry.name.toLowerCase();
+        if (peopleNames?.has(key)) { skipped++; continue; }
         const existing = find.get(entry.name) as { id: number } | undefined;
         const id = existing?.id ?? Number(create.run(entry.name).lastInsertRowid);
         if (existing) updated++; else created++;
+        peopleNames?.add(key);
         ids.add(id);
         if (updatePerson) {
           const values = fields.flatMap((field) => {
@@ -115,6 +119,10 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
           clearPatterns.run(id);
           for (const pattern of new Map(entry.patterns.map((value) => [normalizeMetadataPhrase(value), value])).values()) addPattern.run(id, pattern);
         }
+      }
+      if (!ids.size) {
+        database.exec("COMMIT");
+        return { total: entries.length, created, updated, indexed, skipped };
       }
       const importedEntries: Array<{ id: number; name: string }> = [];
       const importedIds = [...ids];
@@ -130,7 +138,7 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
         : database.prepare(`INSERT OR IGNORE INTO item_${kind}(item_id, ${kind === "tags" ? "tag_id" : "category_id"}) VALUES (?, ?)`);
       const filenameCredits = kind === "people" ? database.prepare("SELECT person_id FROM item_people WHERE item_id = ? AND origin = 'filename'") : null;
       const removeFilenameCredit = kind === "people" ? database.prepare("DELETE FROM item_people WHERE item_id = ? AND person_id = ? AND origin = 'filename'") : null;
-      for (const row of database.prepare("SELECT id, filename, file_extension, media_type FROM media_items WHERE indexed = 1").iterate()) {
+      for (const row of ids.size ? database.prepare("SELECT id, filename, file_extension, media_type FROM media_items WHERE indexed = 1").iterate() : []) {
         const item = row as { id: number; filename: string; file_extension: string; media_type: string };
         const matches = matcher.match(item.filename, item.file_extension);
         if (filenameCredits && removeFilenameCredit) {
@@ -144,7 +152,7 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
       }
       database.exec("COMMIT");
     } catch (error) { database.exec("ROLLBACK"); throw error; }
-    return { total: entries.length, created, updated, indexed };
+    return { total: entries.length, created, updated, indexed, ...(skipped ? { skipped } : {}) };
   });
   app.get("/api/attributes/:kind/:id/patterns", async (request, reply) => {
     const { kind, id } = attributeParams.parse(request.params);

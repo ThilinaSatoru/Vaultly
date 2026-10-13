@@ -10,12 +10,13 @@ import { Pencil, Plus, Trash2, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, formatCount, type Person } from "./media";
 
-const usageCount = (person: Person) => (person.cast_count ?? 0) + (person.artist_count ?? 0);
+const usageCount = (person: Person) => (person.cast_count ?? 0) + (person.artist_count ?? 0) + (person.set_count ?? 0);
 
 export function PeopleView({ people, onChanged, allowBrowse = true }: { people: Person[]; onChanged: () => void; allowBrowse?: boolean }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const [cleanupMessage, setCleanupMessage] = useState("");
   const [renaming, setRenaming] = useState<Person | null>(null);
   const [patternEntry, setPatternEntry] = useState<Person | null>(null);
   const [imagePerson, setImagePerson] = useState<Person | null>(null);
@@ -39,11 +40,23 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
     catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not delete person."); }
   };
 
+  const cleanup = async () => {
+    if (!window.confirm("Remove all people with no media credits or set assignments? People linked to disabled or disconnected sources will be kept.")) return;
+    setWorking(true); setError(""); setCleanupMessage("");
+    try {
+      const result = await api<{ removed: number }>("/api/people/cleanup", { method: "POST" });
+      setCleanupMessage(`${formatCount(result.removed)} unused people removed.`);
+      onChanged();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not remove unused people."); }
+    finally { setWorking(false); }
+  };
+
   return <section className="categories-view people-view">
     <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>Cast & artists</h1><p>One shared list of people: Cast for videos, Artists for comics and stories. Search names and patterns, or customize matching below.</p></div></div>
     <form className="category-form" onSubmit={add}><label htmlFor="new-person">New person</label><div><input id="new-person" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" maxLength={100} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div></form>
     {error && <p className="page-error" role="alert">{error}</p>}
     <AttributeBulkUpload kind="people" onChanged={onChanged} />
+    <div className="people-cleanup"><button className="secondary-button" type="button" disabled={working} onClick={() => void cleanup()}><Trash2 size={16} /> Remove unused people</button><p>Remove records with no media or set assignments. Credits on offline sources are preserved.</p>{cleanupMessage && <p role="status">{cleanupMessage}</p>}</div>
     <PeopleMatchingRepair onChanged={onChanged} />
     {tools}
     <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : visible.map((person) =>
@@ -55,6 +68,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
         <div className="person-profile-details">
           <h2 className="person-profile-name">{allowBrowse ? <AttributeBadge kind="artist" {...person} /> : <span>{person.name}</span>}</h2>
           <div className="person-profile-credits"><span><strong>{formatCount(person.cast_count ?? 0)}</strong> cast credits</span><span><strong>{formatCount(person.artist_count ?? 0)}</strong> artist credits</span></div>
+          {!!person.set_count && <p>{formatCount(person.set_count)} shared set assignments</p>}
           <AttributePatternSummary patterns={person.patterns} />
           {(person.gender || person.country) && <p>{[person.gender, person.country].filter(Boolean).join(" · ")}</p>}
           {person.profile_url && <a href={person.profile_url} target="_blank" rel="noreferrer">Source profile</a>}

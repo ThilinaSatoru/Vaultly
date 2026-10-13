@@ -15,11 +15,11 @@ const maxBackupBytes = 100 * 1024 * 1024;
 const tableOrder = [
   "sources", "media_items", "categories", "tags", "people", "series", "circles",
   "item_categories", "item_tags", "item_people", "series_items", "series_tags",
-  "series_categories", "circle_series",
+  "series_categories", "series_people", "circle_series",
   "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories",
 ] as const;
 
-const optionalTables = new Set<string>(["tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories"]);
+const optionalTables = new Set<string>(["series_people", "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories"]);
 
 const deleteOrder = [...tableOrder].reverse();
 
@@ -37,6 +37,7 @@ const columns: Record<(typeof tableOrder)[number], string[]> = {
   series_items: ["series_id", "item_id", "position"],
   series_tags: ["series_id", "tag_id"],
   series_categories: ["series_id", "category_id"],
+  series_people: ["series_id", "person_id"],
   circle_series: ["circle_id", "series_id", "position"],
   tag_patterns: ["tag_id", "pattern"],
   category_patterns: ["category_id", "pattern"],

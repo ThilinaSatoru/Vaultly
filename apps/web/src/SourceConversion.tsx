@@ -64,11 +64,9 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
   return <>
     <div className="source-operations">
       <Select aria-label="Scan or convert source" value={selection} onChange={(event) => setSelection(event.target.value)} disabled={busy || scanBusy || running}>
-        <option value="scan-all" disabled={!scanEnabled}>Scan again with all (ML matching)</option>
-        <option value="scan-normal" disabled={!scanEnabled}>Scan again (normal scan)</option>
-        <option value="quick" disabled={!enabled}>Convert media (quick method only)</option>
-        <option value="slow" disabled={!enabled}>Convert media (slow method)</option>
-        <option value="both" disabled={!enabled}>Convert media (slow and quick both)</option>
+        <option value="scan-all" disabled={!scanEnabled}>Scan</option>
+        <option value="quick" disabled={!enabled}>Convert (quick)</option>
+        <option value="slow" disabled={!enabled}>Convert (slow)</option>
       </Select>
       <button className="secondary-button" type="button" disabled={busy || scanBusy || running || (selection.startsWith("scan-") ? !scanEnabled : !enabled)} onClick={() => void action()}>
         {busy || scanBusy ? "Working…" : "Run"}

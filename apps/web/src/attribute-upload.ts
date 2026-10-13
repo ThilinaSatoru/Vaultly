@@ -1,4 +1,4 @@
-export interface AttributeImportReport { created: number; updated: number; indexed: number }
+export interface AttributeImportReport { created: number; updated: number; indexed: number; skipped?: number }
 interface Envelope { scraped_at?: string; total?: number }
 interface JsonFile { stream(): ReadableStream<Uint8Array> }
 const encoder = new TextEncoder();
@@ -116,6 +116,7 @@ export async function uploadAttributeFile(
     const next = await send(prefix + records.join(",") + "]}");
     processed += records.length;
     report.created += next.created; report.updated += next.updated; report.indexed += next.indexed;
+    if (next.skipped) report.skipped = (report.skipped ?? 0) + next.skipped;
     records = []; bytes = overhead;
     onProgress(processed, total, { ...report });
   };

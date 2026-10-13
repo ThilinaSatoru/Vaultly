@@ -1,7 +1,7 @@
 import { Select } from "./Select";
 import { vaultStorage, vaultFetch, getActiveProfile, exportVaultPreferences, restoreVaultPreferences } from "./vault-session";
 import { Download, Keyboard, RotateCcw, Settings2, Upload, X } from "lucide-react";
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { api } from "./media";
 import { beginRequestActivity } from "./request-activity";
 import { defaultBindings, eventBinding, formatBinding, readBindings, readBooleanPreference, readNumberPreference, type ShortcutAction, writeBindings, writePreference } from "./preferences";
@@ -12,6 +12,11 @@ import { shortcutGroups } from "./shortcut-help";
 export function SettingsView() {
   const [theme, setTheme] = useState(readTheme);
   const [paletteMode, setPaletteMode] = useState(readPaletteMode);
+  useEffect(() => {
+    const observer = new MutationObserver(() => { setPaletteMode(readPaletteMode()); setTheme(readTheme()); });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-palette"] });
+    return () => observer.disconnect();
+  }, []);
   const [appearance, setAppearance] = useReaderAppearance();
   const [bindings, setBindings] = useState(readBindings);
   const [capturing, setCapturing] = useState<ShortcutAction | null>(null);

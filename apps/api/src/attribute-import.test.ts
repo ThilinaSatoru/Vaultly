@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import { database } from "./database.js";
 import { buildVaultlyServer } from "./server.js";
 
-test("prepared JSON imports upsert profiles, validate atomically, index credits, and survive backups without downloads", async () => {
+test("prepared JSON imports skip duplicate people, validate atomically, index credits, and survive backups without downloads", async () => {
   const token = randomUUID();
   const name = `Import Person ${token}`;
   const download = vi.spyOn(globalThis, "fetch");
@@ -23,9 +23,9 @@ test("prepared JSON imports upsert profiles, validate atomically, index credits,
     expect(person).toMatchObject({ ...payload.records[0], scraped_at: payload.scraped_at, profile_image: null });
     expect(database.prepare("SELECT item_id, role FROM item_people WHERE person_id = ? ORDER BY item_id").all(person.id)).toEqual([{ item_id: video, role: "cast" }, { item_id: comic, role: "artist" }]);
     expect((await app.inject(`/api/items?people=${person.id}&source=${source}`)).json().total).toBe(2);
-    expect((await upload("people", [{ name: name.toUpperCase(), country: "Canada", patterns: ["Alias", "ALIAS"] }])).json()).toEqual({ total: 1, created: 0, updated: 1, indexed: 0 });
-    expect(database.prepare("SELECT gender, country, avatar_url FROM people WHERE id = ?").get(person.id)).toMatchObject({ gender: "transgender", country: "Canada", avatar_url: payload.records[0].avatar_url });
-    expect((await app.inject("/api/people")).json().find((row: { id: number }) => row.id === person.id)).toMatchObject({ patterns: ["ALIAS"], country: "Canada" });
+    expect((await upload("people", [{ name: name.toUpperCase(), country: "Canada", patterns: ["Alias", "ALIAS"] }])).json()).toEqual({ total: 1, created: 0, updated: 0, skipped: 1, indexed: 0 });
+    expect(database.prepare("SELECT gender, country, avatar_url FROM people WHERE id = ?").get(person.id)).toMatchObject({ gender: "transgender", country: "United States", avatar_url: payload.records[0].avatar_url });
+    expect((await app.inject("/api/people")).json().find((row: { id: number }) => row.id === person.id)).toMatchObject({ patterns: [], country: "United States" });
     expect((await upload("people", [{ name, country: null }])).statusCode).toBe(200);
     const rejected = await upload("people", [{ name: `Rejected ${token}` }, { name, avatar_url: "file:///private" }]);
     expect(rejected.statusCode).toBe(400);
@@ -42,7 +42,7 @@ test("prepared JSON imports upsert profiles, validate atomically, index credits,
     expect((await app.inject({ method: "POST", url: "/api/people/profile-scan" })).statusCode).toBe(404);
     expect(download).not.toHaveBeenCalled();
     const backup = (await app.inject("/api/backup")).json();
-    expect(backup.data.people.find((row: { id: number }) => row.id === person.id)).toMatchObject({ gender: "transgender", country: null, avatar_url: payload.records[0].avatar_url, scraped_at: payload.scraped_at });
+    expect(backup.data.people.find((row: { id: number }) => row.id === person.id)).toMatchObject({ gender: "transgender", country: "United States", avatar_url: payload.records[0].avatar_url, scraped_at: payload.scraped_at });
     database.prepare("UPDATE people SET gender = NULL WHERE id = ?").run(person.id);
     const restored = await app.inject({ method: "POST", url: "/api/backup/restore", payload: backup });
     expect(restored.statusCode, restored.body).toBe(200);

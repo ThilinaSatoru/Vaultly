@@ -79,6 +79,7 @@ export interface Person {
   scraped_at?: string | null;
   cast_count?: number;
   artist_count?: number;
+  set_count?: number;
   patterns?: string[];
 }
 
@@ -106,6 +107,7 @@ export interface SeriesSummary {
   favorite: number;
   tags: Tag[];
   categories: Array<{ id: number; name: string }>;
+  people?: Person[];
 }
 
 export interface SeriesItem {

@@ -48,6 +48,12 @@ function recordCrash(details: string) {
   try { appendFileSync(path.join(app.getPath("userData"), "crash-error.log"), `${new Date().toISOString()} ${snapshot}\n${details}\n`, "utf8"); }
   catch { console.error(details); }
 }
+ipcMain.on("window:appearance", (event, appearance) => {
+  if (!trustedPreferencesSender(event) || !appearance || typeof appearance.title !== "string" || appearance.title.length > 200) return;
+  if (!/^#[0-9a-f]{6}$/i.test(appearance.color) || !/^#[0-9a-f]{6}$/i.test(appearance.symbolColor)) return;
+  mainWindow?.setTitle(appearance.title);
+  if (process.platform !== "darwin") mainWindow?.setTitleBarOverlay({ color: appearance.color, symbolColor: appearance.symbolColor, height: 38 });
+});
 process.on("uncaughtExceptionMonitor", (error) => recordCrash(error.stack ?? error.message));
 app.on("child-process-gone", (_event, details) => recordCrash(`Child process: ${JSON.stringify(details)}`));
 
@@ -59,6 +65,9 @@ async function createWindow() {
     minWidth: 960,
     minHeight: 640,
     backgroundColor: "#111315",
+    title: "Vaultly · A world within your vault",
+    titleBarStyle: "hidden",
+    ...(process.platform !== "darwin" && { titleBarOverlay: { color: "#111315", symbolColor: "#e6edf3", height: 38 } }),
     icon: path.join(currentDirectory, process.platform === "win32" ? "icon.ico" : "icon.png"),
     show: false,
     autoHideMenuBar: true,
@@ -83,7 +92,7 @@ async function createWindow() {
   });
 
   // Paint before database initialization. The API runs outside Electron's UI process.
-  await mainWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#111315;color:#e6edf3;font:16px system-ui}.loading{text-align:center}.spinner{width:32px;height:32px;margin:0 auto 20px;border:3px solid #343b44;border-top-color:#a9c8ec;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="loading" role="status"><div class="spinner"></div><h1>Vaultly</h1><p>Opening your library…</p></div></body></html>`));
+  await mainWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><title>Vaultly · Opening the vault</title><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#111315;color:#e6edf3;font:16px system-ui}body::before{content:'Vaultly · Opening the vault';position:fixed;inset:0 145px auto ${process.platform === "darwin" ? "80px" : "16px"};height:38px;display:flex;align-items:center;font-size:12px;-webkit-app-region:drag}.loading{text-align:center}.spinner{width:32px;height:32px;margin:0 auto 20px;border:3px solid #343b44;border-top-color:#a9c8ec;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="loading" role="status"><div class="spinner"></div><h1>Vaultly</h1><p>Opening your library…</p></div></body></html>`));
   if (!serverAddress) {
     const processOptions = {
       windowsHide: true, stdio: ["ignore", "ignore", "pipe", "ipc"],

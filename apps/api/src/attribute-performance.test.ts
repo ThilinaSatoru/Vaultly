@@ -54,7 +54,7 @@ test("12k attributes import and match 12k indexed media with shared name prefixe
     const updateStart = performance.now();
     const updated = await app.inject({ method: "POST", url: "/api/attributes/people/import", payload: { records } });
     const updateMs = performance.now() - updateStart;
-    expect(updated.json()).toEqual({ total: count, created: 0, updated: count, indexed: 0 });
+    expect(updated.json()).toEqual({ total: count, created: 0, updated: 0, skipped: count, indexed: 0 });
     const listStart = performance.now();
     const listed = await app.inject("/api/people");
     const listMs = performance.now() - listStart;

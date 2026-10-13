@@ -66,6 +66,7 @@ import {
   useState,
 } from "react";
 import { GalleryView } from "./GalleryView";
+import { ThemeToggle } from "./DesktopTitleBar";
 import { MediaViewer } from "./MediaViewer";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
@@ -410,7 +411,7 @@ function SourceCard({
     }
   };
 
-  const rescan = async (englishAttributes = false) => {
+  const rescan = async (englishAttributes = true) => {
     setWorking(true);
     setMenuOpen(false);
     setActionError("");
@@ -907,6 +908,15 @@ export function App({ profiles }: { profiles: ProfileList }) {
 function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const navigation = useContext(NavigationContext)!;
   const [section] = useNavigationField<Section>("section", "home");
+  useEffect(() => {
+    const titles: Record<Section, string> = {
+      home: "A world within your vault", all: "The discovery lounge", video: "The screening room",
+      comic: "The panel studio", story: "The reading nook", categories: "The collection compass",
+      tags: "Threads of discovery", people: "The creative constellation", sources: "Roots of your library",
+      settings: "Make it yours", help: "Your field guide",
+    };
+    document.title = `Vaultly · ${titles[section]}`;
+  }, [section]);
   const [libraryView] = useNavigationField<LibraryView>(
     "libraryView",
     "browse",
@@ -1306,7 +1316,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         gallery: viewerGalleryContext,
       });
   };
-  const rescanAll = async (englishAttributes = false) => {
+  const rescanAll = async (englishAttributes = true) => {
     setRescanningAll(true);
     setError("");
     try {
@@ -1608,6 +1618,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 />
               </div>
               <div className="topbar-actions">
+                <ThemeToggle />
                 <VaultProfiles initial={profiles} />
                 {temporaryPlaylist.length > 0 && (
                   <button
@@ -1677,6 +1688,9 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                   }
                   mediaType={section === "all" ? undefined : section}
                   initialSeriesId={selectedSeriesId}
+                  people={people}
+                  onPersonCreated={createPerson}
+                  onPeopleChanged={() => { void loadPeople(); setRefreshKey((value) => value + 1); }}
                   categories={categories}
                   tags={tags}
                   onCategoryCreated={createCategory}

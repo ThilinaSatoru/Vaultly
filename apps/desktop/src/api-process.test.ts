@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 
-test.each(["node", "electron"])("isolated API starts under %s, delegates the folder picker over IPC and exits without leftover work", async (runtime) => {
+test.each(["node", "electron"])("isolated API starts under %s, delegates the folder picker over IPC and exits without leftover work", async (runtime: string) => {
   // Keep the temporary bundle below the package so native dependencies resolve normally.
   const directory = await mkdtemp(path.join(process.cwd(), ".api-process-test-"));
   const bundle = path.join(directory, "api.cjs");

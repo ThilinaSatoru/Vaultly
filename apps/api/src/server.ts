@@ -179,7 +179,7 @@ app.post("/api/sources", async (request, reply) => {
       setSourceAttributes(sourceId, input);
       database.exec("COMMIT");
     } catch (error) { database.exec("ROLLBACK"); throw error; }
-    void scanSource(sourceId, resolvedPath).catch((error) => app.log.error(error, "Source scan failed"));
+    void scanSource(sourceId, resolvedPath, { englishAttributes: true }).catch((error) => app.log.error(error, "Source scan failed"));
     const source = database.prepare(`${sourceSummaryQuery} HAVING s.id = ?`).get(sourceId);
     return reply.code(201).send({ ...(source as Record<string, unknown>), ...sourceAttributes(sourceId) });
   } catch (error) {
@@ -190,7 +190,7 @@ app.post("/api/sources", async (request, reply) => {
   }
 });
 
-const scanOptionsInput = z.object({ englishAttributes: z.boolean().default(false) });
+const scanOptionsInput = z.object({ englishAttributes: z.boolean().default(true) });
 app.post("/api/sources/scan", async (request, reply) => {
   const scanOptions = scanOptionsInput.parse(request.body ?? {});
   const sources = database.prepare("SELECT * FROM sources WHERE enabled = 1 ORDER BY id").all() as unknown as SourceRow[];
@@ -259,7 +259,7 @@ app.patch("/api/sources/:id", async (request, reply) => {
     }
     throw error;
   }
-  if (source.enabled) void scanSource(id, resolvedPath).catch((error) => app.log.error(error, "Source scan failed"));
+  if (source.enabled) void scanSource(id, resolvedPath, { englishAttributes: true }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ id, name, root_path: resolvedPath, status: source.enabled ? "scanning" : "idle" });
 });
 

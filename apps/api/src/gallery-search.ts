@@ -20,7 +20,7 @@ export function gallerySearchFilters(query: string, fuzzy = false, groups = expa
       for (const { kind, entries } of definitions) {
         const ids = normalized ? entries.filter((entry) => entry.phrases.some((phrase) => phrase.includes(normalized))).map((entry) => entry.id) : [];
         if (!ids.length) continue;
-        const table = kind === "people" ? "item_people" : `effective_item_${kind}`;
+        const table = `effective_item_${kind}`;
         const column = kind === "people" ? "person_id" : kind === "tags" ? "tag_id" : "category_id";
         candidates.push(`SELECT item_id FROM ${table} WHERE ${column} IN (SELECT value FROM json_each(?))`);
         values.push(JSON.stringify(ids));

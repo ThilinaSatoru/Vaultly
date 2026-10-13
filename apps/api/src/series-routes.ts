@@ -60,6 +60,23 @@ function seriesCategories(ids: number[]) {
   return result;
 }
 
+function seriesPeople(ids: number[]) {
+  const result = new Map<number, Array<{ id: number; name: string }>>();
+  for (let offset = 0; offset < ids.length; offset += 500) {
+    const batch = ids.slice(offset, offset + 500);
+    const rows = database.prepare(`SELECT sp.series_id, p.id, p.name
+      FROM series_people sp JOIN people p ON p.id = sp.person_id
+      WHERE sp.series_id IN (${batch.map(() => "?").join(",")}) ORDER BY p.name COLLATE NOCASE`)
+      .all(...batch) as Array<{ series_id: number; id: number; name: string }>;
+    for (const row of rows) {
+      const people = result.get(row.series_id) ?? [];
+      people.push({ id: row.id, name: row.name });
+      result.set(row.series_id, people);
+    }
+  }
+  return result;
+}
+
 function getSeries(id: number) {
   const row = database.prepare(`
     SELECT s.id, s.title, s.description, s.preferred_type, s.favorite,
@@ -85,6 +102,7 @@ function getSeries(id: number) {
     ...row,
     tags: seriesTags([id]).get(id) ?? [],
     categories: seriesCategories([id]).get(id) ?? [],
+    people: seriesPeople([id]).get(id) ?? [],
   };
 }
 
@@ -132,7 +150,8 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
     `).all(...values) as unknown as SeriesRow[];
     const tagsBySeries = seriesTags(rows.map((row) => row.id));
     const categoriesBySeries = seriesCategories(rows.map((row) => row.id));
-    return rows.map((row) => ({ ...row, tags: tagsBySeries.get(row.id) ?? [], categories: categoriesBySeries.get(row.id) ?? [] }));
+    const peopleBySeries = seriesPeople(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, tags: tagsBySeries.get(row.id) ?? [], categories: categoriesBySeries.get(row.id) ?? [], people: peopleBySeries.get(row.id) ?? [] }));
   });
 
   app.post("/api/series", async (request, reply) => {
@@ -225,6 +244,27 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       database.exec("ROLLBACK");
       throw error;
     }
+    return getSeries(id);
+  });
+
+  app.put("/api/series/:id/people", async (request, reply) => {
+    const { id } = idInput.parse(request.params);
+    const { personIds } = z.object({ personIds: idsInput }).parse(request.body);
+    if (!getSeries(id)) return reply.code(404).send({ message: "Series or set not found." });
+    const unique = [...new Set(personIds)];
+    for (const personId of unique) {
+      if (!database.prepare("SELECT id FROM people WHERE id = ?").get(personId)) {
+        return reply.code(400).send({ message: `Person ${personId} does not exist.` });
+      }
+    }
+    database.exec("BEGIN IMMEDIATE");
+    try {
+      database.prepare("DELETE FROM series_people WHERE series_id = ?").run(id);
+      const insert = database.prepare("INSERT INTO series_people(series_id, person_id) VALUES (?, ?)");
+      for (const personId of unique) insert.run(id, personId);
+      database.prepare("UPDATE series SET updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+      database.exec("COMMIT");
+    } catch (error) { database.exec("ROLLBACK"); throw error; }
     return getSeries(id);
   });
 

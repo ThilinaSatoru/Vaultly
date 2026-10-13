@@ -61,7 +61,7 @@ export function AttributeBulkUpload({
         finish.update("Importing and indexing attributes", processed, total);
       });
       setResult(
-        `${report.created} created, ${report.updated} updated, ${report.indexed} new media assignments.`,
+        `${report.created} created, ${report.updated} updated${report.skipped ? `, ${report.skipped} duplicates skipped` : ""}, ${report.indexed} new media assignments.`,
       );
     } catch (failure) {
       setError(
@@ -86,8 +86,7 @@ export function AttributeBulkUpload({
       </label>
       <p>
         Upload a prepared JSON file. Existing names are matched without case
-        sensitivity. Supplied fields update existing entries; omitted fields are
-        preserved. Names and patterns are matched against indexed media
+        sensitivity. {kind === "people" ? "Duplicate people are skipped, including repeats within the upload; existing profiles and patterns are preserved." : "Supplied fields update existing entries; omitted fields are preserved."} Names and patterns are matched against indexed media
         filenames.
       </p>
       <details>

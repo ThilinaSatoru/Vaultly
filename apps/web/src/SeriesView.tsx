@@ -8,7 +8,7 @@ import { TagCombobox } from "./TagCombobox";
 import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { CircleView } from "./CircleView";
 import { useArtworkOrientation } from "./artwork";
-import { api, type Category, type CircleSummary, type ItemPage, type MediaType, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
+import { api, type Category, type CircleSummary, type ItemPage, type MediaType, type Person, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 import type { LibraryView } from "./App";
 
 interface SeriesViewProps {
@@ -18,6 +18,9 @@ interface SeriesViewProps {
   initialEntityView?: "sets" | "circles";
   categories: Category[];
   tags: Tag[];
+  people?: Person[];
+  onPersonCreated?: (name: string) => Promise<Person>;
+  onPeopleChanged?: () => void;
   onCategoryCreated: (name: string) => Promise<Category>;
   onTagCreated: (name: string) => Promise<Tag>;
   onCategoriesChanged: () => void;
@@ -76,13 +79,13 @@ function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: 
   return <article className="series-card-wrap">
     <div className="series-card">
       <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} mediaType={mediaType} /></button>
-      <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{entry.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}</div></div>
+      <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{entry.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(entry.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div></div>
     </div>
     <button className={`series-card-favorite${entry.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={entry.favorite ? `Remove ${entry.title} from favorites` : `Add ${entry.title} to favorites`}><Heart size={17} fill={entry.favorite ? "currentColor" : "none"} /></button>
   </article>;
 }
 
-export function SeriesView({ view, mediaType, initialSeriesId = null, initialEntityView = "sets", categories, tags, onCategoryCreated, onTagCreated, onCategoriesChanged, onTagsChanged, onOpenItem }: SeriesViewProps) {
+export function SeriesView({ view, mediaType, initialSeriesId = null, initialEntityView = "sets", categories, tags, people = [], onPersonCreated, onPeopleChanged, onCategoryCreated, onTagCreated, onCategoriesChanged, onTagsChanged, onOpenItem }: SeriesViewProps) {
   const navigation = useContext(NavigationContext)!;
   const [seriesList, setSeriesList] = useState<SeriesSummary[]>([]);
   const [selectedId, setSelectedId] = useNavigationField<number | null>("SeriesView.selectedId", initialSeriesId, "Collection");
@@ -214,6 +217,17 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     finally { setBusy(false); }
   };
 
+  const updatePeople = async (personIds: number[]) => {
+    if (!detail) return;
+    setBusy(true); setError("");
+    try {
+      await api(`/api/series/${detail.id}/people`, { method: "PUT", body: JSON.stringify({ personIds }) });
+      await Promise.all([loadDetail(detail.id), loadList()]);
+      onPeopleChanged?.();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not update shared people."); }
+    finally { setBusy(false); }
+  };
+
   const updateCircles = async (ids: number[]) => {
     if (!detail) return;
     setBusy(true); setError("");
@@ -315,6 +329,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
           </div>
           <AttributeMediaContext.Provider value={mediaType ?? (setType(detail) === "mixed" ? undefined : setType(detail) as MediaType)}><TagCombobox attributeKind="tag" label="Set tags" tags={tags} selectedIds={detail.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={busy} placeholder="Search or create tags" />
           <TagCombobox attributeKind="category" label="Set categories" tags={categories} selectedIds={(detail.categories ?? []).map((category) => category.id)} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={busy} placeholder="Search or create categories" />
+          <TagCombobox attributeKind={setType(detail) === "video" ? "cast" : "artist"} label="Shared people" tags={people} selectedIds={(detail.people ?? []).map((person) => person.id)} onChange={(ids) => void updatePeople(ids)} onCreate={onPersonCreated} disabled={busy} placeholder="Search or create people" />
+          <p className="series-shared-people-hint">Shared people apply to every item in this set: Cast for videos, Artists for comics and stories.</p>
           <TagCombobox attributeKind="circle" label="In story circles" tags={circleOptions} selectedIds={circleIds} onChange={(ids) => void updateCircles(ids)} onCreate={createCircle} disabled={busy} placeholder="Search or create circles" /></AttributeMediaContext.Provider>
         </div>
       </div>

@@ -17,6 +17,15 @@ function creditsForItem(id: number, role: "cast" | "artist") {
 }
 
 export async function registerPeopleRoutes(app: FastifyInstance) {
+  app.post("/api/people/cleanup", async () => {
+    // Availability is deliberately ignored: offline and disabled sources retain credits.
+    const removed = database.prepare(`DELETE FROM people WHERE
+      NOT EXISTS (SELECT 1 FROM item_people ip WHERE ip.person_id = people.id)
+      AND NOT EXISTS (SELECT 1 FROM series_people sp WHERE sp.person_id = people.id)
+      RETURNING profile_image`).all() as Array<{ profile_image: string | null }>;
+    for (const person of removed) await removeProfileImage(person.profile_image);
+    return { removed: removed.length };
+  });
   app.get("/api/people/matching/repair", async () => getPeopleRepairProgress());
   app.post("/api/people/matching/repair", async (_request, reply) => {
     void repairPeopleMatches();
@@ -56,7 +65,8 @@ export async function registerPeopleRoutes(app: FastifyInstance) {
   app.get("/api/people", async () => withAttributePatterns("people", database.prepare(`
     SELECT p.*,
       COUNT(DISTINCT CASE WHEN ip.role = 'cast' AND m.available = 1 THEN m.id END) AS cast_count,
-      COUNT(DISTINCT CASE WHEN ip.role = 'artist' AND m.available = 1 THEN m.id END) AS artist_count
+      COUNT(DISTINCT CASE WHEN ip.role = 'artist' AND m.available = 1 THEN m.id END) AS artist_count,
+      (SELECT COUNT(*) FROM series_people sp WHERE sp.person_id = p.id) AS set_count
     FROM people p LEFT JOIN effective_item_people ip ON ip.person_id = p.id
     LEFT JOIN media_items m ON m.id = ip.item_id
     GROUP BY p.id ORDER BY p.name COLLATE NOCASE
@@ -115,9 +125,12 @@ export async function registerPeopleRoutes(app: FastifyInstance) {
     }
     database.exec("BEGIN IMMEDIATE");
     try {
+      const direct = new Set((database.prepare("SELECT person_id FROM item_people WHERE item_id = ?").all(id) as Array<{ person_id: number }>).map((row) => row.person_id));
       database.prepare("DELETE FROM item_people WHERE item_id = ?").run(id);
+      const inherited = new Set((database.prepare(`SELECT sp.person_id FROM series_items si
+        JOIN series_people sp ON sp.series_id = si.series_id WHERE si.item_id = ?`).all(id) as Array<{ person_id: number }>).map((row) => row.person_id));
       const insert = database.prepare("INSERT INTO item_people(item_id, person_id, role, origin) VALUES (?, ?, ?, 'manual')");
-      for (const personId of unique) insert.run(id, personId, role);
+      for (const personId of unique) if (!inherited.has(personId) || direct.has(personId)) insert.run(id, personId, role);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");

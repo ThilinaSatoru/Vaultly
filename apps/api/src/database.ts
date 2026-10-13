@@ -110,13 +110,6 @@ database.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_item_people_role_person ON item_people(role, person_id, item_id);
 
-  -- Preserve legacy credits while deriving their display role from the media type.
-  DROP VIEW IF EXISTS effective_item_people;
-  CREATE VIEW effective_item_people AS
-    SELECT DISTINCT ip.item_id, ip.person_id,
-      CASE WHEN m.media_type = 'video' THEN 'cast' ELSE 'artist' END AS role
-    FROM item_people ip JOIN media_items m ON m.id = ip.item_id;
-
   CREATE TABLE IF NOT EXISTS series (
     id INTEGER PRIMARY KEY,
     title TEXT NOT NULL,
@@ -155,6 +148,25 @@ database.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_series_categories_category
     ON series_categories(category_id, series_id);
+
+  CREATE TABLE IF NOT EXISTS series_people (
+    series_id INTEGER NOT NULL REFERENCES series(id) ON DELETE CASCADE,
+    person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+    PRIMARY KEY (series_id, person_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_series_people_person ON series_people(person_id, series_id);
+
+  -- Shared people inherit the appropriate credit role for each member's media type.
+  DROP VIEW IF EXISTS effective_item_people;
+  CREATE VIEW effective_item_people AS
+    SELECT ip.item_id, ip.person_id,
+      CASE WHEN m.media_type = 'video' THEN 'cast' ELSE 'artist' END AS role
+    FROM item_people ip JOIN media_items m ON m.id = ip.item_id
+    UNION
+    SELECT si.item_id, sp.person_id,
+      CASE WHEN m.media_type = 'video' THEN 'cast' ELSE 'artist' END AS role
+    FROM series_items si JOIN series_people sp ON sp.series_id = si.series_id
+      JOIN media_items m ON m.id = si.item_id;
 
   CREATE TABLE IF NOT EXISTS circles (
     id INTEGER PRIMARY KEY,
