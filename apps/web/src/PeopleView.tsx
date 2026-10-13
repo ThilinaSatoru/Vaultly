@@ -5,6 +5,7 @@ import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { AttributeBadge } from "./AttributeBadge";
 import { PersonImageDialog } from "./PersonImageDialog";
 import { AttributeBulkUpload } from "./AttributeBulkUpload";
+import { PeopleMatchingRepair } from "./PeopleMatchingRepair";
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, formatCount, type Person } from "./media";
@@ -43,6 +44,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
     <form className="category-form" onSubmit={add}><label htmlFor="new-person">New person</label><div><input id="new-person" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" maxLength={100} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div></form>
     {error && <p className="page-error" role="alert">{error}</p>}
     <AttributeBulkUpload kind="people" onChanged={onChanged} />
+    <PeopleMatchingRepair onChanged={onChanged} />
     {tools}
     <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : visible.map((person) =>
       <article className="person-profile-card" key={person.id}>

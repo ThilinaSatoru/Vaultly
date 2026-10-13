@@ -8,6 +8,7 @@ import { applyTheme } from "./theme";
 
 const root = createRoot(document.getElementById("root")!);
 async function start() {
+  root.render(<div className="boot-loading" role="status" aria-live="polite"><div className="boot-spinner" aria-hidden="true" /><h1>Vaultly</h1><p>Opening your library…</p></div>);
   try {
     const response = await fetch("/api/vault-profiles");
     if (!response.ok) throw new Error("Could not load vault profiles.");

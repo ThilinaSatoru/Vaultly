@@ -1,4 +1,7 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { fork } from "node:child_process";
+import { terminateProcess } from "../../api/src/background-processes.js";
+import type { DesktopRequest, DesktopResponse } from "./server-ipc.js";
 import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +12,7 @@ let mainWindow: BrowserWindow | null = null;
 let closeServer: (() => Promise<void>) | null = null;
 let serverAddress: string | null = null;
 let shuttingDown = false;
+let shutdownComplete = false;
 let preferences: Record<string, string> | undefined;
 function readPreferences() {
   if (!preferences) {
@@ -48,38 +52,7 @@ process.on("uncaughtExceptionMonitor", (error) => recordCrash(error.stack ?? err
 app.on("child-process-gone", (_event, details) => recordCrash(`Child process: ${JSON.stringify(details)}`));
 
 async function createWindow() {
-  if (!serverAddress) {
-    process.env.VAULTLY_RUNTIME_DIR = app.getPath("userData");
-    process.env.VAULTLY_PDF_WORKER_PATH = path.join(currentDirectory, "pdf-thumbnail-worker.mjs");
-    process.env.VAULTLY_COVER_WORKER_PATH = path.join(currentDirectory, "cover-dimensions-worker.mjs");
-
-    const { startVaultlyServer } = await import("../../api/src/server.js");
-    const staticRoot = developmentUrl
-      ? undefined
-      : app.isPackaged ? path.join(process.resourcesPath, "web") : path.resolve(currentDirectory, "../../web/dist");
-    const { app: server, address } = await startVaultlyServer({
-      port: developmentUrl ? Number.parseInt(process.env.VAULTLY_API_PORT ?? "4400", 10) : 0,
-      staticRoot,
-      pickDirectory: async () => {
-        const dialogOptions = {
-        title: "Choose a media library folder",
-          properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
-        };
-        const result = mainWindow
-          ? await dialog.showOpenDialog(mainWindow, dialogOptions)
-          : await dialog.showOpenDialog(dialogOptions);
-        return result.canceled ? null : result.filePaths[0] ?? null;
-      },
-      revealPath: async (itemPath) => shell.showItemInFolder(itemPath),
-      openVideo: async (itemPath) => {
-        const error = await shell.openPath(itemPath);
-        if (error) throw new Error(error);
-      },
-    });
-    serverAddress = address;
-    closeServer = () => server.close();
-  }
-
+  Menu.setApplicationMenu(null);
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -88,8 +61,10 @@ async function createWindow() {
     backgroundColor: "#111315",
     icon: path.join(currentDirectory, process.platform === "win32" ? "icon.ico" : "icon.png"),
     show: false,
+    autoHideMenuBar: true,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(currentDirectory, "preload.cjs") },
   });
+  mainWindow.setMenu(null);
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.webContents.on("render-process-gone", (_event, details) => recordCrash(`Renderer: ${JSON.stringify(details)}`));
@@ -99,6 +74,7 @@ async function createWindow() {
     return { action: "deny" };
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!developmentUrl && !serverAddress) { event.preventDefault(); return; }
     const allowedOrigin = new URL(developmentUrl ?? serverAddress!).origin;
     if (new URL(url).origin !== allowedOrigin) {
       event.preventDefault();
@@ -106,7 +82,52 @@ async function createWindow() {
     }
   });
 
-  await mainWindow.loadURL(developmentUrl ?? serverAddress);
+  // Paint before database initialization. The API runs outside Electron's UI process.
+  await mainWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(`<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;display:grid;place-items:center;height:100vh;background:#111315;color:#e6edf3;font:16px system-ui}.loading{text-align:center}.spinner{width:32px;height:32px;margin:0 auto 20px;border:3px solid #343b44;border-top-color:#a9c8ec;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}</style></head><body><div class="loading" role="status"><div class="spinner"></div><h1>Vaultly</h1><p>Opening your library…</p></div></body></html>`));
+  if (!serverAddress) {
+    const processOptions = {
+      windowsHide: true, stdio: ["ignore", "ignore", "pipe", "ipc"],
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", VAULTLY_RUNTIME_DIR: app.getPath("userData"),
+        VAULTLY_API_PORT: developmentUrl ? process.env.VAULTLY_API_PORT ?? "4400" : "0",
+        VAULTLY_STATIC_ROOT: developmentUrl ? "" : app.isPackaged ? path.join(process.resourcesPath, "web") : path.resolve(currentDirectory, "../../web/dist"),
+        VAULTLY_PDF_WORKER_PATH: path.join(currentDirectory, "pdf-thumbnail-worker.mjs"), VAULTLY_COVER_WORKER_PATH: path.join(currentDirectory, "cover-dimensions-worker.mjs") },
+    };
+    const child = fork(path.join(currentDirectory, "api-process.cjs"), [], { ...processOptions, stdio: ["ignore", "ignore", "pipe", "ipc"] });
+    let diagnostic = "";
+    child.stderr?.on("data", (chunk) => { diagnostic = (diagnostic + chunk.toString()).slice(-4000); });
+    const exited = new Promise<void>((resolve) => { child.once("exit", () => resolve()); child.once("error", () => resolve()); });
+    closeServer = async () => {
+      if (child.connected) child.send({ type: "stop" });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([exited, new Promise<void>((resolve) => { timer = setTimeout(() => { void terminateProcess(child).then(resolve); }, 15000); })]);
+        await exited;
+      } finally { if (timer) clearTimeout(timer); }
+    };
+    child.on("message", async (message: DesktopRequest | { type: "ready"; address: string }) => {
+      if (message.type !== "desktop") return;
+      const response: DesktopResponse = { type: "desktop-result", id: message.id };
+      try {
+        if (shuttingDown) throw new Error("Vaultly is closing.");
+        if (message.action === "pick-directory") {
+          const options = { title: "Choose a media library folder", properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory"> };
+          const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options);
+          response.value = result.canceled ? null : result.filePaths[0] ?? null;
+        } else if (message.action === "reveal-path" && message.path) shell.showItemInFolder(message.path);
+        else if (message.action === "open-video" && message.path) { const error = await shell.openPath(message.path); if (error) throw new Error(error); }
+      } catch (error) { response.error = String(error); }
+      if (child.connected) child.send(response);
+    });
+    serverAddress = await new Promise<string>((resolve, reject) => {
+      child.on("message", (message: { type?: string; address?: string }) => { if (message.type === "ready" && message.address) resolve(message.address); });
+      child.once("error", reject);
+      child.once("exit", (code) => reject(new Error(diagnostic || `Library server exited (${code}).`)));
+    });
+    child.once("exit", (code) => {
+      if (!shuttingDown) { recordCrash(`Library server exited (${code}): ${diagnostic}`); dialog.showErrorBox("Vaultly's library server stopped", diagnostic || "Restart Vaultly to reopen your library."); app.quit(); }
+    });
+  }
+  if (!shuttingDown && mainWindow) await mainWindow.loadURL(developmentUrl ?? serverAddress);
 }
 
 if (!app.requestSingleInstanceLock()) {
@@ -142,8 +163,10 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", (event) => {
-  if (closeServer && !shuttingDown) {
-    event.preventDefault(); shuttingDown = true;
-    void closeServer().catch((error) => recordCrash(String(error))).finally(() => app.quit());
+  if (closeServer && !shutdownComplete) {
+    event.preventDefault();
+    if (shuttingDown) return;
+    shuttingDown = true;
+    void closeServer().catch((error) => recordCrash(String(error))).finally(() => { shutdownComplete = true; app.quit(); });
   }
 });

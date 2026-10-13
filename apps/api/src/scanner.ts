@@ -8,6 +8,7 @@ import path from "node:path";
 import { setImmediate as yieldToRequests } from "node:timers/promises";
 import { database } from "./database.js";
 import { AttributeNameMatcher, EnglishFilenameMetadataMatcher, FilenameMetadataMatcher, normalizeMetadataFilename, normalizeMetadataPhrase } from "./filename-metadata.js";
+import { PeopleMatcher } from "./people-matching.js";
 import { readComicMetadata, type ComicMetadata } from "./comic-metadata.js";
 import { clearThumbnailCache, getPdfThumbnail, getVideoMetadata, getVideoThumbnail } from "./thumbnails.js";
 
@@ -360,6 +361,7 @@ export async function cancelAllSourceScans(): Promise<number> {
 }
 
 export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean; englishAttributes?: boolean } = {}): Promise<void> {
+  if (!database.prepare("SELECT id FROM sources WHERE id = ? AND enabled = 1").get(sourceId)) return Promise.resolve();
   if (isSourceConverting(sourceId)) return Promise.resolve();
   const existingScan = scans.get(sourceId);
   if (existingScan) return existingScan.promise;
@@ -418,15 +420,16 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         const patternedTags = withAttributePatterns("tags", tags);
         const patternedPeople = withAttributePatterns("people", people);
         const tagMatcher = new DescriptiveMatcher(patternedTags);
-        const peopleMatcher = new FilenameMetadataMatcher(patternedPeople);
+        const peopleMatcher = new PeopleMatcher(patternedPeople);
         // Comic metadata requires additional alias indexes. Video/story scans do not.
         let metadataTagMatcher: AttributeNameMatcher<{ id: number; name: string; patterns: string[] }> | undefined;
-        let metadataArtistMatcher: AttributeNameMatcher<{ id: number; name: string; patterns: string[] }> | undefined;
+        let metadataArtistMatcher: PeopleMatcher<{ id: number; name: string; patterns: string[] }> | undefined;
         const createArtist = database.prepare("INSERT OR IGNORE INTO people(name) VALUES (?)");
         const findArtist = database.prepare("SELECT id, name FROM people WHERE name = ? COLLATE NOCASE");
         const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) SELECT ?, id FROM categories WHERE id = ?");
         const addTag = database.prepare("INSERT OR IGNORE INTO item_tags(item_id, tag_id) SELECT ?, id FROM tags WHERE id = ?");
-        const addPerson = database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) SELECT ?, id, ? FROM people WHERE id = ?");
+        const addPerson = database.prepare("INSERT INTO item_people(item_id, person_id, role, origin) SELECT ?, id, ?, ? FROM people WHERE id = ? ON CONFLICT(item_id, person_id, role) DO UPDATE SET origin = CASE WHEN item_people.origin IN ('manual', 'metadata') THEN item_people.origin ELSE excluded.origin END");
+        const clearFilenamePeople = database.prepare("DELETE FROM item_people WHERE item_id = ? AND origin = 'filename'");
         const pathKey = (item: ScannedItem) => `${item.mediaType}|${process.platform === "win32" ? item.relativePath.toLowerCase() : item.relativePath}`;
         const previousByPath = new Map(previousItems.map((item) => [pathKey(item), item]));
         const incomingPaths = new Set(items.map(pathKey));
@@ -519,25 +522,26 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
           for (const tag of tagMatcher.matchNormalized(normalizedFilename)) {
             addTag.run(row.id, tag.id);
           }
+          clearFilenamePeople.run(row.id);
           for (const person of peopleMatcher.matchNormalized(normalizedFilename)) {
-            addPerson.run(row.id, item.mediaType === "video" ? "cast" : "artist", person.id);
+            addPerson.run(row.id, item.mediaType === "video" ? "cast" : "artist", "filename", person.id);
           }
           if (item.comicMetadata) {
             metadataTagMatcher ??= new AttributeNameMatcher(patternedTags);
-            metadataArtistMatcher ??= new AttributeNameMatcher(patternedPeople);
+            metadataArtistMatcher ??= new PeopleMatcher(patternedPeople);
             for (const name of item.comicMetadata.tags) {
               for (const tag of metadataTagMatcher.match(name)) addTag.run(row.id, tag.id);
             }
             for (const name of item.comicMetadata.artists) {
               if (name.length > 100 || !normalizeMetadataPhrase(name)) continue;
-              let artists = metadataArtistMatcher.match(name);
+              let artists = metadataArtistMatcher.matchValue(name);
               if (!artists.length) {
                 createArtist.run(name);
                 const artist = findArtist.get(name) as { id: number; name: string };
                 metadataArtistMatcher.add({ ...artist, patterns: [] });
                 artists = [{ ...artist, patterns: [] }];
               }
-              for (const artist of artists) addPerson.run(row.id, "artist", artist.id);
+              for (const artist of artists) addPerson.run(row.id, "artist", "metadata", artist.id);
             }
             // Metadata has been persisted; it is unnecessary for covers and thumbnails.
             delete item.comicMetadata;

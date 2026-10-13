@@ -175,7 +175,7 @@ async function sendLocalFile(
 const itemSelect = (indexedSearch = false) => `
   SELECT m.id, m.source_id, m.media_type, m.title, m.filename, m.file_extension, m.relative_path, m.size_bytes, m.favorite, m.duration_seconds,
     m.modified_at_ms, m.file_count, m.video_width, m.video_height, m.cover_width, m.cover_height, m.cover_signature,
-    (m.cover_data IS NOT NULL) AS custom_cover, (m.cover_data IS NOT NULL OR m.cover_path IS NOT NULL) AS has_cover, s.name AS source_name,
+    (m.cover_data IS NOT NULL) AS custom_cover, (m.cover_data IS NOT NULL OR m.cover_path IS NOT NULL) AS has_cover, s.name AS source_name, s.root_path AS source_path,
     COALESCE((SELECT group_concat(c.name, ', ')
       FROM effective_item_categories ic JOIN categories c ON c.id = ic.category_id
       WHERE ic.item_id = m.id), '') AS category_names

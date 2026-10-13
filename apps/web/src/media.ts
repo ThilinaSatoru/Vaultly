@@ -6,6 +6,7 @@ export interface MediaItem {
   id: number;
   source_id: number;
   source_name: string;
+  source_path?: string;
   media_type: MediaType;
   title: string;
   filename: string;

@@ -1,13 +1,13 @@
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
-import { execFile, fork } from "node:child_process";
+import { fork } from "node:child_process";
 import { mkdir, readdir, rename, stat, unlink } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
 import { runtimeDirectory, onVaultChanged } from "./database.js";
 import { withMediaProcess } from "./process-resources.js";
+import { backgroundSignal, runCommand, trackProcess } from "./background-processes.js";
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = runCommand;
 let thumbnailDirectory = path.join(runtimeDirectory, "thumbnails");
 const inFlight = new Map<string, Promise<string>>();
 export interface VideoMetadata { durationSeconds: number | null; width: number | null; height: number | null }
@@ -112,6 +112,7 @@ export function parseVideoMetadata(diagnostic: string): VideoMetadata {
 }
 
 export function getVideoMetadata(inputPath: string, signal?: AbortSignal): Promise<VideoMetadata> {
+  signal = backgroundSignal(signal);
   const pending = metadataInFlight.get(inputPath);
   if (pending) return waitForTask(pending, signal);
   const task = withProbe(async () => {
@@ -146,7 +147,7 @@ function renderPdfInWorker(inputPath: string, outputPath: string, signal?: Abort
     stdio: ["ignore", "ignore", "ignore", "ipc"] as ("ignore" | "ipc")[],
     env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   };
-  const worker = fork(workerUrl, [inputPath, outputPath], processOptions);
+  const worker = trackProcess(fork(workerUrl, [inputPath, outputPath], processOptions));
   return new Promise<void>((resolve, reject) => {
     let settled = false;
     const finish = (error?: Error) => {
@@ -181,6 +182,7 @@ export function getVideoThumbnail(
   modifiedAtMs: number,
   signal?: AbortSignal,
 ): Promise<string> {
+  signal = backgroundSignal(signal);
   // Versioned so previously cached opening-frame thumbnails are replaced.
   const cacheKey = `video-mid-v2-${id}-${sizeBytes}-${Math.round(modifiedAtMs)}`;
   const targetPath = path.join(thumbnailDirectory, `${cacheKey}.jpg`);
@@ -223,6 +225,7 @@ export function getPdfThumbnail(
   modifiedAtMs: number,
   signal?: AbortSignal,
 ): Promise<string> {
+  signal = backgroundSignal(signal);
   const cacheKey = `pdf-${id}-${sizeBytes}-${Math.round(modifiedAtMs)}`;
   const targetPath = path.join(thumbnailDirectory, `${cacheKey}.jpg`);
   const pending = inFlight.get(cacheKey);

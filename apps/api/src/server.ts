@@ -18,6 +18,8 @@ import { registerBulkRoutes } from "./bulk-routes.js";
 import { registerCircleRoutes } from "./circle-routes.js";
 import { registerBackupRoutes } from "./backup-routes.js";
 import { getBackgroundActivity } from "./background-activity.js";
+import { cancelPeopleRepair, enableAutomaticPeopleRepair, waitForPeopleRepair } from "./people-repair.js";
+import { resetProcessShutdown, stopBackgroundProcesses } from "./background-processes.js";
 import { getSystemResources } from "./process-resources.js";
 import { cancelSourceConversion, checkConversionRuntime, getConversionProgress, isSourceConverting, startSourceConversion } from "./source-conversion.js";
 
@@ -31,6 +33,7 @@ export interface VaultlyServerOptions {
 }
 
 export async function buildVaultlyServer(options: VaultlyServerOptions = {}) {
+resetProcessShutdown();
 await removeLegacyPlaybackCache().catch(() => undefined);
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: ["http://127.0.0.1:5173", "http://localhost:5173"] });
@@ -75,13 +78,14 @@ app.post("/api/sources/:id/conversion", async (request, reply) => {
   const { mode } = z.object({ mode: z.enum(["quick", "slow", "both"]).default("both") }).parse(request.body ?? {});
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
+  if (!source.enabled) return reply.code(409).send({ message: "Enable this source before converting videos." });
   if (source.status === "scanning" || !source.last_scanned_at) return reply.code(409).send({ message: "Finish scanning this source before converting videos." });
   if (isSourceConverting(id)) return reply.code(202).send(getConversionProgress(id));
   try { await checkConversionRuntime(); }
   catch { return reply.code(503).send({ message: "Conversion requires Python, ffmpeg and ffprobe on PATH. Set VAULTLY_PYTHON if Python uses a different executable." }); }
   // A scan may have started while checking the external tools.
-  const current = database.prepare("SELECT status, root_path FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
-  if (!current || current.status === "scanning" || current.root_path !== source.root_path) return reply.code(409).send({ message: "Source changed; try conversion after scanning finishes." });
+  const current = database.prepare("SELECT status, root_path, enabled FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+  if (!current || !current.enabled || current.status === "scanning" || current.root_path !== source.root_path) return reply.code(409).send({ message: "Source changed; try conversion after scanning finishes." });
   return reply.code(202).send(startSourceConversion(id, source.root_path, mode));
 });
 app.post("/api/sources/:id/conversion/cancel", async (request) => {
@@ -89,18 +93,22 @@ app.post("/api/sources/:id/conversion/cancel", async (request) => {
   return cancelSourceConversion(id);
 });
 app.addHook("onClose", async () => {
-  await cancelAllSourceScans();
-  const sources = database.prepare("SELECT id FROM sources").all() as Array<{ id: number }>;
-  await Promise.all(sources.map(({ id }) => cancelSourceConversion(id)));
+  try {
+    cancelPeopleRepair();
+    await waitForPeopleRepair();
+    await cancelAllSourceScans();
+    const sources = database.prepare("SELECT id FROM sources").all() as Array<{ id: number }>;
+    await Promise.all(sources.map(({ id }) => cancelSourceConversion(id)));
+  } finally { await stopBackgroundProcesses(); }
 });
 
 const sourceSummaryQuery = `
   SELECT
     s.*,
-    COUNT(CASE WHEN m.available = 1 THEN 1 END) AS item_count,
-    COUNT(CASE WHEN m.available = 1 AND m.media_type = 'comic' THEN 1 END) AS comic_count,
-    COUNT(CASE WHEN m.available = 1 AND m.media_type = 'video' THEN 1 END) AS video_count,
-    COUNT(CASE WHEN m.available = 1 AND m.media_type = 'story' THEN 1 END) AS story_count
+    COUNT(CASE WHEN m.indexed = 1 THEN 1 END) AS item_count,
+    COUNT(CASE WHEN m.indexed = 1 AND m.media_type = 'comic' THEN 1 END) AS comic_count,
+    COUNT(CASE WHEN m.indexed = 1 AND m.media_type = 'video' THEN 1 END) AS video_count,
+    COUNT(CASE WHEN m.indexed = 1 AND m.media_type = 'story' THEN 1 END) AS story_count
   FROM sources s
   LEFT JOIN media_items m ON m.source_id = s.id
   GROUP BY s.id
@@ -123,11 +131,7 @@ app.get("/api/sources", async () => {
   const updateConnection = database.prepare("UPDATE sources SET connected = ? WHERE id = ? AND connected <> ?");
   for (const source of checked) {
     const connected = source.path_available ? 1 : 0;
-    const changed = updateConnection.run(connected, source.id, connected).changes;
-    if (changed) {
-      database.prepare("UPDATE media_items SET available = CASE WHEN ? = 1 THEN indexed ELSE 0 END WHERE source_id = ?")
-        .run(connected, source.id);
-    }
+    updateConnection.run(connected, source.id, connected);
   }
   const availability = new Map(checked.map((source) => [source.id, { path_available: source.path_available, path_error: source.path_error }]));
   const summaries = database.prepare(`${sourceSummaryQuery} ORDER BY s.created_at DESC`).all() as Array<SourceRow & Record<string, unknown>>;
@@ -189,7 +193,7 @@ app.post("/api/sources", async (request, reply) => {
 const scanOptionsInput = z.object({ englishAttributes: z.boolean().default(false) });
 app.post("/api/sources/scan", async (request, reply) => {
   const scanOptions = scanOptionsInput.parse(request.body ?? {});
-  const sources = database.prepare("SELECT * FROM sources ORDER BY id").all() as unknown as SourceRow[];
+  const sources = database.prepare("SELECT * FROM sources WHERE enabled = 1 ORDER BY id").all() as unknown as SourceRow[];
   if (sources.some((source) => isSourceConverting(source.id))) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
   for (const source of sources) void scanSource(source.id, source.root_path, { generateThumbnails: true, ...scanOptions }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning", count: sources.length });
@@ -200,6 +204,7 @@ app.post("/api/sources/:id/scan", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
+  if (!source.enabled) return reply.code(409).send({ message: "Enable this source before scanning." });
   if (isSourceConverting(id)) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
   void scanSource(source.id, source.root_path, { generateThumbnails: true, ...scanOptions }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning" });
@@ -213,6 +218,23 @@ app.post("/api/sources/:id/scan/cancel", async (request, reply) => {
     return reply.code(404).send({ message: "Library source not found." });
   }
   return { cancelled: await cancelSourceScan(id) };
+});
+
+app.patch("/api/sources/:id/enabled", async (request, reply) => {
+  const { id } = sourceIdInput.parse(request.params);
+  const { enabled } = z.object({ enabled: z.boolean() }).parse(request.body);
+  const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+  if (!source) return reply.code(404).send({ message: "Library source not found." });
+  // Hide immediately, before waiting for native processes and queued scans to stop.
+  if (!enabled) {
+    database.prepare("UPDATE sources SET enabled = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
+    await Promise.all([cancelSourceScan(id), cancelSourceConversion(id)]);
+  } else {
+    let connected = 0;
+    try { connected = (await stat(source.root_path)).isDirectory() ? 1 : 0; } catch { /* Drive is offline. */ }
+    database.prepare("UPDATE sources SET enabled = 1, connected = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(connected, id);
+  }
+  return database.prepare("SELECT * FROM sources WHERE id = ?").get(id);
 });
 
 app.patch("/api/sources/:id", async (request, reply) => {
@@ -237,8 +259,8 @@ app.patch("/api/sources/:id", async (request, reply) => {
     }
     throw error;
   }
-  void scanSource(id, resolvedPath).catch((error) => app.log.error(error, "Source scan failed"));
-  return reply.code(202).send({ id, name, root_path: resolvedPath, status: "scanning" });
+  if (source.enabled) void scanSource(id, resolvedPath).catch((error) => app.log.error(error, "Source scan failed"));
+  return reply.code(202).send({ id, name, root_path: resolvedPath, status: source.enabled ? "scanning" : "idle" });
 });
 
 app.delete("/api/sources/:id", async (request, reply) => {
@@ -267,5 +289,6 @@ return app;
 export async function startVaultlyServer(options: VaultlyServerOptions = {}) {
   const app = await buildVaultlyServer(options);
   const address = await app.listen({ host: options.host ?? "127.0.0.1", port: options.port ?? 4400 });
+  enableAutomaticPeopleRepair();
   return { app, address };
 }

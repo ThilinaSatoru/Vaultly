@@ -1,7 +1,11 @@
 import { Select } from "./Select";
 import { VaultProfiles } from "./VaultProfiles";
 import type { VaultProfiles as ProfileList } from "./vault-session";
-import { SourceAttributesDialog, SourceAttributeFields, type SourceAttributeOptions } from "./SourceAttributesDialog";
+import {
+  SourceAttributesDialog,
+  SourceAttributeFields,
+  type SourceAttributeOptions,
+} from "./SourceAttributesDialog";
 import { SourceConversion } from "./SourceConversion";
 import { SourcesBrowser } from "./SourcesBrowser";
 import { AttributeBadge, AttributeBrowseProvider } from "./AttributeBadge";
@@ -11,8 +15,15 @@ import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { CategoriesView } from "./CategoriesView";
 import { TagsView } from "./TagsView";
 import { PeopleView } from "./PeopleView";
-import { AttributeManagerContext, type AttributeManagerKind } from "./attribute-manager";
-import { NavigationContext, useNavigation, useNavigationField } from "./navigation";
+import {
+  AttributeManagerContext,
+  type AttributeManagerKind,
+} from "./attribute-manager";
+import {
+  NavigationContext,
+  useNavigation,
+  useNavigationField,
+} from "./navigation";
 import type { GalleryVideoContext } from "./video-playlist";
 import {
   AlertTriangle,
@@ -44,18 +55,37 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { type FormEvent, type ReactNode, useContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type ReactNode,
+  useContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { GalleryView } from "./GalleryView";
 import { MediaViewer } from "./MediaViewer";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
 import { HelpView } from "./HelpView";
 import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
-import { api, formatCount, type Category, type MediaItem, type MediaType, type Person, type SeriesViewerContext, type Tag } from "./media";
+import {
+  api,
+  formatCount,
+  type Category,
+  type MediaItem,
+  type MediaType,
+  type Person,
+  type SeriesViewerContext,
+  type Tag,
+} from "./media";
 
 type SourceStatus = "idle" | "scanning" | "ready" | "error";
 
 interface LibrarySource {
+  enabled?: number;
   id: number;
   name: string;
   root_path: string;
@@ -74,19 +104,79 @@ interface LibrarySource {
   path_error: string | null;
 }
 
-type Section = "home" | "all" | MediaType | "categories" | "tags" | "people" | "sources" | "settings" | "help";
-export type LibraryView = "browse" | "categories" | "favorites" | "series" | "circles";
+type Section =
+  | "home"
+  | "all"
+  | MediaType
+  | "categories"
+  | "tags"
+  | "people"
+  | "sources"
+  | "settings"
+  | "help";
+export type LibraryView =
+  | "browse"
+  | "categories"
+  | "favorites"
+  | "series"
+  | "circles";
 
-function LibraryNav({ active, view, icon, label, count, onBrowse, onView }: { active: boolean; view: LibraryView; icon: ReactNode; label: string; count?: string; onBrowse: () => void; onView: (view: LibraryView) => void }) {
-  return <div className={`library-nav-group${active ? " is-active" : ""}`}>
-    <button className={active && view === "browse" ? "nav-active" : "nav-link"} type="button" onClick={onBrowse}>{icon} {label}{count && <span>{count}</span>}</button>
-    {active && <div className="library-submenu">
-      <button className={view === "categories" ? "active" : ""} type="button" onClick={() => onView("categories")}><Folder size={14} /> Categories</button>
-      <button className={view === "favorites" ? "active" : ""} type="button" onClick={() => onView("favorites")}><Heart size={14} /> Favorites</button>
-      <button className={view === "series" ? "active" : ""} type="button" onClick={() => onView("series")}><Layers3 size={14} /> Series & sets</button>
-      <button className={view === "circles" ? "active" : ""} type="button" onClick={() => onView("circles")}><Orbit size={14} /> Circles</button>
-    </div>}
-  </div>;
+function LibraryNav({
+  active,
+  view,
+  icon,
+  label,
+  count,
+  onBrowse,
+  onView,
+}: {
+  active: boolean;
+  view: LibraryView;
+  icon: ReactNode;
+  label: string;
+  count?: string;
+  onBrowse: () => void;
+  onView: (view: LibraryView) => void;
+}) {
+  return (
+    <div className={`library-nav-group${active ? " is-active" : ""}`}>
+      <button
+        className={active && view === "browse" ? "nav-active" : "nav-link"}
+        type="button"
+        onClick={onBrowse}>
+        {icon} {label}
+        {count && <span>{count}</span>}
+      </button>
+      {active && (
+        <div className="library-submenu">
+          <button
+            className={view === "categories" ? "active" : ""}
+            type="button"
+            onClick={() => onView("categories")}>
+            <Folder size={14} /> Categories
+          </button>
+          <button
+            className={view === "favorites" ? "active" : ""}
+            type="button"
+            onClick={() => onView("favorites")}>
+            <Heart size={14} /> Favorites
+          </button>
+          <button
+            className={view === "series" ? "active" : ""}
+            type="button"
+            onClick={() => onView("series")}>
+            <Layers3 size={14} /> Series & sets
+          </button>
+          <button
+            className={view === "circles" ? "active" : ""}
+            type="button"
+            onClick={() => onView("circles")}>
+            <Orbit size={14} /> Circles
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const formatScanDate = (value: string | null) => {
@@ -101,7 +191,11 @@ const formatScanDate = (value: string | null) => {
   return relativeTime.format(Math.round(hours / 24), "day");
 };
 
-function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttributeOptions & { onClose: () => void; onAdded: () => void }) {
+function AddSourceDialog({
+  onClose,
+  onAdded,
+  ...attributeOptions
+}: SourceAttributeOptions & { onClose: () => void; onAdded: () => void }) {
   const [rootPath, setRootPath] = useState("");
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [categoryIds, setCategoryIds] = useState<number[]>([]);
@@ -115,10 +209,17 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
     setPicking(true);
     setError("");
     try {
-      const result = await api<{ path: string | null }>("/api/system/pick-directory", { method: "POST" });
+      const result = await api<{ path: string | null }>(
+        "/api/system/pick-directory",
+        { method: "POST" },
+      );
       if (result.path) setRootPath(result.path);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not open the folder picker.");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not open the folder picker.",
+      );
     } finally {
       setPicking(false);
     }
@@ -135,86 +236,196 @@ function AddSourceDialog({ onClose, onAdded, ...attributeOptions }: SourceAttrib
     try {
       await api("/api/sources", {
         method: "POST",
-        body: JSON.stringify({ rootPath: rootPath.trim(), name: name.trim() || undefined, mediaType, tagIds, categoryIds }),
+        body: JSON.stringify({
+          rootPath: rootPath.trim(),
+          name: name.trim() || undefined,
+          mediaType,
+          tagIds,
+          categoryIds,
+        }),
       });
       onAdded();
       onClose();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not add this folder.");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not add this folder.",
+      );
     } finally {
       setSaving(false);
     }
   };
 
   return (
-    <AttributeEditorDialog title="Add a library source" onClose={onClose} busy={saving || picking}>
-        <div className="dialog-icon"><FolderOpen size={24} /></div>
-        <p className="dialog-intro">Choose a media type, then its root folder. Nested folders keep their structure and unrelated files are skipped.</p>
+    <AttributeEditorDialog
+      title="Add a library source"
+      onClose={onClose}
+      busy={saving || picking}>
+      <div className="dialog-icon">
+        <FolderOpen size={24} />
+      </div>
+      <p className="dialog-intro">
+        Choose a media type, then its root folder. Nested folders keep their
+        structure and unrelated files are skipped.
+      </p>
 
-        <form onSubmit={submit}>
-          <label htmlFor="source-media-type">Media type</label>
-          <Select id="source-media-type" required value={mediaType} onChange={(event) => setMediaType(event.target.value)}><option value="" disabled>Choose a media type…</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></Select>
-          <label htmlFor="source-path">Folder path</label>
-          <div className="path-control">
-            <input
-              id="source-path"
-              value={rootPath}
-              onChange={(event) => setRootPath(event.target.value)}
-              placeholder="D:\\Media"
-              autoFocus
-            />
-            <button className="browse-button" type="button" onClick={chooseFolder} disabled={picking}>
-              {picking ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}
-              Browse
-            </button>
-          </div>
-
-          <label htmlFor="source-name">Display name <span>Optional</span></label>
+      <form onSubmit={submit}>
+        <label htmlFor="source-media-type">Media type</label>
+        <Select
+          id="source-media-type"
+          required
+          value={mediaType}
+          onChange={(event) => setMediaType(event.target.value)}>
+          <option value="" disabled>
+            Choose a media type…
+          </option>
+          <option value="movies">Movies</option>
+          <option value="tv">TV series</option>
+          <option value="anime">Anime</option>
+          <option value="manga">Manga / comics</option>
+          <option value="ebooks">E-books / documents</option>
+          <option value="pictures">Pictures</option>
+        </Select>
+        <label htmlFor="source-path">Folder path</label>
+        <div className="path-control">
           <input
-            id="source-name"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Uses the folder name by default"
+            id="source-path"
+            value={rootPath}
+            onChange={(event) => setRootPath(event.target.value)}
+            placeholder="D:\\Media"
+            autoFocus
           />
+          <button
+            className="browse-button"
+            type="button"
+            onClick={chooseFolder}
+            disabled={picking}>
+            {picking ? (
+              <LoaderCircle className="spin" size={17} />
+            ) : (
+              <FolderOpen size={17} />
+            )}
+            Browse
+          </button>
+        </div>
 
-          <SourceAttributeFields {...attributeOptions} tagIds={tagIds} categoryIds={categoryIds} onTagsChange={setTagIds} onCategoriesChange={setCategoryIds} disabled={saving} />
+        <label htmlFor="source-name">
+          Display name <span>Optional</span>
+        </label>
+        <input
+          id="source-name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Uses the folder name by default"
+        />
 
-          <div className="mixed-note">
-            <Grid2X2 size={18} />
-            <div><strong>Scan only the selected media</strong><span>Movie and series scans skip cover images, subtitles, and unrelated documents. Seasons, chapters, and custom subfolders stay browsable.</span></div>
+        <SourceAttributeFields
+          {...attributeOptions}
+          tagIds={tagIds}
+          categoryIds={categoryIds}
+          onTagsChange={setTagIds}
+          onCategoriesChange={setCategoryIds}
+          disabled={saving}
+        />
+
+        <div className="mixed-note">
+          <Grid2X2 size={18} />
+          <div>
+            <strong>Scan only the selected media</strong>
+            <span>
+              Movie and series scans skip cover images, subtitles, and unrelated
+              documents. Seasons, chapters, and custom subfolders stay
+              browsable.
+            </span>
           </div>
+        </div>
 
-          {error && <p className="form-error" role="alert">{error}</p>}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
 
-          <div className="dialog-actions">
-            <button className="secondary-button" type="button" onClick={onClose}>Cancel</button>
-            <button className="primary-button" type="submit" disabled={saving}>
-              {saving ? <LoaderCircle className="spin" size={18} /> : <Plus size={18} />}
-              Add & scan
-            </button>
-          </div>
-        </form>
+        <div className="dialog-actions">
+          <button className="secondary-button" type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="primary-button" type="submit" disabled={saving}>
+            {saving ? (
+              <LoaderCircle className="spin" size={18} />
+            ) : (
+              <Plus size={18} />
+            )}
+            Add & scan
+          </button>
+        </div>
+      </form>
     </AttributeEditorDialog>
   );
 }
 
-function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions }: SourceAttributeOptions & { source: LibrarySource; onChanged: () => void; expanded: boolean; onToggle: () => void }) {
+function SourceCard({
+  source,
+  onChanged,
+  expanded,
+  onToggle,
+  ...attributeOptions
+}: SourceAttributeOptions & {
+  source: LibrarySource;
+  onChanged: () => void;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const [converting, setConverting] = useState(false);
   const [attributesOpen, setAttributesOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState("");
-  const displayStatus = source.path_available ? converting ? "converting" : source.status : "unavailable";
+  const enabled = source.enabled !== 0;
+  const displayStatus = !enabled
+    ? "disabled"
+    : source.path_available
+      ? converting
+        ? "converting"
+        : source.status
+      : "unavailable";
+  const toggleEnabled = async () => {
+    setWorking(true);
+    setActionError("");
+    try {
+      await api(`/api/sources/${source.id}/enabled`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: !enabled }),
+      });
+      onChanged();
+    } catch (error) {
+      setActionError(
+        error instanceof Error
+          ? error.message
+          : "Could not change source availability.",
+      );
+    } finally {
+      setWorking(false);
+    }
+  };
 
   const rescan = async (englishAttributes = false) => {
     setWorking(true);
     setMenuOpen(false);
     setActionError("");
     try {
-      await api(`/api/sources/${source.id}/scan`, { method: "POST", body: JSON.stringify({ englishAttributes }) });
+      await api(`/api/sources/${source.id}/scan`, {
+        method: "POST",
+        body: JSON.stringify({ englishAttributes }),
+      });
       onChanged();
     } catch (requestError) {
-      setActionError(requestError instanceof Error ? requestError.message : "Could not scan this source.");
+      setActionError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not scan this source.",
+      );
     } finally {
       setWorking(false);
     }
@@ -228,19 +439,34 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
       await api(`/api/sources/${source.id}/scan/cancel`, { method: "POST" });
       onChanged();
     } catch (requestError) {
-      setActionError(requestError instanceof Error ? requestError.message : "Could not cancel this scan.");
-    } finally { setWorking(false); }
+      setActionError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not cancel this scan.",
+      );
+    } finally {
+      setWorking(false);
+    }
   };
 
   const remove = async () => {
-    if (!window.confirm(`Remove “${source.name}” from Vaultly? Your files will not be deleted.`)) return;
+    if (
+      !window.confirm(
+        `Remove “${source.name}” from Vaultly? Your files will not be deleted.`,
+      )
+    )
+      return;
     setWorking(true);
     setActionError("");
     try {
       await api(`/api/sources/${source.id}`, { method: "DELETE" });
       onChanged();
     } catch (requestError) {
-      setActionError(requestError instanceof Error ? requestError.message : "Could not remove this source.");
+      setActionError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not remove this source.",
+      );
     } finally {
       setWorking(false);
     }
@@ -251,7 +477,10 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
     setMenuOpen(false);
     setActionError("");
     try {
-      const picked = await api<{ path: string | null }>("/api/system/pick-directory", { method: "POST" });
+      const picked = await api<{ path: string | null }>(
+        "/api/system/pick-directory",
+        { method: "POST" },
+      );
       if (!picked.path) return;
       await api(`/api/sources/${source.id}`, {
         method: "PATCH",
@@ -259,134 +488,429 @@ function SourceCard({ source, onChanged, expanded, onToggle, ...attributeOptions
       });
       onChanged();
     } catch (requestError) {
-      setActionError(requestError instanceof Error ? requestError.message : "Could not relocate this source.");
+      setActionError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not relocate this source.",
+      );
     } finally {
       setWorking(false);
     }
   };
 
   return (
-    <article className={`source-card${expanded ? " is-expanded" : ""}`}>
+    <article
+      className={`source-card${expanded ? " is-expanded" : ""}${enabled ? "" : " is-disabled"}`}>
       <div className="source-card-top">
-        <button className="source-expand" type="button" aria-expanded={expanded} aria-controls={`source-details-${source.id}`} aria-label={`${expanded ? "Collapse" : "Expand"} ${source.name}`} onClick={onToggle}><ChevronRight size={17} /></button>
-        <div className="drive-icon"><HardDrive size={19} /></div>
+        <button
+          className="source-expand"
+          type="button"
+          aria-expanded={expanded}
+          aria-controls={`source-details-${source.id}`}
+          aria-label={`${expanded ? "Collapse" : "Expand"} ${source.name}`}
+          onClick={onToggle}>
+          <ChevronRight size={17} />
+        </button>
+        <div className="drive-icon">
+          <HardDrive size={19} />
+        </div>
         <div className="source-heading">
           <div className="source-title-line">
-            <h3><button className="source-name-toggle" type="button" aria-expanded={expanded} aria-controls={`source-details-${source.id}`} onClick={onToggle}>{source.name}</button></h3>
+            <h3>
+              <button
+                className="source-name-toggle"
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={`source-details-${source.id}`}
+                onClick={onToggle}>
+                {source.name}
+              </button>
+            </h3>
             <span className={`status status-${displayStatus}`}>
-              {displayStatus === "scanning" || displayStatus === "converting" ? <LoaderCircle className="spin" size={13} /> : displayStatus === "ready" ? <Check size={13} /> : displayStatus === "unavailable" ? <AlertTriangle size={13} /> : null}
+              {displayStatus === "scanning" ||
+              displayStatus === "converting" ? (
+                <LoaderCircle className="spin" size={13} />
+              ) : displayStatus === "ready" ? (
+                <Check size={13} />
+              ) : displayStatus === "unavailable" ? (
+                <AlertTriangle size={13} />
+              ) : null}
               {displayStatus}
             </span>
           </div>
           <p title={source.root_path}>{source.root_path}</p>
         </div>
+        <span className="source-item-count">
+          {formatCount(source.item_count)} items
+        </span>
+        <button
+          type="button"
+          className="source-enabled-toggle"
+          role="switch"
+          aria-checked={enabled}
+          aria-label={`${enabled ? "Disable" : "Enable"} ${source.name}`}
+          title={
+            enabled
+              ? "Disable source and hide its content"
+              : "Enable source and show its content"
+          }
+          disabled={working}
+          onClick={() => void toggleEnabled()}>
+          <span />
+        </button>
         <div className="menu-wrap">
-          <button className="icon-button" type="button" aria-label={`Actions for ${source.name}`} onClick={() => setMenuOpen(!menuOpen)} disabled={working}>
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={`Actions for ${source.name}`}
+            onClick={() => setMenuOpen(!menuOpen)}
+            disabled={working}>
             <MoreHorizontal size={20} />
           </button>
           {menuOpen && (
             <div className="source-menu">
-              <button type="button" onClick={() => { setMenuOpen(false); setAttributesOpen(true); }}><TagIcon size={16} /> Common attributes</button>
-              <button type="button" onClick={() => void relocate()} disabled={converting || source.status === "scanning"}><FolderOpen size={16} /> Relocate source</button>
-              <button className="danger" type="button" onClick={remove} disabled={converting || source.status === "scanning"}><Trash2 size={16} /> Remove source</button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setAttributesOpen(true);
+                }}>
+                <TagIcon size={16} /> Common attributes
+              </button>
+              <button
+                type="button"
+                onClick={() => void relocate()}
+                disabled={converting || source.status === "scanning"}>
+                <FolderOpen size={16} /> Relocate source
+              </button>
+              <button
+                className="danger"
+                type="button"
+                onClick={remove}
+                disabled={converting || source.status === "scanning"}>
+                <Trash2 size={16} /> Remove source
+              </button>
             </div>
           )}
         </div>
       </div>
 
-      <div className="source-stats">
-        <div><Image size={17} /><span>Comics</span><strong>{formatCount(source.comic_count)}</strong></div>
-        <div><Clapperboard size={17} /><span>Videos</span><strong>{formatCount(source.video_count)}</strong></div>
-        <div><BookOpen size={17} /><span>Stories</span><strong>{formatCount(source.story_count)}</strong></div>
+      <div className="source-stats" hidden={!expanded}>
+        <div>
+          <Image size={17} />
+          <span>Comics</span>
+          <strong>{formatCount(source.comic_count)}</strong>
+        </div>
+        <div>
+          <Clapperboard size={17} />
+          <span>Videos</span>
+          <strong>{formatCount(source.video_count)}</strong>
+        </div>
+        <div>
+          <BookOpen size={17} />
+          <span>Stories</span>
+          <strong>{formatCount(source.story_count)}</strong>
+        </div>
       </div>
 
-      <SourceConversion sourceId={source.id} enabled={source.video_count > 0 && source.path_available && source.status !== "scanning" && Boolean(source.last_scanned_at)} scanEnabled={source.path_available && source.status !== "scanning"} scanBusy={working} expanded={expanded} onScan={rescan} onExpand={onToggle} onChanged={onChanged} onRunning={setConverting} />
-      <div id={`source-details-${source.id}`} className="source-details" hidden={!expanded}>
-      <label>Media type <Select aria-label={`Media type for ${source.name}`} value={source.media_type ?? "mixed"} disabled={working || converting || source.status === "scanning"} onChange={(event) => { const mediaType = event.target.value; setWorking(true); void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, mediaType }) }).then(onChanged).catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change media type.")).finally(() => setWorking(false)); }}><option value="mixed">Legacy mixed media</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga / comics</option><option value="ebooks">E-books / documents</option><option value="pictures">Pictures</option></Select></label>
-      <div className="source-common-attributes">
-        <div className="attribute-badges">{(source.tags ?? []).map((tag) => <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />)}{(source.categories ?? []).map((category) => <AttributeBadge key={`category-${category.id}`} kind="category" {...category} />)}</div>
-        <button className="source-attributes-edit" type="button" onClick={() => setAttributesOpen(true)}><TagIcon size={15} />{source.tags?.length || source.categories?.length ? "Edit common attributes" : "Add common tags or categories"}</button>
+      <div hidden={!expanded}>
+        <SourceConversion
+          sourceId={source.id}
+          enabled={
+            enabled &&
+            source.video_count > 0 &&
+            source.path_available &&
+            source.status !== "scanning" &&
+            Boolean(source.last_scanned_at)
+          }
+          scanEnabled={
+            enabled && source.path_available && source.status !== "scanning"
+          }
+          scanBusy={working}
+          expanded={expanded}
+          onScan={rescan}
+          onExpand={onToggle}
+          onChanged={onChanged}
+          onRunning={setConverting}
+        />
       </div>
-      {source.status === "scanning" && source.scan_progress && <ScanProgress progress={source.scan_progress} />}
+      <div
+        id={`source-details-${source.id}`}
+        className="source-details"
+        hidden={!expanded}>
+        <label>
+          Media type{" "}
+          <Select
+            aria-label={`Media type for ${source.name}`}
+            value={source.media_type ?? "mixed"}
+            disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              const mediaType = event.target.value;
+              setWorking(true);
+              void api(`/api/sources/${source.id}`, {
+                method: "PATCH",
+                body: JSON.stringify({ rootPath: source.root_path, mediaType }),
+              })
+                .then(onChanged)
+                .catch((reason: unknown) =>
+                  setActionError(
+                    reason instanceof Error
+                      ? reason.message
+                      : "Could not change media type.",
+                  ),
+                )
+                .finally(() => setWorking(false));
+            }}>
+            <option value="mixed">Legacy mixed media</option>
+            <option value="movies">Movies</option>
+            <option value="tv">TV series</option>
+            <option value="anime">Anime</option>
+            <option value="manga">Manga / comics</option>
+            <option value="ebooks">E-books / documents</option>
+            <option value="pictures">Pictures</option>
+          </Select>
+        </label>
+        <div className="source-common-attributes">
+          <div className="attribute-badges">
+            {(source.tags ?? []).map((tag) => (
+              <AttributeBadge key={`tag-${tag.id}`} kind="tag" {...tag} />
+            ))}
+            {(source.categories ?? []).map((category) => (
+              <AttributeBadge
+                key={`category-${category.id}`}
+                kind="category"
+                {...category}
+              />
+            ))}
+          </div>
+          <button
+            className="source-attributes-edit"
+            type="button"
+            onClick={() => setAttributesOpen(true)}>
+            <TagIcon size={15} />
+            {source.tags?.length || source.categories?.length
+              ? "Edit common attributes"
+              : "Add common tags or categories"}
+          </button>
+        </div>
+        {source.status === "scanning" && source.scan_progress && (
+          <ScanProgress progress={source.scan_progress} />
+        )}
       </div>
-      {attributesOpen && <SourceAttributesDialog source={source} {...attributeOptions} onClose={() => setAttributesOpen(false)} onSaved={onChanged} />}
-      <footer>
-        <span>{source.status === "scanning" ? "Scan in progress…" : formatScanDate(source.last_scanned_at)}</span>
-        {source.status === "scanning"
-          ? <button className="source-attributes-edit" type="button" onClick={() => void cancelScan()} disabled={working}>{working ? <LoaderCircle className="spin" size={15} /> : <X size={15} />}{working ? "Cancelling…" : "Cancel scan"}</button>
-          : <strong>{formatCount(source.item_count)} items</strong>}
+      {attributesOpen && (
+        <SourceAttributesDialog
+          source={source}
+          {...attributeOptions}
+          onClose={() => setAttributesOpen(false)}
+          onSaved={onChanged}
+        />
+      )}
+      <footer hidden={!expanded && source.status !== "scanning"}>
+        <span>
+          {source.status === "scanning"
+            ? "Scan in progress…"
+            : formatScanDate(source.last_scanned_at)}
+        </span>
+        {source.status === "scanning" ? (
+          <button
+            className="source-attributes-edit"
+            type="button"
+            onClick={() => void cancelScan()}
+            disabled={working}>
+            {working ? (
+              <LoaderCircle className="spin" size={15} />
+            ) : (
+              <X size={15} />
+            )}
+            {working ? "Cancelling…" : "Cancel scan"}
+          </button>
+        ) : (
+          <strong>{formatCount(source.item_count)} items</strong>
+        )}
       </footer>
-      {source.last_error && <p className="scan-error">{source.last_error}</p>}
-      {!source.path_available && <p className="source-unavailable"><AlertTriangle size={15} /> {source.path_error || "The source path or drive is unavailable."}</p>}
-      {actionError && <p className="scan-error" role="alert">{actionError}</p>}
+      {expanded && source.last_error && (
+        <p className="scan-error">{source.last_error}</p>
+      )}
+      {expanded && !source.path_available && (
+        <p className="source-unavailable">
+          <AlertTriangle size={15} />{" "}
+          {source.path_error || "The source path or drive is unavailable."}
+        </p>
+      )}
+      {actionError && (
+        <p className="scan-error" role="alert">
+          {actionError}
+        </p>
+      )}
     </article>
   );
 }
 
-function HomeView({ sources, categories, onOpenLibrary, onOpenCategories, onAddSource }: {
+function HomeView({
+  sources,
+  categories,
+  onOpenLibrary,
+  onOpenCategories,
+  onAddSource,
+}: {
   sources: LibrarySource[];
   categories: Category[];
   onOpenLibrary: (type: MediaType) => void;
   onOpenCategories: () => void;
   onAddSource: () => void;
 }) {
-  const connectedSources = sources.filter((source) => source.path_available);
-  const totals = connectedSources.reduce((result, source) => ({
-    all: result.all + source.item_count,
-    comic: result.comic + source.comic_count,
-    video: result.video + source.video_count,
-    story: result.story + source.story_count,
-  }), { all: 0, comic: 0, video: 0, story: 0 });
+  const connectedSources = sources.filter(
+    (source) => source.enabled !== 0 && source.path_available,
+  );
+  const totals = connectedSources.reduce(
+    (result, source) => ({
+      all: result.all + source.item_count,
+      comic: result.comic + source.comic_count,
+      video: result.video + source.video_count,
+      story: result.story + source.story_count,
+    }),
+    { all: 0, comic: 0, video: 0, story: 0 },
+  );
   const libraries = [
-    { type: "comic" as const, label: "Comics", description: "Issues, image folders, and archives", count: totals.comic, icon: <Image size={25} /> },
-    { type: "video" as const, label: "Videos", description: "Movies, episodes, and local clips", count: totals.video, icon: <Clapperboard size={25} /> },
-    { type: "story" as const, label: "E-books", description: "PDF, EPUB, books, and documents", count: totals.story, icon: <BookOpen size={25} /> },
+    {
+      type: "comic" as const,
+      label: "Comics",
+      description: "Issues, image folders, and archives",
+      count: totals.comic,
+      icon: <Image size={25} />,
+    },
+    {
+      type: "video" as const,
+      label: "Videos",
+      description: "Movies, episodes, and local clips",
+      count: totals.video,
+      icon: <Clapperboard size={25} />,
+    },
+    {
+      type: "story" as const,
+      label: "E-books",
+      description: "PDF, EPUB, books, and documents",
+      count: totals.story,
+      icon: <BookOpen size={25} />,
+    },
   ];
-  const availableCategories = categories.filter((category) => category.item_count > 0);
+  const availableCategories = categories.filter(
+    (category) => category.item_count > 0,
+  );
   const visibleCategories = availableCategories.slice(0, 8);
 
-  return <>
-    <div className="page-heading home-heading">
-      <div><p className="eyebrow">Your library</p><h1>Welcome home</h1><p>Pick up where you left off, or jump into a media library.</p></div>
-      {!sources.length && <button className="primary-button" type="button" onClick={onAddSource}><Plus size={18} /> Add source</button>}
-    </div>
-
-    <section className="home-stats" aria-label="Library statistics">
-      <div><span>Available media</span><strong>{formatCount(totals.all)}</strong></div>
-      <div><span>Categories</span><strong>{formatCount(availableCategories.length)}</strong></div>
-      <div><span>Connected sources</span><strong>{connectedSources.length}<small> / {sources.length}</small></strong></div>
-    </section>
-
-    <section className="home-section">
-      <div className="home-section-heading"><div><p className="eyebrow">Browse</p><h2>Libraries</h2></div></div>
-      <div className="home-library-grid">
-        {libraries.map((library) => <button key={library.type} className={`home-library-card home-library-${library.type}`} type="button" onClick={() => onOpenLibrary(library.type)}>
-          <span className="home-library-icon">{library.icon}</span>
-          <span className="home-library-copy"><strong>{library.label}</strong><small>{library.description}</small></span>
-          <span className="home-library-count">{formatCount(library.count)}</span>
-          <ArrowRight size={19} />
-        </button>)}
+  return (
+    <>
+      <div className="page-heading home-heading">
+        <div>
+          <p className="eyebrow">Your library</p>
+          <h1>Your library, your rules.</h1>
+          <p>Pick up where you left off, or jump into a media library.</p>
+        </div>
+        {!sources.length && (
+          <button
+            className="primary-button"
+            type="button"
+            onClick={onAddSource}>
+            <Plus size={18} /> Add source
+          </button>
+        )}
       </div>
-    </section>
 
-    <section className="home-section">
-      <div className="home-section-heading"><div><p className="eyebrow">Organize</p><h2>Categories</h2></div><button type="button" onClick={onOpenCategories}>View all <ArrowRight size={16} /></button></div>
-      {visibleCategories.length ? <div className="home-category-list">
-        {visibleCategories.map((category) => <AttributeBadge key={category.id} kind="category" {...category}><Folder size={18} /><span>{category.name}</span><strong>{formatCount(category.item_count)}</strong><ChevronRight size={17} /></AttributeBadge>)}
-      </div> : <div className="home-empty-categories"><Folder size={24} /><span>Categories with available media will appear here.</span></div>}
-    </section>
-  </>;
+      <section className="home-stats" aria-label="Library statistics">
+        <div>
+          <span>Available media</span>
+          <strong>{formatCount(totals.all)}</strong>
+        </div>
+        <div>
+          <span>Categories</span>
+          <strong>{formatCount(availableCategories.length)}</strong>
+        </div>
+        <div>
+          <span>Connected sources</span>
+          <strong>
+            {connectedSources.length}
+            <small> / {sources.length}</small>
+          </strong>
+        </div>
+      </section>
+
+      <section className="home-section">
+        <div className="home-section-heading">
+          <div>
+            <p className="eyebrow">Browse</p>
+            <h2>Libraries</h2>
+          </div>
+        </div>
+        <div className="home-library-grid">
+          {libraries.map((library) => (
+            <button
+              key={library.type}
+              className={`home-library-card home-library-${library.type}`}
+              type="button"
+              onClick={() => onOpenLibrary(library.type)}>
+              <span className="home-library-icon">{library.icon}</span>
+              <span className="home-library-copy">
+                <strong>{library.label}</strong>
+                <small>{library.description}</small>
+              </span>
+              <span className="home-library-count">
+                {formatCount(library.count)}
+              </span>
+              <ArrowRight size={19} />
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="home-section">
+        <div className="home-section-heading">
+          <div>
+            <p className="eyebrow">Organize</p>
+            <h2>Categories</h2>
+          </div>
+          <button type="button" onClick={onOpenCategories}>
+            View all <ArrowRight size={16} />
+          </button>
+        </div>
+        {visibleCategories.length ? (
+          <div className="home-category-list">
+            {visibleCategories.map((category) => (
+              <AttributeBadge key={category.id} kind="category" {...category}>
+                <Folder size={18} />
+                <span>{category.name}</span>
+                <strong>{formatCount(category.item_count)}</strong>
+                <ChevronRight size={17} />
+              </AttributeBadge>
+            ))}
+          </div>
+        ) : (
+          <div className="home-empty-categories">
+            <Folder size={24} />
+            <span>Categories with available media will appear here.</span>
+          </div>
+        )}
+      </section>
+    </>
+  );
 }
 
 export function App({ profiles }: { profiles: ProfileList }) {
   const navigation = useNavigation();
-  return <NavigationContext.Provider value={navigation}><LibraryApp profiles={profiles} /></NavigationContext.Provider>;
+  return (
+    <NavigationContext.Provider value={navigation}>
+      <LibraryApp profiles={profiles} />
+    </NavigationContext.Provider>
+  );
 }
 
 function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const navigation = useContext(NavigationContext)!;
   const [section] = useNavigationField<Section>("section", "home");
-  const [libraryView] = useNavigationField<LibraryView>("libraryView", "browse");
+  const [libraryView] = useNavigationField<LibraryView>(
+    "libraryView",
+    "browse",
+  );
   const [search, setSearch] = useNavigationField("search", "");
   const [sources, setSources] = useState<LibrarySource[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -399,19 +923,36 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const [managementMinimized, setManagementMinimized] = useState(false);
   const [managementExpanded, setManagementExpanded] = useState(false);
   const [managementTab, setManagementTab] = useState<ManagementTab>("tags");
-  const [managementVisited, setManagementVisited] = useState<ManagementTab[]>([]);
+  const [managementVisited, setManagementVisited] = useState<ManagementTab[]>(
+    [],
+  );
   const [attributeRevision, setAttributeRevision] = useState(0);
   const openManagement = useCallback((kind: ManagementTab) => {
     setManagementTab(kind);
-    setManagementVisited((current) => current.includes(kind) ? current : [...current, kind]);
+    setManagementVisited((current) =>
+      current.includes(kind) ? current : [...current, kind],
+    );
     setManagementMinimized(false);
     setManagementOpen(true);
   }, []);
-  const openAttributeManager = useCallback((kind: AttributeManagerKind) => openManagement(kind), [openManagement]);
-  const addSource = () => { openManagement("sources"); setShowAddSource(true); };
-  const [selectedItemId] = useNavigationField<number | null>("selectedItemId", null);
+  const openAttributeManager = useCallback(
+    (kind: AttributeManagerKind) => openManagement(kind),
+    [openManagement],
+  );
+  const addSource = () => {
+    openManagement("sources");
+    setShowAddSource(true);
+  };
+  const [selectedItemId] = useNavigationField<number | null>(
+    "selectedItemId",
+    null,
+  );
   const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
-  const [floatingSession, setFloatingSession] = useState<{ id: number; series: SeriesViewerContext | null; gallery: GalleryVideoContext | null } | null>(null);
+  const [floatingSession, setFloatingSession] = useState<{
+    id: number;
+    series: SeriesViewerContext | null;
+    gallery: GalleryVideoContext | null;
+  } | null>(null);
   const viewerFloating = floatingSession !== null;
   const activeViewerId = floatingSession?.id ?? selectedItemId;
   const navigateViewer = (id: number) => {
@@ -420,18 +961,33 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   };
   const toggleFloating = () => {
     if (floatingSession) {
-      navigation.update({ selectedItemId: floatingSession.id, viewerSeriesContext: floatingSession.series, viewerGalleryContext: floatingSession.gallery });
+      navigation.update({
+        selectedItemId: floatingSession.id,
+        viewerSeriesContext: floatingSession.series,
+        viewerGalleryContext: floatingSession.gallery,
+      });
       setFloatingSession(null);
-    } else if (selectedItemId !== null) setFloatingSession({ id: selectedItemId, series: viewerSeriesContext, gallery: viewerGalleryContext });
+    } else if (selectedItemId !== null)
+      setFloatingSession({
+        id: selectedItemId,
+        series: viewerSeriesContext,
+        gallery: viewerGalleryContext,
+      });
   };
-  const [viewerSeriesContext, setViewerSeriesContext] = useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
-  const [viewerGalleryContext] = useNavigationField<GalleryVideoContext | null>("viewerGalleryContext", null);
-  const [selectedSeriesId] = useNavigationField<number | null>("selectedSeriesId", null);
+  const [viewerSeriesContext, setViewerSeriesContext] =
+    useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
+  const [viewerGalleryContext] = useNavigationField<GalleryVideoContext | null>(
+    "viewerGalleryContext",
+    null,
+  );
+  const [selectedSeriesId] = useNavigationField<number | null>(
+    "selectedSeriesId",
+    null,
+  );
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [rescanningAll, setRescanningAll] = useState(false);
   const previousScanningSourceKey = useRef("");
-
 
   const loadSources = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -439,61 +995,144 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       setSources(await api<LibrarySource[]>("/api/sources"));
       setError("");
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not load your sources.");
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not load your sources.",
+      );
     } finally {
       if (!quiet) setLoading(false);
     }
   }, []);
 
   const loadCategories = useCallback(async () => {
-    try { setCategories(await api<Category[]>("/api/categories")); }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load categories."); }
+    try {
+      setCategories(await api<Category[]>("/api/categories"));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not load categories.",
+      );
+    }
   }, []);
 
   const loadTags = useCallback(async () => {
-    try { setTags(await api<Tag[]>("/api/tags")); }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load tags."); }
+    try {
+      setTags(await api<Tag[]>("/api/tags"));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not load tags.",
+      );
+    }
   }, []);
 
   const loadPeople = useCallback(async () => {
-    try { setPeople(await api<Person[]>("/api/people")); }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not load people."); }
+    try {
+      setPeople(await api<Person[]>("/api/people"));
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not load people.",
+      );
+    }
   }, []);
 
   const createTag = async (name: string): Promise<Tag> => {
-    const created = await api<Tag>("/api/tags", { method: "POST", body: JSON.stringify({ name }) });
-    setTags((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    const created = await api<Tag>("/api/tags", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    setTags((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
+    );
     return created;
   };
 
   const createCategory = async (name: string): Promise<Category> => {
-    const created = await api<Category>("/api/categories", { method: "POST", body: JSON.stringify({ name }) });
-    setCategories((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    const created = await api<Category>("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    setCategories((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
+    );
     return created;
   };
 
   const createPerson = async (name: string): Promise<Person> => {
-    const created = await api<Person>("/api/people", { method: "POST", body: JSON.stringify({ name }) });
-    setPeople((current) => [...current, created].sort((a, b) => a.name.localeCompare(b.name)));
+    const created = await api<Person>("/api/people", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    setPeople((current) =>
+      [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
+    );
     return created;
   };
 
-  useEffect(() => { void loadSources(); }, [loadSources]);
-  useEffect(() => { void loadCategories(); }, [loadCategories]);
-  useEffect(() => { void loadTags(); }, [loadTags]);
-  useEffect(() => { void loadPeople(); }, [loadPeople]);
+  const [initializing, setInitializing] = useState(true);
+  useEffect(() => {
+    let mounted = true;
+    void Promise.all([loadSources(), loadCategories(), loadTags(), loadPeople()]).finally(() => { if (mounted) setInitializing(false); });
+    return () => { mounted = false; };
+  }, [loadSources, loadCategories, loadTags, loadPeople]);
+
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let wasRunning = false;
+    const poll = async () => {
+      try {
+        const repair = await api<{ status: string } | null>("/api/people/matching/repair");
+        if (stopped) return;
+        if (repair?.status === "running") { wasRunning = true; timer = setTimeout(() => void poll(), 1500); }
+        else if (wasRunning) { void loadPeople(); setRefreshKey((value) => value + 1); }
+      } catch { if (!stopped && wasRunning) timer = setTimeout(() => void poll(), 3000); }
+    };
+    void poll();
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [loadPeople]);
 
   // Older history entries may still point to the former standalone management pages.
   useEffect(() => {
-    if (section === "tags" || section === "categories" || section === "people" || section === "sources" || section === "settings") {
+    if (
+      section === "tags" ||
+      section === "categories" ||
+      section === "people" ||
+      section === "sources" ||
+      section === "settings"
+    ) {
       openManagement(section);
       navigation.update({ section: "home" }, "Home");
     }
   }, [section, openManagement]);
 
-  const isScanning = useMemo(() => sources.some((source) => source.status === "scanning"), [sources]);
-  const scanningSourceKey = useMemo(() => sources.filter((source) => source.status === "scanning").map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
-  const availableSourceKey = useMemo(() => sources.filter((source) => source.path_available).map((source) => source.id).sort((a, b) => a - b).join(","), [sources]);
+  const isScanning = useMemo(
+    () => sources.some((source) => source.status === "scanning"),
+    [sources],
+  );
+  const scanningSourceKey = useMemo(
+    () =>
+      sources
+        .filter((source) => source.status === "scanning")
+        .map((source) => source.id)
+        .sort((a, b) => a - b)
+        .join(","),
+    [sources],
+  );
+  const availableSourceKey = useMemo(
+    () =>
+      sources
+        .filter((source) => source.enabled !== 0 && source.path_available)
+        .map((source) => source.id)
+        .sort((a, b) => a - b)
+        .join(","),
+    [sources],
+  );
   const previousAvailableSourceKey = useRef<string | null>(null);
   useEffect(() => {
     if (previousAvailableSourceKey.current === null) {
@@ -503,7 +1142,9 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     if (previousAvailableSourceKey.current !== availableSourceKey) {
       previousAvailableSourceKey.current = availableSourceKey;
       setRefreshKey((value) => value + 1);
-      void loadCategories(); void loadTags(); void loadPeople();
+      void loadCategories();
+      void loadTags();
+      void loadPeople();
     }
   }, [availableSourceKey, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
@@ -511,67 +1152,178 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     if (previousScanningSourceKey.current && !scanningSourceKey) {
       void loadSources(true);
       setRefreshKey((value) => value + 1);
-      void loadCategories(); void loadTags(); void loadPeople();
+      void loadCategories();
+      void loadTags();
+      void loadPeople();
     }
     previousScanningSourceKey.current = scanningSourceKey;
   }, [scanningSourceKey, loadSources, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
     let polling = false;
     let stopped = false;
-    const timer = window.setInterval(async () => {
-      if (polling) return;
-      polling = true;
-      try {
-        if (isScanning) {
-          const updates = await api<Array<Pick<LibrarySource, "id" | "status" | "last_error" | "last_scanned_at" | "scan_progress">>>("/api/sources/scan/progress");
-          if (stopped) return;
-          const byId = new Map(updates.map((update) => [update.id, update]));
-          setSources((current) => current.map((source) => ({ ...source, ...byId.get(source.id) })));
-        } else await loadSources(true);
-      } catch {
-        if (!stopped) await loadSources(true);
-      } finally { polling = false; }
-    }, isScanning ? 1000 : 5000);
-    return () => { stopped = true; window.clearInterval(timer); };
+    const timer = window.setInterval(
+      async () => {
+        if (polling) return;
+        polling = true;
+        try {
+          if (isScanning) {
+            const updates = await api<
+              Array<
+                Pick<
+                  LibrarySource,
+                  | "id"
+                  | "status"
+                  | "last_error"
+                  | "last_scanned_at"
+                  | "scan_progress"
+                >
+              >
+            >("/api/sources/scan/progress");
+            if (stopped) return;
+            const byId = new Map(updates.map((update) => [update.id, update]));
+            setSources((current) =>
+              current.map((source) => ({ ...source, ...byId.get(source.id) })),
+            );
+          } else await loadSources(true);
+        } catch {
+          if (!stopped) await loadSources(true);
+        } finally {
+          polling = false;
+        }
+      },
+      isScanning ? 1000 : 5000,
+    );
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
   }, [isScanning, loadSources]);
 
-  const attributeOptions: SourceAttributeOptions = { tags, categories, onTagCreated: createTag, onCategoryCreated: createCategory };
-  const totalItems = sources.filter((source) => source.path_available).reduce((total, source) => total + source.item_count, 0);
-  const sectionNames: Record<Section, string> = { home: "Home", all: "All media", comic: "Comics & pictures", video: "Videos", story: "E-books", categories: "Categories", tags: "Tags", people: "Cast & artists", sources: "Sources", settings: "Settings", help: "Help & shortcuts" };
+  const attributeOptions: SourceAttributeOptions = {
+    tags,
+    categories,
+    onTagCreated: createTag,
+    onCategoryCreated: createCategory,
+  };
+  const totalItems = sources
+    .filter((source) => source.enabled !== 0 && source.path_available)
+    .reduce((total, source) => total + source.item_count, 0);
+  const sectionNames: Record<Section, string> = {
+    home: "Home",
+    all: "All media",
+    comic: "Comics & pictures",
+    video: "Videos",
+    story: "E-books",
+    categories: "Categories",
+    tags: "Tags",
+    people: "Cast & artists",
+    sources: "Sources",
+    settings: "Settings",
+    help: "Help & shortcuts",
+  };
   const selectSection = (nextSection: Section) => {
-    navigation.reset({ section: nextSection, libraryView: "browse", search: "" }, sectionNames[nextSection]);
+    navigation.reset(
+      { section: nextSection, libraryView: "browse", search: "" },
+      sectionNames[nextSection],
+    );
   };
   const selectLibraryView = (view: LibraryView) => {
-    navigation.reset({ section, libraryView: view, search: "", "SeriesView.entityView": view === "circles" ? "circles" : "sets" }, sectionNames[section] + " · " + view);
+    navigation.reset(
+      {
+        section,
+        libraryView: view,
+        search: "",
+        "SeriesView.entityView": view === "circles" ? "circles" : "sets",
+      },
+      sectionNames[section] + " · " + view,
+    );
   };
-  const openSeries = (id: number) => navigation.push({ selectedSeriesId: id, "SeriesView.selectedId": id, "SeriesView.entityView": "sets", selectedItemId: null, viewerSeriesContext: null, viewerFloating: false, libraryView: "series" }, "Collection");
-  const refreshMedia = () => { setRefreshKey((value) => value + 1); void loadCategories(); void loadTags(); void loadPeople(); };
+  const openSeries = (id: number) =>
+    navigation.push(
+      {
+        selectedSeriesId: id,
+        "SeriesView.selectedId": id,
+        "SeriesView.entityView": "sets",
+        selectedItemId: null,
+        viewerSeriesContext: null,
+        viewerFloating: false,
+        libraryView: "series",
+      },
+      "Collection",
+    );
+  const refreshMedia = () => {
+    setRefreshKey((value) => value + 1);
+    void loadCategories();
+    void loadTags();
+    void loadPeople();
+  };
   const attributesChanged = () => {
     refreshMedia();
     setAttributeRevision((value) => value + 1);
   };
-  const openItem = (id: number, context: SeriesViewerContext | null = null, gallery: GalleryVideoContext | null = null) => {
-    navigation.push({ selectedItemId: id, viewerSeriesContext: context, viewerGalleryContext: gallery, viewerFloating: false }, gallery?.videos.find((item) => item.id === id)?.title ?? context?.items.find((item) => item.id === id)?.title ?? `File ${id}`);
+  const openItem = (
+    id: number,
+    context: SeriesViewerContext | null = null,
+    gallery: GalleryVideoContext | null = null,
+  ) => {
+    navigation.push(
+      {
+        selectedItemId: id,
+        viewerSeriesContext: context,
+        viewerGalleryContext: gallery,
+        viewerFloating: false,
+      },
+      gallery?.videos.find((item) => item.id === id)?.title ??
+        context?.items.find((item) => item.id === id)?.title ??
+        `File ${id}`,
+    );
   };
   const closePageViewer = () => {
-    const origin = [...navigation.entry.breadcrumbs].reverse().find((crumb) => !crumb.viewer);
+    const origin = [...navigation.entry.breadcrumbs]
+      .reverse()
+      .find((crumb) => !crumb.viewer);
     if (origin) navigation.goTo(origin.id);
-    else navigation.update({ selectedItemId: null, viewerSeriesContext: null, viewerGalleryContext: null, viewerFloating: false });
+    else
+      navigation.update({
+        selectedItemId: null,
+        viewerSeriesContext: null,
+        viewerGalleryContext: null,
+        viewerFloating: false,
+      });
   };
   const queueVideo = (item: MediaItem) => {
-    setTemporaryPlaylist((current) => current.some((entry) => entry.id === item.id) ? current : [...current, item]);
-    if (activeViewerId === null) setFloatingSession({ id: item.id, series: null, gallery: null });
-    else if (!floatingSession && selectedItemId !== null) setFloatingSession({ id: selectedItemId, series: viewerSeriesContext, gallery: viewerGalleryContext });
+    setTemporaryPlaylist((current) =>
+      current.some((entry) => entry.id === item.id)
+        ? current
+        : [...current, item],
+    );
+    if (activeViewerId === null)
+      setFloatingSession({ id: item.id, series: null, gallery: null });
+    else if (!floatingSession && selectedItemId !== null)
+      setFloatingSession({
+        id: selectedItemId,
+        series: viewerSeriesContext,
+        gallery: viewerGalleryContext,
+      });
   };
   const rescanAll = async (englishAttributes = false) => {
     setRescanningAll(true);
     setError("");
     try {
-      await api("/api/sources/scan", { method: "POST", body: JSON.stringify({ englishAttributes }) });
+      await api("/api/sources/scan", {
+        method: "POST",
+        body: JSON.stringify({ englishAttributes }),
+      });
       await loadSources(true);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not rescan all sources.");
-    } finally { setRescanningAll(false); }
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not rescan all sources.",
+      );
+    } finally {
+      setRescanningAll(false);
+    }
   };
 
   const cancelAllScans = async () => {
@@ -582,160 +1334,480 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       await loadSources(true);
       refreshMedia();
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : "Could not cancel scans.");
-    } finally { setRescanningAll(false); }
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Could not cancel scans.",
+      );
+    } finally {
+      setRescanningAll(false);
+    }
   };
 
   const viewerCommonProps = {
-    attributeRevision, categories, tags, people,
+    attributeRevision,
+    categories,
+    tags,
+    people,
     playlist: temporaryPlaylist.map(({ id, title }) => ({ id, title })),
-    onRemoveFromPlaylist: (id: number) => setTemporaryPlaylist((current) => current.filter((item) => item.id !== id)),
+    onRemoveFromPlaylist: (id: number) =>
+      setTemporaryPlaylist((current) =>
+        current.filter((item) => item.id !== id),
+      ),
     onClearPlaylist: () => setTemporaryPlaylist([]),
-    onCategoryCreated: createCategory, onTagCreated: createTag, onPersonCreated: createPerson,
-    onOpenSeries: openSeries, onChanged: refreshMedia,
+    onCategoryCreated: createCategory,
+    onTagCreated: createTag,
+    onPersonCreated: createPerson,
+    onOpenSeries: openSeries,
+    onChanged: refreshMedia,
   };
 
-  const sourcesPanel = <div className="sources-page">
-    <div className="page-heading">
-      <div><p className="eyebrow">Library setup</p><h1>Sources</h1><p>Manage local folders by media type. Expand a source for attributes, scanning, and conversion. Scans include subfolders and run when you choose.</p></div>
-      <div className="page-heading-actions">{isScanning
-        ? <button className="secondary-button" type="button" onClick={() => void cancelAllScans()} disabled={rescanningAll}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <X size={18} />} {rescanningAll ? "Cancelling…" : "Cancel all scans"}</button>
-        : <button className="secondary-button" type="button" onClick={() => void rescanAll()} disabled={rescanningAll || sources.length === 0}>{rescanningAll ? <LoaderCircle className="spin" size={18} /> : <RefreshCw size={18} />} Rescan all</button>}<button className="primary-button" type="button" onClick={() => setShowAddSource(true)}><Plus size={18} /> Add source</button></div>
-    </div>
-
-    <section className="summary-strip" aria-label="Source summary">
-      <div><span>Folders</span><strong>{formatCount(sources.length)}</strong></div>
-      <div><span>Indexed items</span><strong>{formatCount(totalItems)}</strong></div>
-      <div><span>Storage</span><strong>Local</strong></div>
-      <div className="summary-message"><span className="pulse-dot" /> Your media stays on this computer</div>
-    </section>
-
-    {error && <div className="page-error" role="alert">{error}<button type="button" onClick={() => loadSources()}>Try again</button></div>}
-
-    {loading && sources.length === 0 ? (
-      <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading sources…</span></div>
-    ) : sources.length > 0 ? (
-      <SourcesBrowser sources={sources} renderSource={(source, expanded, toggle) => <SourceCard key={source.id} source={source} expanded={expanded} onToggle={toggle} {...attributeOptions} onChanged={() => { void loadSources(true); refreshMedia(); }} />} />
-    ) : (
-      <section className="empty-state">
-        <div className="empty-visual"><div className="folder-back" /><div className="folder-front"><Image size={29} /><Clapperboard size={29} /><BookOpen size={29} /></div></div>
-        <h2>Connect your media folders</h2>
-        <p>Add one or more folders. Choose a media type for each source to keep books, pictures, and videos organized.</p>
-        <button className="primary-button" type="button" onClick={() => setShowAddSource(true)}>Choose a folder <ChevronRight size={18} /></button>
-        <span>Nothing is uploaded or moved.</span>
-      </section>
-    )}
-
-    {showAddSource && <AddSourceDialog {...attributeOptions} onClose={() => setShowAddSource(false)} onAdded={() => { void loadSources(true); refreshMedia(); }} />}
-  </div>;
-
-  return (
-    <AttributeManagerContext.Provider value={{ open: openAttributeManager, isOpen: managementOpen && !managementMinimized }}><AttributeBrowseProvider><div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand"><div className="brand-mark"><Library size={21} /></div><span>Vaultly</span></div>
-        <nav aria-label="Main navigation">
-          <p>Library</p>
-          <button className={section === "home" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("home")}><Home size={19} /> Home<span>{formatCount(totalItems)}</span></button>
-          <LibraryNav active={section === "comic"} view={libraryView} icon={<Image size={19} />} label="Comics & pictures" onBrowse={() => selectSection("comic")} onView={selectLibraryView} />
-          <LibraryNav active={section === "video"} view={libraryView} icon={<Clapperboard size={19} />} label="Videos" onBrowse={() => selectSection("video")} onView={selectLibraryView} />
-          <LibraryNav active={section === "story"} view={libraryView} icon={<BookOpen size={19} />} label="E-books" onBrowse={() => selectSection("story")} onView={selectLibraryView} />
-          <p>Workspace</p>
-          <button className={managementOpen && !managementMinimized && managementTab === "sources" ? "nav-active" : "nav-link"} type="button" onClick={() => openManagement("sources")}><HardDrive size={19} /> Sources</button>
-          <button className={managementOpen && !managementMinimized && managementTab === "settings" ? "nav-active" : "nav-link"} type="button" onClick={() => openManagement("settings")}><Settings2 size={19} /> Settings</button>
-          <button className={section === "help" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("help")}><CircleHelp size={19} /> Help</button>
-        </nav>
-        <BackgroundStatus onOpen={openManagement} />
-      </aside>
-
-      <main>
-        <header className="topbar">
-          <div className="search-box"><Search size={19} /><input aria-label="Search library" placeholder="Search your library" value={search} onChange={(event) => {
-            const nextSearch = event.target.value;
-            if (nextSearch && (section !== "all" || libraryView !== "browse")) navigation.push({ section: "all", libraryView: "browse", search: nextSearch, selectedItemId: null }, "Search results");
-            else setSearch(nextSearch);
-          }} /></div>
-          <div className="topbar-actions">
-            <VaultProfiles initial={profiles} />
-            {temporaryPlaylist.length > 0 && <button className="playlist-launch" type="button" onClick={() => openItem(temporaryPlaylist[0].id)}><ListVideo size={17} /> Temporary playlist <strong>{temporaryPlaylist.length}</strong></button>}
-            <div className="local-pill"><span /> Local only</div>
-          </div>
-        </header>
-
-        <div className="content">
-          <nav className="navigation-trail" aria-label="Navigation history">
-            <button className="secondary-button" type="button" onClick={navigation.back} disabled={!navigation.entry.breadcrumbs.length}><ArrowLeft size={16} /> Back</button>
-            {navigation.entry.breadcrumbs.map((crumb) => <span key={crumb.id}><button type="button" onClick={() => navigation.goTo(crumb.id)}>{crumb.label}</button><ChevronRight size={14} /></span>)}
-            <strong aria-current="page">{navigation.entry.label}</strong>
-          </nav>
-          {section === "home" ? (
-            <HomeView sources={sources} categories={categories} onOpenLibrary={selectSection} onOpenCategories={() => navigation.push({ section: "all", libraryView: "categories", search: "" }, "All media categories")} onAddSource={addSource} />
-          ) : section === "help" ? <HelpView onOpenSources={() => openManagement("sources")} onOpenSettings={() => openManagement("settings")} />
-          : section === "categories" || section === "tags" || section === "people" || section === "sources" || section === "settings" ? null
-          : libraryView === "series" || libraryView === "circles" ? (
-            <SeriesView key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}-${selectedSeriesId ?? "list"}`} view="browse" initialEntityView={libraryView === "circles" ? "circles" : "sets"} mediaType={section === "all" ? undefined : section} initialSeriesId={selectedSeriesId} categories={categories} tags={tags} onCategoryCreated={createCategory} onTagCreated={createTag} onCategoriesChanged={() => void loadCategories()} onTagsChanged={() => void loadTags()} onOpenItem={(id, context) => openItem(id, context)} />
+  const sourcesPanel = (
+    <div className="sources-page">
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">Library setup</p>
+          <h1>Sources</h1>
+          <p>
+            Browse folders by drive and path. Disable a source to hide its
+            content. Expand a source for attributes, scanning, and conversion.
+          </p>
+        </div>
+        <div className="page-heading-actions">
+          {isScanning ? (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void cancelAllScans()}
+              disabled={rescanningAll}>
+              {rescanningAll ? (
+                <LoaderCircle className="spin" size={18} />
+              ) : (
+                <X size={18} />
+              )}{" "}
+              {rescanningAll ? "Cancelling…" : "Cancel all scans"}
+            </button>
           ) : (
-            <GalleryView
-              key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}`}
-              view={libraryView}
-              type={section === "all" ? undefined : section}
-              search={search}
-              categories={categories}
-              tags={tags}
-              people={people}
-              onTagCreated={createTag}
-              onCategoryCreated={createCategory}
-              onPersonCreated={createPerson}
-              onChanged={refreshMedia}
-              sources={sources.filter((source) => source.path_available).map((source) => ({ id: source.id, name: source.name }))}
-              onOpen={(id, context) => openItem(id, null, context)}
-              onQueueVideo={queueVideo}
-              queuedVideoIds={temporaryPlaylist.map((item) => item.id)}
-              onOpenSeries={openSeries}
-              onAddSource={addSource}
-              refreshKey={refreshKey}
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => void rescanAll()}
+              disabled={rescanningAll || sources.length === 0}>
+              {rescanningAll ? (
+                <LoaderCircle className="spin" size={18} />
+              ) : (
+                <RefreshCw size={18} />
+              )}{" "}
+              Rescan all
+            </button>
+          )}
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => setShowAddSource(true)}>
+            <Plus size={18} /> Add source
+          </button>
+        </div>
+      </div>
+
+      <section className="summary-strip" aria-label="Source summary">
+        <div>
+          <span>Folders</span>
+          <strong>{formatCount(sources.length)}</strong>
+        </div>
+        <div>
+          <span>Indexed items</span>
+          <strong>{formatCount(totalItems)}</strong>
+        </div>
+        <div>
+          <span>Storage</span>
+          <strong>Local</strong>
+        </div>
+        <div className="summary-message">
+          <span className="pulse-dot" /> Your media stays on this computer
+        </div>
+      </section>
+
+      {error && (
+        <div className="page-error" role="alert">
+          {error}
+          <button type="button" onClick={() => loadSources()}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {loading && sources.length === 0 ? (
+        <div className="loading-state">
+          <LoaderCircle className="spin" size={28} />
+          <span>Loading sources…</span>
+        </div>
+      ) : sources.length > 0 ? (
+        <SourcesBrowser
+          sources={sources}
+          renderSource={(source, expanded, toggle) => (
+            <SourceCard
+              key={source.id}
+              source={source}
+              expanded={expanded}
+              onToggle={toggle}
+              {...attributeOptions}
+              onChanged={() => {
+                void loadSources(true);
+                refreshMedia();
+              }}
             />
           )}
+        />
+      ) : (
+        <section className="empty-state">
+          <div className="empty-visual">
+            <div className="folder-back" />
+            <div className="folder-front">
+              <Image size={29} />
+              <Clapperboard size={29} />
+              <BookOpen size={29} />
+            </div>
+          </div>
+          <h2>Connect your media folders</h2>
+          <p>
+            Add one or more folders. Choose a media type for each source to keep
+            books, pictures, and videos organized.
+          </p>
+          <button
+            className="primary-button"
+            type="button"
+            onClick={() => setShowAddSource(true)}>
+            Choose a folder <ChevronRight size={18} />
+          </button>
+          <span>Nothing is uploaded or moved.</span>
+        </section>
+      )}
+
+      {showAddSource && (
+        <AddSourceDialog
+          {...attributeOptions}
+          onClose={() => setShowAddSource(false)}
+          onAdded={() => {
+            void loadSources(true);
+            refreshMedia();
+          }}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <AttributeManagerContext.Provider
+      value={{
+        open: openAttributeManager,
+        isOpen: managementOpen && !managementMinimized,
+      }}>
+      <AttributeBrowseProvider>
+        <div className="app-shell">
+          {initializing && <div className="app-startup-overlay" role="status" aria-live="polite"><LoaderCircle className="spin" size={32} /><strong>Loading your library…</strong><span>Reading sources and metadata</span></div>}
+          <aside className="sidebar">
+            <div className="brand">
+              <div className="brand-mark">
+                <Library size={21} />
+              </div>
+              <span>Vaultly</span>
+            </div>
+            <nav aria-label="Main navigation">
+              <p>Library</p>
+              <button
+                className={section === "home" ? "nav-active" : "nav-link"}
+                type="button"
+                onClick={() => selectSection("home")}>
+                <Home size={19} /> Home<span>{formatCount(totalItems)}</span>
+              </button>
+              <LibraryNav
+                active={section === "comic"}
+                view={libraryView}
+                icon={<Image size={19} />}
+                label="Comics & pictures"
+                onBrowse={() => selectSection("comic")}
+                onView={selectLibraryView}
+              />
+              <LibraryNav
+                active={section === "video"}
+                view={libraryView}
+                icon={<Clapperboard size={19} />}
+                label="Videos"
+                onBrowse={() => selectSection("video")}
+                onView={selectLibraryView}
+              />
+              <LibraryNav
+                active={section === "story"}
+                view={libraryView}
+                icon={<BookOpen size={19} />}
+                label="E-books"
+                onBrowse={() => selectSection("story")}
+                onView={selectLibraryView}
+              />
+              <p>Workspace</p>
+              <button
+                className={
+                  managementOpen &&
+                  !managementMinimized &&
+                  managementTab === "sources"
+                    ? "nav-active"
+                    : "nav-link"
+                }
+                type="button"
+                onClick={() => openManagement("sources")}>
+                <HardDrive size={19} /> Sources
+              </button>
+              <button
+                className={
+                  managementOpen &&
+                  !managementMinimized &&
+                  managementTab === "settings"
+                    ? "nav-active"
+                    : "nav-link"
+                }
+                type="button"
+                onClick={() => openManagement("settings")}>
+                <Settings2 size={19} /> Settings
+              </button>
+              <button
+                className={section === "help" ? "nav-active" : "nav-link"}
+                type="button"
+                onClick={() => selectSection("help")}>
+                <CircleHelp size={19} /> Help
+              </button>
+            </nav>
+            <BackgroundStatus onOpen={openManagement} />
+          </aside>
+
+          <main>
+            <header className="topbar">
+              <div className="search-box">
+                <Search size={19} />
+                <input
+                  aria-label="Search library"
+                  placeholder="Search your library"
+                  value={search}
+                  onChange={(event) => {
+                    const nextSearch = event.target.value;
+                    if (
+                      nextSearch &&
+                      (section !== "all" || libraryView !== "browse")
+                    )
+                      navigation.push(
+                        {
+                          section: "all",
+                          libraryView: "browse",
+                          search: nextSearch,
+                          selectedItemId: null,
+                        },
+                        "Search results",
+                      );
+                    else setSearch(nextSearch);
+                  }}
+                />
+              </div>
+              <div className="topbar-actions">
+                <VaultProfiles initial={profiles} />
+                {temporaryPlaylist.length > 0 && (
+                  <button
+                    className="playlist-launch"
+                    type="button"
+                    onClick={() => openItem(temporaryPlaylist[0].id)}>
+                    <ListVideo size={17} /> Temporary playlist{" "}
+                    <strong>{temporaryPlaylist.length}</strong>
+                  </button>
+                )}
+                <div className="local-pill">
+                  <span /> Local only
+                </div>
+              </div>
+            </header>
+
+            <div className="content">
+              <nav className="navigation-trail" aria-label="Navigation history">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={navigation.back}
+                  disabled={!navigation.entry.breadcrumbs.length}>
+                  <ArrowLeft size={16} /> Back
+                </button>
+                {navigation.entry.breadcrumbs.map((crumb) => (
+                  <span key={crumb.id}>
+                    <button
+                      type="button"
+                      onClick={() => navigation.goTo(crumb.id)}>
+                      {crumb.label}
+                    </button>
+                    <ChevronRight size={14} />
+                  </span>
+                ))}
+                <strong aria-current="page">{navigation.entry.label}</strong>
+              </nav>
+              {section === "home" ? (
+                <HomeView
+                  sources={sources}
+                  categories={categories}
+                  onOpenLibrary={selectSection}
+                  onOpenCategories={() =>
+                    navigation.push(
+                      { section: "all", libraryView: "categories", search: "" },
+                      "All media categories",
+                    )
+                  }
+                  onAddSource={addSource}
+                />
+              ) : section === "help" ? (
+                <HelpView
+                  onOpenSources={() => openManagement("sources")}
+                  onOpenSettings={() => openManagement("settings")}
+                />
+              ) : section === "categories" ||
+                section === "tags" ||
+                section === "people" ||
+                section === "sources" ||
+                section === "settings" ? null : libraryView === "series" ||
+                libraryView === "circles" ? (
+                <SeriesView
+                  key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}-${selectedSeriesId ?? "list"}`}
+                  view="browse"
+                  initialEntityView={
+                    libraryView === "circles" ? "circles" : "sets"
+                  }
+                  mediaType={section === "all" ? undefined : section}
+                  initialSeriesId={selectedSeriesId}
+                  categories={categories}
+                  tags={tags}
+                  onCategoryCreated={createCategory}
+                  onTagCreated={createTag}
+                  onCategoriesChanged={() => void loadCategories()}
+                  onTagsChanged={() => void loadTags()}
+                  onOpenItem={(id, context) => openItem(id, context)}
+                />
+              ) : (
+                <GalleryView
+                  key={`${navigation.entry.pageId ?? navigation.entry.id}-${section}-${libraryView}`}
+                  view={libraryView}
+                  type={section === "all" ? undefined : section}
+                  search={search}
+                  categories={categories}
+                  tags={tags}
+                  people={people}
+                  onTagCreated={createTag}
+                  onCategoryCreated={createCategory}
+                  onPersonCreated={createPerson}
+                  onChanged={refreshMedia}
+                  sources={sources
+                    .filter(
+                      (source) => source.enabled !== 0 && source.path_available,
+                    )
+                    .map((source) => ({ id: source.id, name: source.name }))}
+                  onOpen={(id, context) => openItem(id, null, context)}
+                  onQueueVideo={queueVideo}
+                  queuedVideoIds={temporaryPlaylist.map((item) => item.id)}
+                  onOpenSeries={openSeries}
+                  onAddSource={addSource}
+                  refreshKey={refreshKey}
+                />
+              )}
+            </div>
+          </main>
+
+          {activeViewerId !== null && (
+            <MediaViewer
+              {...viewerCommonProps}
+              itemId={activeViewerId}
+              seriesContext={
+                floatingSession ? floatingSession.series : viewerSeriesContext
+              }
+              galleryContext={
+                floatingSession ? floatingSession.gallery : viewerGalleryContext
+              }
+              floating={viewerFloating}
+              onToggleFloating={toggleFloating}
+              onNavigateItem={navigateViewer}
+              onNavigatePlaylistItem={(id) => {
+                if (floatingSession)
+                  setFloatingSession({ id, series: null, gallery: null });
+                else
+                  navigation.push(
+                    {
+                      selectedItemId: id,
+                      viewerGalleryContext: null,
+                      viewerSeriesContext: null,
+                    },
+                    `File ${id}`,
+                  );
+              }}
+              onClose={() => {
+                if (floatingSession) {
+                  setFloatingSession(null);
+                  if (selectedItemId === floatingSession.id)
+                    navigation.update({ selectedItemId: null });
+                } else closePageViewer();
+              }}
+            />
+          )}
+          {floatingSession !== null &&
+            selectedItemId !== null &&
+            selectedItemId !== floatingSession.id && (
+              <MediaViewer
+                {...viewerCommonProps}
+                itemId={selectedItemId}
+                seriesContext={viewerSeriesContext}
+                galleryContext={viewerGalleryContext}
+                floating={false}
+                onToggleFloating={() =>
+                  setFloatingSession({
+                    id: selectedItemId,
+                    series: viewerSeriesContext,
+                    gallery: viewerGalleryContext,
+                  })
+                }
+                onNavigateItem={(id) =>
+                  navigation.push({ selectedItemId: id }, `File ${id}`)
+                }
+                onNavigatePlaylistItem={(id) =>
+                  navigation.push(
+                    {
+                      selectedItemId: id,
+                      viewerGalleryContext: null,
+                      viewerSeriesContext: null,
+                    },
+                    `File ${id}`,
+                  )
+                }
+                onClose={closePageViewer}
+              />
+            )}
+          <ManagementDrawer
+            open={managementOpen}
+            minimized={managementMinimized}
+            expanded={managementExpanded}
+            active={managementTab}
+            visited={managementVisited}
+            onOpen={openManagement}
+            onClose={() => setManagementOpen(false)}
+            onMinimize={() => setManagementMinimized((value) => !value)}
+            onExpand={() => setManagementExpanded((value) => !value)}
+            panels={{
+              tags: <TagsView tags={tags} onChanged={attributesChanged} />,
+              categories: (
+                <CategoriesView
+                  categories={categories}
+                  onChanged={attributesChanged}
+                />
+              ),
+              people: (
+                <PeopleView people={people} onChanged={attributesChanged} />
+              ),
+              sources: sourcesPanel,
+              settings: <SettingsView />,
+            }}
+          />
         </div>
-      </main>
-
-
-      {activeViewerId !== null && <MediaViewer
-        {...viewerCommonProps}
-        itemId={activeViewerId}
-        seriesContext={floatingSession ? floatingSession.series : viewerSeriesContext}
-        galleryContext={floatingSession ? floatingSession.gallery : viewerGalleryContext}
-        floating={viewerFloating}
-        onToggleFloating={toggleFloating}
-        onNavigateItem={navigateViewer}
-        onNavigatePlaylistItem={(id) => {
-          if (floatingSession) setFloatingSession({ id, series: null, gallery: null });
-          else navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, `File ${id}`);
-        }}
-        onClose={() => {
-          if (floatingSession) {
-            setFloatingSession(null);
-            if (selectedItemId === floatingSession.id) navigation.update({ selectedItemId: null });
-          } else closePageViewer();
-        }}
-      />}
-      {floatingSession !== null && selectedItemId !== null && selectedItemId !== floatingSession.id && <MediaViewer
-        {...viewerCommonProps}
-        itemId={selectedItemId}
-        seriesContext={viewerSeriesContext}
-        galleryContext={viewerGalleryContext}
-        floating={false}
-        onToggleFloating={() => setFloatingSession({ id: selectedItemId, series: viewerSeriesContext, gallery: viewerGalleryContext })}
-        onNavigateItem={(id) => navigation.push({ selectedItemId: id }, `File ${id}`)}
-        onNavigatePlaylistItem={(id) => navigation.push({ selectedItemId: id, viewerGalleryContext: null, viewerSeriesContext: null }, `File ${id}`)}
-        onClose={closePageViewer}
-      />}
-      <ManagementDrawer open={managementOpen} minimized={managementMinimized} expanded={managementExpanded} active={managementTab} visited={managementVisited} onOpen={openManagement} onClose={() => setManagementOpen(false)} onMinimize={() => setManagementMinimized((value) => !value)} onExpand={() => setManagementExpanded((value) => !value)} panels={{
-        tags: <TagsView tags={tags} onChanged={attributesChanged} />,
-        categories: <CategoriesView categories={categories} onChanged={attributesChanged} />,
-        people: <PeopleView people={people} onChanged={attributesChanged} />,
-        sources: sourcesPanel,
-        settings: <SettingsView />,
-      }} />
-    </div></AttributeBrowseProvider></AttributeManagerContext.Provider>
+      </AttributeBrowseProvider>
+    </AttributeManagerContext.Provider>
   );
 }

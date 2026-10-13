@@ -29,16 +29,19 @@ afterAll(() => { database.close(); rmSync(isolated.directory, { recursive: true,
 test("video quality survives backups and older backups restore without resolution fields", async () => {
   const app = Fastify();
   await app.register(registerBackupRoutes);
-  const sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)")
+  const sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path, enabled) VALUES (?, ?, ?, 0)")
     .run("Video quality", "quality", "quality").lastInsertRowid);
   database.prepare(`INSERT INTO media_items(source_id, media_type, title, filename, file_extension, relative_path,
     size_bytes, modified_at_ms, file_count, video_width, video_height, video_metadata_signature)
     VALUES (?, 'video', 'Quality', 'quality.mp4', '.mp4', 'quality.mp4', 12, 34, 1, 1920, 1080, '12:34')`).run(sourceId);
   try {
     const backup = (await app.inject("/api/backup")).json();
+    expect(backup.data.sources[0].enabled).toBe(0);
     expect(backup.data.media_items[0]).toMatchObject({ video_width: 1920, video_height: 1080, video_metadata_signature: "12:34" });
     expect((await app.inject({ method: "POST", url: "/api/backup/restore", payload: backup })).statusCode).toBe(200);
     expect(database.prepare("SELECT video_height FROM media_items WHERE source_id = ?").get(sourceId)).toMatchObject({ video_height: 1080 });
+    expect(database.prepare("SELECT enabled FROM sources WHERE id = ?").get(sourceId)).toMatchObject({ enabled: 0 });
+    delete backup.data.sources[0].enabled;
     for (const item of backup.data.media_items) {
       delete item.video_width;
       delete item.video_height;
@@ -47,6 +50,7 @@ test("video quality survives backups and older backups restore without resolutio
     expect((await app.inject({ method: "POST", url: "/api/backup/restore", payload: backup })).statusCode).toBe(200);
     expect(database.prepare("SELECT video_height, video_metadata_signature FROM media_items WHERE source_id = ?").get(sourceId))
       .toMatchObject({ video_height: null, video_metadata_signature: null });
+    expect(database.prepare("SELECT enabled FROM sources WHERE id = ?").get(sourceId)).toMatchObject({ enabled: 1 });
   } finally {
     database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
     await app.close();

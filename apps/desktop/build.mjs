@@ -21,6 +21,7 @@ const shared = {
 };
 
 await Promise.all([
+  build({ ...shared, entryPoints: ["src/api-process.ts"], outfile: "dist/api-process.cjs", format: "cjs", define: { "import.meta.url": "undefined" }, external: ["@ffmpeg-installer/ffmpeg", "@napi-rs/canvas"] }),
   build({ ...shared, entryPoints: ["../api/cover-dimensions-worker.mjs"], outfile: "dist/cover-dimensions-worker.mjs", external: ["@napi-rs/canvas"] }),
   build({ ...shared, entryPoints: ["src/preload.ts"], outfile: "dist/preload.cjs", format: "cjs", external: ["electron"] }),
   build({

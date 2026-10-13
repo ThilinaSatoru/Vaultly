@@ -40,8 +40,9 @@ export async function registerBulkRoutes(app: FastifyInstance) {
           else remove.run(seriesId, itemId);
         }
       } else if (input.field === "people" || input.field === "cast" || input.field === "artists") {
-        const add = database.prepare(`INSERT OR IGNORE INTO item_people(item_id, person_id, role)
-          SELECT id, ?, CASE WHEN media_type = 'video' THEN 'cast' ELSE 'artist' END FROM media_items WHERE id = ?`);
+        const add = database.prepare(`INSERT INTO item_people(item_id, person_id, role, origin)
+          SELECT id, ?, CASE WHEN media_type = 'video' THEN 'cast' ELSE 'artist' END, 'manual' FROM media_items WHERE id = ?
+          ON CONFLICT(item_id, person_id, role) DO UPDATE SET origin = 'manual'`);
         const remove = database.prepare("DELETE FROM item_people WHERE item_id = ? AND person_id = ?");
         for (const itemId of itemIds) for (const personId of valueIds) {
           if (input.mode === "add") add.run(personId, itemId);

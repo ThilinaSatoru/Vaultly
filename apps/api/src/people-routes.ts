@@ -3,6 +3,7 @@ import { z } from "zod";
 import { database } from "./database.js";
 import { withAttributePatterns } from "./attribute-routes.js";
 import { normalizeProfileImage, readProfileImage, removeProfileImage, storeProfileImage } from "./profile-images.js";
+import { getPeopleRepairProgress, repairPeopleMatches } from "./people-repair.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const itemRoleInput = z.object({ id: z.coerce.number().int().positive(), role: z.enum(["cast", "artist"]) });
@@ -16,6 +17,11 @@ function creditsForItem(id: number, role: "cast" | "artist") {
 }
 
 export async function registerPeopleRoutes(app: FastifyInstance) {
+  app.get("/api/people/matching/repair", async () => getPeopleRepairProgress());
+  app.post("/api/people/matching/repair", async (_request, reply) => {
+    void repairPeopleMatches();
+    return reply.code(202).send(getPeopleRepairProgress());
+  });
   app.get("/api/people/:id/image", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const person = database.prepare("SELECT profile_image FROM people WHERE id = ?").get(id) as { profile_image: string | null } | undefined;
@@ -110,7 +116,7 @@ export async function registerPeopleRoutes(app: FastifyInstance) {
     database.exec("BEGIN IMMEDIATE");
     try {
       database.prepare("DELETE FROM item_people WHERE item_id = ?").run(id);
-      const insert = database.prepare("INSERT INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)");
+      const insert = database.prepare("INSERT INTO item_people(item_id, person_id, role, origin) VALUES (?, ?, ?, 'manual')");
       for (const personId of unique) insert.run(id, personId, role);
       database.exec("COMMIT");
     } catch (error) {

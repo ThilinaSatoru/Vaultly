@@ -37,7 +37,7 @@ test("patterns and inherited source attributes work across scans, queries, edits
         .toEqual(expect.arrayContaining([alias.toLowerCase(), `${alias} extra`.toLowerCase()]));
     }
     const reversed = (alias: string, separator: string) => normalizeMetadataPhrase(alias).split(" ").reverse().join(separator);
-    const firstName = `${reversed(aliases.tag, " ")} - ${reversed(aliases.category, "")} - ${reversed(aliases.person, "")}.pdf`;
+    const firstName = `${reversed(aliases.tag, " ")} - ${reversed(aliases.category, "")} - ${aliases.person}.pdf`;
     await writeFile(path.join(root, firstName), "fixture");
     await scanSource(sourceId, root);
     const item = database.prepare("SELECT id FROM media_items WHERE source_id = ? AND filename = ?").get(sourceId, firstName) as { id: number };

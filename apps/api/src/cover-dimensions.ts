@@ -2,9 +2,11 @@ import { fork } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { withMediaProcess } from "./process-resources.js";
+import { backgroundSignal, trackProcess } from "./background-processes.js";
 
 /** Wait for worker exit before releasing the slot so native image memory is reclaimed. */
 export function readCoverDimensions(filename: string, signal?: AbortSignal): Promise<{ width: number; height: number }> {
+  signal = backgroundSignal(signal);
   return withMediaProcess(() => {
     signal?.throwIfAborted();
     const url = process.env.VAULTLY_COVER_WORKER_PATH
@@ -15,7 +17,7 @@ export function readCoverDimensions(filename: string, signal?: AbortSignal): Pro
       stdio: ["ignore", "ignore", "ignore", "ipc"] as ("ignore" | "ipc")[],
       env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
     };
-    const worker = fork(url, [filename], processOptions);
+    const worker = trackProcess(fork(url, [filename], processOptions));
     return new Promise<{ width: number; height: number }>((resolve, reject) => {
       let result: { width: number; height: number } | undefined;
       let failure: Error | undefined;

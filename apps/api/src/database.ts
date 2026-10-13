@@ -34,6 +34,7 @@ database.exec(`
     status TEXT NOT NULL DEFAULT 'idle'
       CHECK (status IN ('idle', 'scanning', 'ready', 'error')),
     connected INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
     last_error TEXT,
     last_scanned_at TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -103,6 +104,7 @@ database.exec(`
     item_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
     person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('cast', 'artist')),
+    origin TEXT NOT NULL DEFAULT 'legacy',
     PRIMARY KEY (item_id, person_id, role)
   );
 
@@ -215,6 +217,9 @@ database.exec(`
 `);
 
 const sourceColumns = (database.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>).map((column) => column.name);
+const creditColumns = database.prepare("PRAGMA table_info(item_people)").all() as Array<{ name: string }>;
+database.exec("CREATE TABLE IF NOT EXISTS maintenance_versions (name TEXT PRIMARY KEY, version INTEGER NOT NULL)");
+if (!creditColumns.some((column) => column.name === "origin")) database.exec("ALTER TABLE item_people ADD COLUMN origin TEXT NOT NULL DEFAULT 'legacy'");
 const peopleColumns = (database.prepare("PRAGMA table_info(people)").all() as Array<{ name: string }>).map((column) => column.name);
 if (!peopleColumns.includes("profile_image")) database.exec("ALTER TABLE people ADD COLUMN profile_image TEXT");
 for (const column of ["gender", "country_code", "country", "avatar_url", "source", "profile_url", "scraped_at"]) {
@@ -222,6 +227,7 @@ for (const column of ["gender", "country_code", "country", "avatar_url", "source
 }
 if (!sourceColumns.includes("media_type")) database.exec("ALTER TABLE sources ADD COLUMN media_type TEXT NOT NULL DEFAULT 'mixed'");
 if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD COLUMN connected INTEGER NOT NULL DEFAULT 1");
+if (!sourceColumns.includes("enabled")) database.exec("ALTER TABLE sources ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
 
 // Filename and format are stored separately from the relative path so a filename
 // filter never matches an unrelated parent directory.
@@ -293,6 +299,25 @@ database.exec(`
   CREATE INDEX IF NOT EXISTS idx_media_items_available_filename ON media_items(available, filename COLLATE NOCASE, id);
 `);
 
+// Keep background indexing and drive reconnection from exposing disabled content.
+database.exec(`
+  DROP TRIGGER IF EXISTS source_availability_changed;
+  CREATE TRIGGER source_availability_changed
+  AFTER UPDATE OF enabled, connected ON sources
+  WHEN OLD.enabled <> NEW.enabled OR OLD.connected <> NEW.connected
+  BEGIN
+    UPDATE media_items SET available = CASE WHEN NEW.enabled = 1 AND NEW.connected = 1 THEN indexed ELSE 0 END
+    WHERE source_id = NEW.id;
+  END;
+  CREATE TRIGGER IF NOT EXISTS disabled_source_media_insert
+  AFTER INSERT ON media_items
+  WHEN NEW.available <> 0 AND EXISTS (SELECT 1 FROM sources WHERE id = NEW.source_id AND enabled = 0)
+  BEGIN UPDATE media_items SET available = 0 WHERE id = NEW.id; END;
+  CREATE TRIGGER IF NOT EXISTS disabled_source_media_update
+  AFTER UPDATE OF available, source_id ON media_items
+  WHEN NEW.available <> 0 AND EXISTS (SELECT 1 FROM sources WHERE id = NEW.source_id AND enabled = 0)
+  BEGIN UPDATE media_items SET available = 0 WHERE id = NEW.id; END;
+`);
 initializeSearchIndex(database);
 
 database.exec("PRAGMA optimize");
@@ -334,6 +359,7 @@ export interface SourceRow {
   media_type: import("./source-media.js").SourceMediaType;
   status: SourceStatus;
   connected: number;
+  enabled: number;
   last_error: string | null;
   last_scanned_at: string | null;
   created_at: string;

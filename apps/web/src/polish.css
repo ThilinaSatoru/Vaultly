@@ -146,7 +146,6 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .gallery-advanced { padding: 20px; border-radius: 14px; border-color: var(--border); background: var(--panel); }
 .gallery-selection-bar { min-height: 42px; margin-bottom: 18px; font-size: .78rem; }
 .gallery-selection-bar .secondary-button { min-height: 31px; font-size: .73rem; background: transparent; }
-.media-grid { gap: 20px; }
 .media-card { border-radius: 15px; box-shadow: none; transition: border-color .18s, transform .18s; }
 .media-card:hover { border-color: var(--accent-border); transform: translateY(-3px); box-shadow: none; }
 .media-art { background: var(--field); }
@@ -477,8 +476,7 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .viewer-header-actions > .viewer-float-toggle:hover { background: var(--accent-fill); color: #252a32; }
 
 /* The displayed artwork, including collection covers, determines the card shape. */
-.media-grid, .series-grid { align-items: start; }
-.media-grid:has(.media-card-video.media-card-portrait) { grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); }
+.series-grid { align-items: start; }
 .media-art.media-art-portrait, .series-cover.series-cover-portrait { aspect-ratio: 2 / 3; }
 .media-art.media-art-landscape, .series-cover.series-cover-landscape { aspect-ratio: 16 / 9; }
 .media-art img, .media-art video, .series-cover img { object-fit: contain; }

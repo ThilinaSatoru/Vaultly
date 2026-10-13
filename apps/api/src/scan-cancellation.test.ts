@@ -78,6 +78,25 @@ test("cancelling a video quality read leaves it eligible for retry", async () =>
   expect(database.prepare("SELECT video_height FROM media_items WHERE source_id = ?").get(id)).toMatchObject({ video_height: 1080 });
 });
 
+test("disabling a source cancels active metadata work and keeps partial indexing hidden", async () => {
+  const { id, root } = await source();
+  await writeFile(path.join(root, "disable.mp4"), "video");
+  vi.mocked(getVideoMetadata).mockImplementationOnce((_file, signal) => new Promise((_resolve, reject) => {
+    signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+  }));
+  const app = await buildVaultlyServer();
+  app.log.level = "silent";
+  try {
+    const scan = scanSource(id, root);
+    await vi.waitFor(() => expect(getScanProgress(id)?.phase).toBe("metadata"));
+    expect((await app.inject({ method: "PATCH", url: `/api/sources/${id}/enabled`, payload: { enabled: false } })).statusCode).toBe(200);
+    await scan;
+    expect(getScanProgress(id)).toBeNull();
+    expect(database.prepare("SELECT enabled, status FROM sources WHERE id = ?").get(id)).toMatchObject({ enabled: 0, status: "idle" });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM media_items WHERE source_id = ? AND available = 1").get(id)).toMatchObject({ count: 0 });
+  } finally { await app.close(); }
+});
+
 test("progress reports real discovery counts and thumbnail completion through the lightweight API", async () => {
   const { id, root } = await source();
   await mkdir(path.join(root, "Comic"));

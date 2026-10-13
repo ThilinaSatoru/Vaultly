@@ -2,6 +2,7 @@ import { database } from "./database.js";
 import { getConversionActivity } from "./source-conversion.js";
 import { getScanProgress } from "./scanner.js";
 import { getThumbnailActivity } from "./thumbnails.js";
+import { getPeopleRepairProgress } from "./people-repair.js";
 
 export interface BackgroundTask {
   id: string; label: string; detail: string; processed: number | null; total: number | null;
@@ -10,6 +11,8 @@ export interface BackgroundTask {
 
 export function getBackgroundActivity(): BackgroundTask[] {
   const tasks: BackgroundTask[] = getConversionActivity();
+  const repair = getPeopleRepairProgress();
+  if (repair?.status === "running") tasks.push({ id: "people-repair", label: "People matching", detail: "Repairing existing credits", processed: repair.processed, total: repair.total, target: "people" });
   const sources = database.prepare("SELECT id, name FROM sources WHERE status = 'scanning'").all() as Array<{ id: number; name: string }>;
   for (const source of sources) {
     const progress = getScanProgress(source.id);

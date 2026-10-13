@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { database } from "./database.js";
 import { FilenameMetadataMatcher, normalizeMetadataPhrase } from "./filename-metadata.js";
+import { PeopleMatcher } from "./people-matching.js";
 
 const definitions = {
   tags: { table: "tag_patterns", column: "tag_id" },
@@ -122,13 +123,22 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
         importedEntries.push(...database.prepare(`SELECT id, name FROM ${kind} WHERE id IN (${batch.map(() => "?").join(",")})`).all(...batch) as Array<{ id: number; name: string }>);
       }
       const imported = withAttributePatterns(kind, importedEntries);
-      const matcher = new FilenameMetadataMatcher(imported);
+      // Include every person when resolving alias ambiguity, even in chunked imports.
+      const matcher = kind === "people" ? new PeopleMatcher(withAttributePatterns("people", database.prepare("SELECT id, name FROM people").all() as Array<{ id: number; name: string }>)) : new FilenameMetadataMatcher(imported);
       const assignment = kind === "people"
-        ? database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role) VALUES (?, ?, ?)")
+        ? database.prepare("INSERT OR IGNORE INTO item_people(item_id, person_id, role, origin) VALUES (?, ?, ?, 'filename')")
         : database.prepare(`INSERT OR IGNORE INTO item_${kind}(item_id, ${kind === "tags" ? "tag_id" : "category_id"}) VALUES (?, ?)`);
+      const filenameCredits = kind === "people" ? database.prepare("SELECT person_id FROM item_people WHERE item_id = ? AND origin = 'filename'") : null;
+      const removeFilenameCredit = kind === "people" ? database.prepare("DELETE FROM item_people WHERE item_id = ? AND person_id = ? AND origin = 'filename'") : null;
       for (const row of database.prepare("SELECT id, filename, file_extension, media_type FROM media_items WHERE indexed = 1").iterate()) {
         const item = row as { id: number; filename: string; file_extension: string; media_type: string };
-        for (const match of matcher.match(item.filename, item.file_extension)) {
+        const matches = matcher.match(item.filename, item.file_extension);
+        if (filenameCredits && removeFilenameCredit) {
+          const matched = new Set(matches.map((person) => person.id));
+          for (const credit of filenameCredits.all(item.id) as Array<{ person_id: number }>) if (!matched.has(credit.person_id)) removeFilenameCredit.run(item.id, credit.person_id);
+        }
+        for (const match of matches) {
+          if (kind === "people" && !ids.has(match.id)) continue;
           indexed += Number(kind === "people" ? assignment.run(item.id, match.id, item.media_type === "video" ? "cast" : "artist").changes : assignment.run(item.id, match.id).changes);
         }
       }

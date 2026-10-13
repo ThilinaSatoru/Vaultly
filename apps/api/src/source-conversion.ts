@@ -2,13 +2,13 @@ import { execFile, spawn } from "node:child_process";
 import { access, copyFile, realpath, stat, unlink } from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
 import { randomUUID } from "node:crypto";
 import { database, onVaultChanged } from "./database.js";
 import { video2mp4Script } from "./video2mp4-script.js";
 import { withMediaProcess } from "./process-resources.js";
+import { runCommand, trackProcess } from "./background-processes.js";
 
-const run = promisify(execFile);
+const run = runCommand;
 const python = () => process.env.VAULTLY_PYTHON || "python";
 export type ConversionMode = "quick" | "slow" | "both";
 export interface ConversionProgress {
@@ -84,8 +84,8 @@ function addConversionError(progress: ConversionProgress, message: string) {
 async function worker(src: string, tmp: string, signal: AbortSignal, progress: ConversionProgress, mode: ConversionMode) {
   signal.throwIfAborted();
   return new Promise<number>((resolve, reject) => {
-    const child = spawn(python(), ["-X", "utf8", "-u", "-c", conversionWorker], { windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8:replace" } });
+    const child = trackProcess(spawn(python(), ["-X", "utf8", "-u", "-c", conversionWorker], { windowsHide: true, detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8:replace" } }));
     let errors = "";
     let pending = "";
     child.stdout.setEncoding("utf8");
