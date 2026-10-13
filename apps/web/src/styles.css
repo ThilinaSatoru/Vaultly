@@ -305,6 +305,7 @@ main { grid-column: 2; min-width: 0; }
 .gallery-empty p { margin: 0 0 18px; }
 .pagination { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 28px 0; color: #a9aeb6; font-size: .8rem; }
 .pagination button:disabled { opacity: .4; cursor: default; }
+.pagination[aria-label="Attribute pages"] { flex-wrap: wrap; gap: 10px; }
 .category-card-section { margin: 5px 0 34px; }
 .category-card-heading { display: flex; align-items: baseline; gap: 9px; margin-bottom: 15px; padding-bottom: 9px; border-bottom: 1px solid #292d34; }
 .category-card-heading h2 { margin: 0; font: 700 1.16rem Manrope, sans-serif; }
@@ -598,6 +599,7 @@ main { grid-column: 2; min-width: 0; }
   .sidebar .nav-link, .sidebar .nav-active { justify-content: center; width: 48px; padding: 0; }
   .sidebar-status-heading { justify-content: center; }
   .sidebar-status-heading > span { display: none; }
+  .sidebar-status > .system-resources { display: none; }
   .sidebar-status-heading small { margin-left: 0; }
   .sidebar-status-tasks { display: none; position: absolute; z-index: 20; left: calc(100% + 10px); bottom: 0; width: 220px; max-height: 220px; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); box-shadow: 0 8px 30px #0008; }
   .sidebar-status:hover .sidebar-status-tasks, .sidebar-status:focus-within .sidebar-status-tasks { display: block; }
@@ -737,13 +739,12 @@ main { grid-column: 2; min-width: 0; }
 @container (max-width: 400px) { .people-profile-grid { grid-template-columns: 1fr; } }
 .person-image-preview { display: block; width: 160px; height: 160px; object-fit: contain; border-radius: 12px; margin: 16px auto; }
 .person-image-upload { display: grid; gap: 8px; margin: 16px 0; }
-.people-profile-scan { margin: 18px 0; padding: 16px; border: 1px solid #303640; border-radius: 9px; background: #181c22; }
-.people-profile-scan-heading { display: flex; gap: 16px; align-items: center; justify-content: space-between; }
-.people-profile-scan-heading p, .people-profile-scan > p { color: #9197a1; font-size: .8rem; line-height: 1.5; }
-.people-profile-scan progress { width: 100%; accent-color: var(--acid); }
-.people-profile-scan details { margin-top: 12px; }
-.people-profile-scan li { margin: 10px 0; font-size: .8rem; overflow-wrap: anywhere; }
-.people-profile-scan li p { color: #9197a1; margin: 4px 0; }
+.attribute-bulk-upload { margin: 18px 0; padding: 16px; min-width: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); }
+.attribute-bulk-upload label { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; font-weight: 600; }
+.attribute-bulk-upload input { max-width: 100%; }
+.attribute-bulk-upload p { color: var(--muted); font-size: .85rem; line-height: 1.5; }
+.attribute-bulk-upload summary { cursor: pointer; }
+.attribute-bulk-upload pre { max-width: 100%; overflow: auto; padding: 12px; background: var(--panel); border-radius: 6px; font-size: .8rem; }
 .attribute-media-choice { justify-content: flex-start; min-height: 52px; }
 .attribute-editor-backdrop { z-index: 1400; }
 .attribute-editor-backdrop[hidden] { display: none; }

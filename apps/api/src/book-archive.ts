@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { inflateRawSync } from "node:zlib";
 import path from "node:path";
+import { withMediaProcess } from "./process-resources.js";
 
 interface Entry { name: string; method: number; size: number; compressed: number; offset: number }
 export class BookArchive {
@@ -40,17 +41,22 @@ export class BookArchive {
 
 let cache: { filename: string; signature: string; archive: BookArchive } | undefined;
 let pending: { filename: string; signature: string; promise: Promise<BookArchive> } | undefined;
+let cacheTimer: ReturnType<typeof setTimeout> | undefined;
 export async function openBookArchive(filename: string) {
   const info = await stat(filename);
   const signature = `${info.size}:${info.mtimeMs}`;
   if (cache?.filename === filename && cache.signature === signature) return cache.archive;
   if (info.size > 256 * 1024 * 1024) throw new Error("Books over 256 MB must be opened in an external reader.");
   if (pending?.filename === filename && pending.signature === signature) return pending.promise;
-  const job = { filename, signature, promise: readFile(filename).then((bytes) => new BookArchive(bytes)) };
+  const job = { filename, signature, promise: withMediaProcess(async () => new BookArchive(await readFile(filename))) };
   pending = job;
   try {
     const archive = await job.promise;
-    cache = { filename, signature, archive };
+    clearTimeout(cacheTimer);
+    // Large books remain usable by the current request without being retained at idle.
+    cache = info.size <= 32 * 1024 * 1024 ? { filename, signature, archive } : undefined;
+    cacheTimer = setTimeout(() => { cache = undefined; }, 30_000);
+    cacheTimer.unref();
     return archive;
   } finally { if (pending === job) pending = undefined; }
 }

@@ -86,7 +86,7 @@ export class AttributeNameMatcher<T extends NamedEntry> {
 
 /** Match complete words or phrases, not arbitrary substrings or file extensions. */
 export class FilenameMetadataMatcher<T extends NamedEntry> {
-  private readonly byFirstWord = new Map<string, Array<{ entry: T; phrase: MatchingPhrase }>>();
+  private readonly byWordCount = new Map<number, Map<string, Map<number, T>>>();
   private readonly byJoinedWord = new Map<string, Array<{ entry: T; phrase: MatchingPhrase }>>();
 
   constructor(entries: T[]) {
@@ -98,11 +98,11 @@ export class FilenameMetadataMatcher<T extends NamedEntry> {
       if (!value) continue;
       const phrase = new MatchingPhrase(value);
       const candidate = { entry, phrase };
-      for (const word of new Set(phrase.words)) {
-        const candidates = this.byFirstWord.get(word) ?? [];
-        candidates.push(candidate);
-        this.byFirstWord.set(word, candidates);
-      }
+      const signatures = this.byWordCount.get(phrase.words.length) ?? new Map<string, Map<number, T>>();
+      const matches = signatures.get(phrase.signature) ?? new Map<number, T>();
+      matches.set(entry.id, entry);
+      signatures.set(phrase.signature, matches);
+      this.byWordCount.set(phrase.words.length, signatures);
       if (phrase.words.length > 1) {
         for (const first of new Set(phrase.words.map((word) => word[0]))) {
           const key = `${phrase.joinedLength}:${first}`;
@@ -123,17 +123,23 @@ export class FilenameMetadataMatcher<T extends NamedEntry> {
     const words = normalized.split(" ");
     const matches: T[] = [];
     const matchedIds = new Set<number>();
+    const add = (entry: T) => {
+      if (!matchedIds.has(entry.id)) { matchedIds.add(entry.id); matches.push(entry); }
+    };
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
-      const candidates = [...(this.byFirstWord.get(word) ?? []), ...(this.byJoinedWord.get(`${word.length}:${word[0]}`) ?? [])];
+      for (const [length, signatures] of this.byWordCount) {
+        if (wholeValue && (i !== 0 || length !== words.length)) continue;
+        if (i + length > words.length) continue;
+        const window = words.slice(i, i + length);
+        if (!wholeValue && window.join(" ").length < 2) continue;
+        const entries = signatures.get([...window].sort().join(" "));
+        if (entries) for (const entry of entries.values()) add(entry);
+      }
+      if (wholeValue && words.length !== 1) continue;
+      const candidates = this.byJoinedWord.get(`${word.length}:${word[0]}`) ?? [];
       for (const candidate of candidates) {
-        if (!wholeValue && candidate.phrase.phrase.length < 2) continue;
-        const window = wholeValue ? words : words.slice(i, i + candidate.phrase.words.length);
-        if (!matchedIds.has(candidate.entry.id) && (candidate.phrase.matches(window)
-          || (!wholeValue && candidate.phrase.matches([word])))) {
-          matchedIds.add(candidate.entry.id);
-          matches.push(candidate.entry);
-        }
+        if (!matchedIds.has(candidate.entry.id) && candidate.phrase.matches([word])) add(candidate.entry);
       }
     }
     return matches;

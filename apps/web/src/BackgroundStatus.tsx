@@ -1,5 +1,6 @@
 import { Activity, Check, LoaderCircle } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { getRequestActivity, subscribeRequestActivity } from "./request-activity";
 import { api, formatCount } from "./media";
 
 export interface BackgroundTask {
@@ -12,14 +13,15 @@ export interface SystemResources {
 }
 
 export function BackgroundStatusView({ tasks, available, onOpen, resources }: { tasks: BackgroundTask[]; available: boolean | null; onOpen: (target: BackgroundTask["target"]) => void; resources?: SystemResources | null }) {
-  const label = available === false ? "Status unavailable" : available === null ? "Checking activity" : tasks.length ? `${tasks.length} running` : "No tasks running";
+  const label = tasks.length ? `${tasks.length} running` : available === false ? "Status unavailable" : available === null ? "Checking activity" : "No tasks running";
   return <section className={`sidebar-status${tasks.length ? " is-running" : ""}`} aria-label="Background activity">
     <button className="sidebar-status-heading" type="button" onClick={() => onOpen(tasks[0]?.target ?? "sources")} title={label} aria-label={`Background activity: ${label}`}>
       {tasks.length ? <LoaderCircle className="spin" size={14} /> : available ? <Check size={14} /> : <Activity size={14} />}
       <span>{label}</span>{tasks.length > 0 && <small>{tasks.length}</small>}
     </button>
-    {resources && tasks.length > 0 && <p className={`system-resources${resources.lowMemory ? " is-low" : ""}`}>
-      CPU {resources.cpuPercent}% · {(resources.freeBytes / 1024 ** 3).toFixed(1)} GB free · app {Math.round(resources.appBytes / 1024 ** 2)} MB<br />
+    <p className="system-resources" role="status">Database {available === false ? "unreachable" : available === null ? "checking" : tasks.some((task) => task.id.startsWith("source-") || (task.id.startsWith("request-") && task.detail !== "Reading and validating JSON")) ? "processing changes" : "connected"}</p>
+    {resources && <p className={`system-resources${resources.lowMemory ? " is-low" : ""}`}>
+      CPU {resources.cpuPercent}% · {(resources.freeBytes / 1024 ** 3).toFixed(1)} GB free · API {Math.round(resources.appBytes / 1024 ** 2)} MB<br />
       {resources.activeProcesses} / {resources.processLimit} processes · {resources.waitingProcesses} waiting{resources.lowMemory && " · waiting for memory"}
     </p>}
     {tasks.length > 0 && <div className="sidebar-status-tasks">{tasks.map((task) => {
@@ -35,6 +37,7 @@ export function BackgroundStatusView({ tasks, available, onOpen, resources }: { 
 }
 
 export function BackgroundStatus({ onOpen }: { onOpen: (target: BackgroundTask["target"]) => void }) {
+  const requests = useSyncExternalStore(subscribeRequestActivity, getRequestActivity, getRequestActivity);
   const [tasks, setTasks] = useState<BackgroundTask[]>([]);
   const [available, setAvailable] = useState<boolean | null>(null);
   const [resources, setResources] = useState<SystemResources | null>(null);
@@ -59,5 +62,5 @@ export function BackgroundStatus({ onOpen }: { onOpen: (target: BackgroundTask["
     void poll();
     return () => { stopped = true; clearTimeout(timer); controller.abort(); };
   }, []);
-  return <BackgroundStatusView tasks={tasks} available={available} onOpen={onOpen} resources={resources} />;
+  return <BackgroundStatusView tasks={[...requests, ...tasks]} available={available} onOpen={onOpen} resources={resources} />;
 }

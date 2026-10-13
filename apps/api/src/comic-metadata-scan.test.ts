@@ -2,9 +2,26 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, test } from "vitest";
+import { afterAll, expect, test, vi } from "vitest";
+import { rmSync } from "node:fs";
+const isolated = await vi.hoisted(async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const directory = mkdtempSync(join(tmpdir(), "vaultly-comic-metadata-tests-"));
+  const previous = process.env.VAULTLY_RUNTIME_DIR;
+  process.env.VAULTLY_RUNTIME_DIR = directory;
+  return { directory, previous };
+});
 import { database } from "./database.js";
 import { scanSource } from "./scanner.js";
+
+afterAll(() => {
+  database.close();
+  rmSync(isolated.directory, { recursive: true, force: true });
+  if (isolated.previous === undefined) delete process.env.VAULTLY_RUNTIME_DIR;
+  else process.env.VAULTLY_RUNTIME_DIR = isolated.previous;
+});
 
 test("comic sidecars reuse tags and artist aliases, create artists once, and apply changed metadata on rescan", async () => {
   const token = randomUUID();

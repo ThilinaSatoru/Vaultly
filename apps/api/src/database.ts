@@ -20,6 +20,10 @@ registerEnglishMatchingFunction(database);
 database.exec("PRAGMA journal_mode = WAL");
 database.exec("PRAGMA foreign_keys = ON");
 database.exec("PRAGMA busy_timeout = 5000");
+// Bound SQLite's resident page cache and spill large sort/index work to disk.
+database.exec("PRAGMA cache_size = -32768");
+database.exec("PRAGMA temp_store = FILE");
+database.exec("PRAGMA mmap_size = 0");
 
 database.exec(`
   CREATE TABLE IF NOT EXISTS sources (
@@ -213,6 +217,9 @@ database.exec(`
 const sourceColumns = (database.prepare("PRAGMA table_info(sources)").all() as Array<{ name: string }>).map((column) => column.name);
 const peopleColumns = (database.prepare("PRAGMA table_info(people)").all() as Array<{ name: string }>).map((column) => column.name);
 if (!peopleColumns.includes("profile_image")) database.exec("ALTER TABLE people ADD COLUMN profile_image TEXT");
+for (const column of ["gender", "country_code", "country", "avatar_url", "source", "profile_url", "scraped_at"]) {
+  if (!peopleColumns.includes(column)) database.exec(`ALTER TABLE people ADD COLUMN ${column} TEXT`);
+}
 if (!sourceColumns.includes("media_type")) database.exec("ALTER TABLE sources ADD COLUMN media_type TEXT NOT NULL DEFAULT 'mixed'");
 if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD COLUMN connected INTEGER NOT NULL DEFAULT 1");
 

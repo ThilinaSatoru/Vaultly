@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { database } from "./database.js";
 import { withAttributePatterns } from "./attribute-routes.js";
-import { downloadProfileImage, normalizeProfileImage, readProfileImage, removeProfileImage, storeProfileImage, type ProfileImageFetch } from "./profile-images.js";
+import { normalizeProfileImage, readProfileImage, removeProfileImage, storeProfileImage } from "./profile-images.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const itemRoleInput = z.object({ id: z.coerce.number().int().positive(), role: z.enum(["cast", "artist"]) });
@@ -15,7 +15,7 @@ function creditsForItem(id: number, role: "cast" | "artist") {
   `).all(id, role);
 }
 
-export async function registerPeopleRoutes(app: FastifyInstance, options: { fetchProfileImage?: ProfileImageFetch } = {}) {
+export async function registerPeopleRoutes(app: FastifyInstance) {
   app.get("/api/people/:id/image", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const person = database.prepare("SELECT profile_image FROM people WHERE id = ?").get(id) as { profile_image: string | null } | undefined;
@@ -24,10 +24,12 @@ export async function registerPeopleRoutes(app: FastifyInstance, options: { fetc
   });
   app.put("/api/people/:id/image", { bodyLimit: 15 * 1024 * 1024 }, async (request, reply) => {
     const { id } = idInput.parse(request.params);
-    const input = z.union([z.object({ data: z.string().min(1).max(14 * 1024 * 1024) }), z.object({ url: z.string().url().max(4096), referrer: z.string().url().max(4096).optional() })]).parse(request.body);
+    const parsed = z.object({ data: z.string().min(1).max(14 * 1024 * 1024) }).strict().safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "Upload an image file. Image URL downloads are no longer supported." });
+    const input = parsed.data;
     if (!database.prepare("SELECT id FROM people WHERE id = ?").get(id)) return reply.code(404).send({ message: "Person not found." });
     let data: Buffer;
-    try { data = await normalizeProfileImage("url" in input ? await downloadProfileImage(input.url, input.referrer, options.fetchProfileImage) : Buffer.from(input.data, "base64")); }
+    try { data = await normalizeProfileImage(Buffer.from(input.data, "base64")); }
     catch (error) { return reply.code(400).send({ message: error instanceof Error ? error.message : "Could not load image." }); }
     const filename = await storeProfileImage(data);
     const person = database.prepare("SELECT profile_image FROM people WHERE id = ?").get(id) as { profile_image: string | null } | undefined;
@@ -46,7 +48,7 @@ export async function registerPeopleRoutes(app: FastifyInstance, options: { fetc
     return reply.code(204).send();
   });
   app.get("/api/people", async () => withAttributePatterns("people", database.prepare(`
-    SELECT p.id, p.name, p.profile_image,
+    SELECT p.*,
       COUNT(DISTINCT CASE WHEN ip.role = 'cast' AND m.available = 1 THEN m.id END) AS cast_count,
       COUNT(DISTINCT CASE WHEN ip.role = 'artist' AND m.available = 1 THEN m.id END) AS artist_count
     FROM people p LEFT JOIN effective_item_people ip ON ip.person_id = p.id

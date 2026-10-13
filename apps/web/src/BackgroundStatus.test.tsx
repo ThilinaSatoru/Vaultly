@@ -21,3 +21,16 @@ test("distinguishes idle from an unavailable status endpoint", () => {
   expect(renderToStaticMarkup(<BackgroundStatusView available tasks={[]} onOpen={vi.fn()} />)).toContain("No tasks running");
   expect(renderToStaticMarkup(<BackgroundStatusView available={false} tasks={[]} onOpen={vi.fn()} />)).toContain("Status unavailable");
 });
+
+test("memory and database status stay visible when idle", () => {
+  const html = renderToStaticMarkup(<BackgroundStatusView available tasks={[]} onOpen={vi.fn()} resources={{ cpuPercent: 3, freeBytes: 2 * 1024 ** 3, totalBytes: 8 * 1024 ** 3, appBytes: 128 * 1024 ** 2, activeProcesses: 0, waitingProcesses: 0, processLimit: 2, lowMemory: false }} />);
+  expect(html).toContain("Database connected");
+  expect(html).toContain("API 128 MB");
+});
+
+test("local uploads remain visible when server activity is unavailable", () => {
+  const html = renderToStaticMarkup(<BackgroundStatusView available={false} tasks={[{ ...task, id: "request-1", label: "Attribute upload" }]} onOpen={vi.fn()} />);
+  expect(html).toContain("1 running");
+  expect(html).toContain("Attribute upload");
+  expect(html).toContain("Database unreachable");
+});

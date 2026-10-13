@@ -1,10 +1,10 @@
 import { Check, ChevronDown, Plus, Search, SlidersHorizontal, X } from "lucide-react";
-import { useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Tag } from "./media";
 import { AttributeBadge } from "./AttributeBadge";
 import type { AttributeKind } from "./attribute-navigation";
-import { matchesAttribute } from "./attribute-search";
+import { searchAttributes } from "./attribute-search";
 import { AttributeManagerContext } from "./attribute-manager";
 
 interface TagComboboxProps {
@@ -31,8 +31,10 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useRef(`tag-list-${Math.random().toString(36).slice(2)}`).current;
-  const selected = tags.filter((tag) => selectedIds.includes(tag.id));
-  const filtered = tags.filter((tag) => matchesAttribute(tag, query));
+  const selectedSet = new Set(selectedIds);
+  const selected = tags.filter((tag) => selectedSet.has(tag.id));
+  const matches = useMemo(() => open ? searchAttributes(tags, query) : [], [tags, query, open]);
+  const filtered = matches.slice(0, 100);
   const canCreate = Boolean(onCreate && query.trim() && !tags.some((tag) => tag.name.toLocaleLowerCase() === query.trim().toLocaleLowerCase()));
   useEffect(() => { setActiveIndex(0); }, [query, tags]);
   useEffect(() => { menuRef.current?.querySelector(`[data-option-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" }); }, [activeIndex]);
@@ -138,6 +140,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
               <span>{tag.name}</span>{selectedIds.includes(tag.id) && <Check size={16} />}
             </button>
           ))}
+          {matches.length > filtered.length && <p className="tag-combobox-empty">Showing {filtered.length} of {matches.length} options. Refine your search to find more.</p>}
           {canCreate && <button type="button" className="tag-create-option" onClick={() => void create()} disabled={creating}><Plus size={15} /> Create “{query.trim()}”</button>}
           {error && <p className="tag-combobox-error" role="alert">{error}</p>}
         </div>, document.body,

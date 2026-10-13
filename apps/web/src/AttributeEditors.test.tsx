@@ -30,6 +30,7 @@ import { api } from "./media";
 import { AttributePatterns } from "./AttributePatterns";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
+import { AttributeBulkUpload } from "./AttributeBulkUpload";
 
 function render(component: () => ReactNode) {
   hooks.cursor = 0; hooks.effectCursor = 0;
@@ -55,6 +56,58 @@ function deferred<T>() {
 }
 const settle = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 const attribute = { id: 7, name: "Travel" };
+
+it("bulk upload explains each JSON format and imports a prepared file", async () => {
+  vi.mocked(api).mockResolvedValue({ created: 2, updated: 1, indexed: 3 });
+  const onChanged = vi.fn();
+  const component = () => AttributeBulkUpload({ kind: "people", onChanged });
+  let node = render(component);
+  const example = JSON.parse(find(node, (element) => element.type === "pre").props.children);
+  expect(example.records[0]).toHaveProperty("avatar_url");
+  const target = { files: [new Blob(['\uFEFF{"records":[{"name":"Prepared person"}]}'])], value: "dump.json" };
+  find(node, (element) => element.type === "input").props.onChange({ target });
+  await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  expect(target.value).toBe("");
+  expect(api).toHaveBeenCalledWith("/api/attributes/people/import", { method: "POST", body: '{"records":[{"name":"Prepared person"}]}' }, false);
+  expect(onChanged).toHaveBeenCalledOnce();
+  node = render(component);
+  expect(find(node, (element) => element.props.role === "status").props.children).toBe("2 created, 1 updated, 3 new media assignments.");
+  for (const kind of ["tags", "categories"] as const) {
+    hooks.cursor = 0;
+    const other = AttributeBulkUpload({ kind, onChanged });
+    expect(JSON.parse(find(other, (element) => element.type === "pre").props.children).records[0]).toHaveProperty("patterns");
+  }
+});
+
+it("bulk upload rejects malformed files and allows retrying", async () => {
+  const onChanged = vi.fn();
+  const component = () => AttributeBulkUpload({ kind: "tags", onChanged });
+  let node = render(component);
+  find(node, (element) => element.type === "input").props.onChange({ target: { files: [new Blob(["{invalid"])], value: "bad.json" } });
+  await vi.waitFor(() => {
+    node = render(component);
+    expect(find(node, (element) => element.type === "input").props.disabled).toBe(false);
+  });
+  node = render(component);
+  expect(find(node, (element) => element.props.role === "alert").props.children).toContain("Invalid JSON");
+  expect(find(node, (element) => element.type === "input").props.disabled).toBe(false);
+  expect(api).not.toHaveBeenCalled();
+  expect(onChanged).not.toHaveBeenCalled();
+});
+
+it("refreshes committed attributes after a later chunk fails and allows retrying", async () => {
+  vi.mocked(api).mockResolvedValueOnce({ created: 10000, updated: 0, indexed: 3 }).mockRejectedValueOnce(new Error("Invalid record"));
+  const onChanged = vi.fn();
+  const component = () => AttributeBulkUpload({ kind: "tags", onChanged });
+  let node = render(component);
+  const records = Array.from({ length: 10001 }, (_, id) => ({ name: `Tag ${id}` }));
+  find(node, (element) => element.type === "input").props.onChange({ target: { files: [new Blob([JSON.stringify(records)])], value: "dump.json" } });
+  await vi.waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  node = render(component);
+  expect(find(node, (element) => element.props.role === "alert").props.children).toContain("10,000 of 10,001 records saved. Invalid record");
+  expect(find(node, (element) => element.type === "input").props.disabled).toBe(false);
+  expect(api).toHaveBeenCalledTimes(2);
+});
 
 beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effectCursor = 0; hooks.effects = []; hooks.jobs = []; hooks.management = null; vi.mocked(api).mockReset(); });
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });

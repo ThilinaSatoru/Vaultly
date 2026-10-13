@@ -17,8 +17,6 @@ import { registerPeopleRoutes } from "./people-routes.js";
 import { registerBulkRoutes } from "./bulk-routes.js";
 import { registerCircleRoutes } from "./circle-routes.js";
 import { registerBackupRoutes } from "./backup-routes.js";
-import type { ProfileImageFetch } from "./profile-images.js";
-import { registerPeopleProfileScanRoutes, type PeopleProfileBrowserFactory } from "./people-profile-scan.js";
 import { getBackgroundActivity } from "./background-activity.js";
 import { getSystemResources } from "./process-resources.js";
 import { cancelSourceConversion, checkConversionRuntime, getConversionProgress, isSourceConverting, startSourceConversion } from "./source-conversion.js";
@@ -30,8 +28,6 @@ export interface VaultlyServerOptions {
   pickDirectory?: () => Promise<string | null>;
   revealPath?: (itemPath: string) => Promise<void>;
   openVideo?: (itemPath: string) => Promise<void>;
-  fetchProfileImage?: ProfileImageFetch;
-  createPeopleProfileBrowser?: PeopleProfileBrowserFactory;
 }
 
 export async function buildVaultlyServer(options: VaultlyServerOptions = {}) {
@@ -52,8 +48,7 @@ app.setErrorHandler((error, _request, reply) => {
 
 await app.register(registerMediaRoutes, { revealPath: options.revealPath, openVideo: options.openVideo });
 await app.register(registerSeriesRoutes);
-await app.register(registerPeopleRoutes, { fetchProfileImage: options.fetchProfileImage });
-await app.register(registerPeopleProfileScanRoutes, { createBrowser: options.createPeopleProfileBrowser, fetchProfileImage: options.fetchProfileImage });
+await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);
 await app.register(registerCircleRoutes);
 await app.register(registerBackupRoutes);

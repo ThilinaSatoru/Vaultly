@@ -4,6 +4,7 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 const hooks = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
+  useMemo: (compute: () => unknown) => compute(),
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
     if (!(index in hooks.states)) hooks.states[index] = typeof initial === "function" ? initial() : initial;
@@ -42,4 +43,28 @@ test.each(["tags", "categories", "people"] as const)("%s pattern editor survives
   expect(find(node, (element) => element.type === AttributePatternButton)).toBeUndefined();
   editor.props.onClose();
   expect(find(render(component), (element) => element.type === AttributePatterns)).toBeUndefined();
+});
+
+test.each(["tags", "categories", "people"] as const)("%s renders at most 100 of 12k attributes and resets pagination on search", (kind) => {
+  const entries = Array.from({ length: 12000 }, (_, id) => ({ id: id + 1, name: `Person ${id}`, item_count: 0 }));
+  const onChanged = vi.fn();
+  const component = () => kind === "tags" ? TagsView({ tags: entries, onChanged })
+    : kind === "categories" ? CategoriesView({ categories: entries, onChanged })
+      : PeopleView({ people: entries, onChanged });
+  const collect = (node: ReactNode): ReactElement<any>[] => {
+    if (isValidElement<any>(node)) return [node, ...collect(node.props.children)];
+    if (Array.isArray(node)) return node.flatMap(collect);
+    return [];
+  };
+  let node = render(component);
+  const rows = () => collect(node).filter((element) => element.props.className === (kind === "people" ? "person-profile-card" : "category-row"));
+  expect(rows()).toHaveLength(100);
+  find(node, (element) => element.type === "button" && element.props.children === "Next")!.props.onClick();
+  node = render(component);
+  expect(rows()).toHaveLength(100);
+  expect(find(node, (element) => element.type === "button" && element.props.children === "Previous")!.props.disabled).toBe(false);
+  find(node, (element) => element.props["aria-label"] === "Search attributes")!.props.onChange({ target: { value: "11999" } });
+  node = render(component);
+  expect(rows()).toHaveLength(1);
+  expect(find(node, (element) => element.props["aria-label"] === "Attribute pages")).toBeUndefined();
 });

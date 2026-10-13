@@ -28,7 +28,7 @@ const columns: Record<(typeof tableOrder)[number], string[]> = {
   media_items: ["id", "source_id", "media_type", "title", "filename", "file_extension", "relative_path", "size_bytes", "modified_at_ms", "file_count", "favorite", "duration_seconds", "video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature", "indexed", "available", "created_at", "updated_at"],
   categories: ["id", "name", "created_at"],
   tags: ["id", "name", "created_at"],
-  people: ["id", "name", "created_at", "profile_image"],
+  people: ["id", "name", "created_at", "profile_image", "gender", "country_code", "country", "avatar_url", "source", "profile_url", "scraped_at"],
   series: ["id", "title", "description", "cover_data", "cover_mime", "preferred_type", "favorite", "auto_key", "created_at", "updated_at"],
   circles: ["id", "title", "description", "preferred_type", "created_at", "updated_at"],
   item_categories: ["item_id", "category_id"],
@@ -61,6 +61,7 @@ function exportRow(table: string, row: BackupRow): BackupRow {
 }
 
 function importValue(table: string, column: string, value: unknown): unknown {
+  if (table === "people" && value === undefined && !["id", "name", "created_at"].includes(column)) return null;
   if (table === "sources" && column === "media_type" && value === undefined) return "mixed";
   if (table === "media_items" && ["video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature"].includes(column) && value === undefined) return null;
   if (["series", "media_items"].includes(table) && column === "cover_data" && typeof value === "string") return Buffer.from(value, "base64");

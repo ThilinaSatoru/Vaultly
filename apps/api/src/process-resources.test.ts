@@ -46,3 +46,21 @@ test("source scans serialize and queued scans can be cancelled", async () => {
     expect(task).not.toHaveBeenCalled();
   } finally { finish(); await first; memory.mockRestore(); }
 });
+
+test("a running scan reduces media work to one process and releases the limit afterward", async () => {
+  const memory = vi.spyOn(os, "freemem").mockReturnValue(os.totalmem());
+  let finishScan!: () => void;
+  const scan = withSourceScan(() => new Promise<void>((resolve) => { finishScan = resolve; }));
+  const releases: Array<() => void> = [];
+  const run = () => withMediaProcess(() => new Promise<void>((resolve) => releases.push(resolve)));
+  const first = run(), second = run();
+  try {
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    expect(getSystemResources()).toMatchObject({ processLimit: 1, activeProcesses: 1 });
+    releases[0]();
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+    releases[1]();
+    await Promise.all([first, second]);
+  } finally { releases.forEach((release) => release()); finishScan(); await scan; memory.mockRestore(); }
+  expect(getSystemResources().processLimit).toBe(2);
+});

@@ -1,6 +1,7 @@
 import path from "node:path";
-import { readdir, realpath, readFile, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
+import { readCoverDimensions } from "./cover-dimensions.js";
 
 const imagePattern = /\.(?:jpe?g|png|webp|avif)$/i;
 export function coverCandidates(mediaName: string, filenames: string[], isDirectory = false) {
@@ -42,7 +43,8 @@ export async function normalizeVideoCover(bytes: Buffer) {
   return { data: canvas.toBuffer("image/png"), width, height };
 }
 
-export async function findMediaCover(rootPath: string, mediaPath: string, dimensions = new Map<string, { width: number; height: number }>(), isDirectory = false, directories = new Map<string, string[]>()) {
+export async function findMediaCover(rootPath: string, mediaPath: string, dimensions = new Map<string, { width: number; height: number }>(), isDirectory = false, directories = new Map<string, string[]>(), signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const root = await realpath(rootPath);
   let directory = await realpath(isDirectory ? mediaPath : path.dirname(mediaPath));
   while (true) {
@@ -60,6 +62,7 @@ export async function findMediaCover(rootPath: string, mediaPath: string, dimens
     ]);
     for (const name of candidates) {
       try {
+        signal?.throwIfAborted();
         const filename = await realpath(path.join(directory, name));
         const relative = path.relative(root, filename);
         if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
@@ -68,9 +71,9 @@ export async function findMediaCover(rootPath: string, mediaPath: string, dimens
         const signature = `${relative}:${info.size}:${info.mtimeMs}`;
         const cacheKey = `${filename}:${signature}`;
         let size = dimensions.get(cacheKey);
-        if (!size) { const image = await decodeVideoCover(await readFile(filename)); size = { width: image.width, height: image.height }; dimensions.set(cacheKey, size); }
+        if (!size) { size = await readCoverDimensions(filename, signal); dimensions.set(cacheKey, size); }
         return { path: relative, ...size, signature };
-      } catch { /* Try the next recognised cover if an image is damaged. */ }
+      } catch { signal?.throwIfAborted(); /* Try the next recognised cover if an image is damaged. */ }
     }
     if (!relativeDirectory) break;
     directory = path.dirname(directory);

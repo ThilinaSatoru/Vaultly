@@ -58,7 +58,7 @@ test("new profiles start blank; databases, images, caches and backups stay isola
       expect(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()).toMatchObject({ count: 0 });
     }
     expect(profileImageDirectory).toBe(path.join(isolated.directory, "vaults", profile.id, "profile-images"));
-    expect((await app.inject("/api/people/profile-scan")).json()).toMatchObject({ status: "idle", results: [] });
+    expect((await app.inject("/api/people/profile-scan")).statusCode).toBe(404);
     // Old requests must never mutate a different vault, even when IDs repeat.
     const stale = await app.inject({ method: "POST", url: "/api/tags?vaultProfile=default", payload: { name: "Stale tag" } });
     expect(stale.statusCode).toBe(409);

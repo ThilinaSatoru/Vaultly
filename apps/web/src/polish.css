@@ -267,8 +267,8 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .series-card p, .series-hero-body > p:not(.eyebrow), .series-content-heading p, .series-add > p,
 .series-empty-members, .series-member-title span, .series-member-controls button,
 .series-candidates small, .series-candidates p, .person-profile-credits,
-.person-profile-details .attribute-pattern-summary, .people-profile-scan-heading p,
-.people-profile-scan > p, .people-profile-scan li p, .management-drawer-title span,
+.person-profile-details .attribute-pattern-summary,
+.management-drawer-title span,
 .viewer-title span, .viewer-detail-row span, .detail-hint, .similar-playlist-heading small,
 .viewer-playlist-state, .similar-video-copy small, .pdf-page-control, .archive-state,
 .empty-state > span, .home-empty-categories, .pagination { color: var(--muted); }
@@ -297,7 +297,7 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .home-empty-categories, .gallery-empty { border-color: var(--border); border-radius: 16px; background: var(--surface-gradient); }
 .source-media-filters button[aria-pressed="true"] span { color: var(--acid); }
 .source-list-tools button, .source-expand, .source-name-toggle { color: var(--text); }
-.source-common-attributes, .people-profile-scan { border-color: var(--border); background: var(--panel-2); }
+.source-common-attributes { border-color: var(--border); background: var(--panel-2); }
 .sidebar-status-progress, .scan-progress-track, .pdf-toolbar-divider { background: var(--border); }
 .source-operations select, .source-filter-tools select, .category-form input,
 .setting-number input,
@@ -360,7 +360,7 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .series-card, .circle-card, .media-card, .folder-card, .gallery-toolbar,
 .gallery-advanced, .summary-strip, .home-empty-categories, .gallery-empty, .empty-state,
 .category-form, .category-list, .series-members, .series-candidates, .circle-hero,
-.people-profile-scan, .people-profile-grid > .category-empty { border-radius: var(--radius-card); }
+.people-profile-grid > .category-empty { border-radius: var(--radius-card); }
 .dialog, .viewer, .viewer.viewer-floating, .management-editor-window .dialog { border-radius: 30px; }
 .management-drawer, .management-drawer-heading { border-radius: 26px 26px 0 0; }
 .sidebar .nav-link, .sidebar .nav-active, .library-submenu button,

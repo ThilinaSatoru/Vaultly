@@ -5,7 +5,8 @@ import { createCanvas } from "@napi-rs/canvas";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import * as coverDimensions from "./cover-dimensions.js";
 import { coverCandidates, findMediaCover } from "./video-covers.js";
 import { parseVideoTracks } from "./video-tracks.js";
 import { database } from "./database.js";
@@ -32,6 +33,29 @@ test("damaged preferred artwork falls back to the next valid cover inside the me
     await writeFile(path.join(root, "cover.png"), createCanvas(120, 180).toBuffer("image/png"));
     expect(await findMediaCover(root, path.join(root, "Film.mkv"))).toMatchObject({ path: "cover.png", width: 120, height: 180 });
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("rescan reuses unchanged cover dimensions but inspects changed artwork", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-cover-rescan-"));
+  const source = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path, media_type) VALUES (?, ?, ?, 'pictures')").run("Artwork rescan", root, root).lastInsertRowid);
+  const inspect = vi.spyOn(coverDimensions, "readCoverDimensions");
+  try {
+    const filename = path.join(root, "cover.png");
+    await writeFile(filename, createCanvas(120, 180).toBuffer("image/png"));
+    await scanSource(source, root);
+    expect(inspect).toHaveBeenCalledOnce();
+    inspect.mockClear();
+    await scanSource(source, root);
+    expect(inspect).not.toHaveBeenCalled();
+    await writeFile(filename, createCanvas(300, 100).toBuffer("image/png"));
+    await scanSource(source, root);
+    expect(inspect).toHaveBeenCalledOnce();
+    expect(database.prepare("SELECT cover_width, cover_height FROM media_items WHERE source_id = ?").get(source)).toEqual({ cover_width: 300, cover_height: 100 });
+  } finally {
+    inspect.mockRestore();
+    database.prepare("DELETE FROM sources WHERE id = ?").run(source);
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("season files inherit nearby group artwork without looking outside the source", async () => {

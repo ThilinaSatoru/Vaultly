@@ -65,6 +65,7 @@ export function vaultDeletionTargets(id: string) {
   if (existsSync(directory) && path.relative(expected, realpathSync(directory)) !== "") {
     throw new Error("The profile data directory is redirected. It cannot be deleted.");
   }
+  // Keep the obsolete report in deletion cleanup so older vaults leave no orphan files.
   const owned = ["vaultly.db", "vaultly.db-wal", "vaultly.db-shm", "vaultly.db-journal", "thumbnails", "profile-images", "audio-tracks", "playback", "people-profile-scan.json"];
   const targets = owned.map((name) => path.resolve(directory, name)).filter((target) => existsSync(target));
   for (const target of targets) {

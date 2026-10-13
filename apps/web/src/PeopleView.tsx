@@ -4,10 +4,12 @@ import { AttributePatternSummary, useAttributeList } from "./AttributeManagerToo
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { AttributeBadge } from "./AttributeBadge";
 import { PersonImageDialog } from "./PersonImageDialog";
-import { PeopleProfileScan } from "./PeopleProfileScan";
+import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { Pencil, Plus, Trash2, Users } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, formatCount, type Person } from "./media";
+
+const usageCount = (person: Person) => (person.cast_count ?? 0) + (person.artist_count ?? 0);
 
 export function PeopleView({ people, onChanged, allowBrowse = true }: { people: Person[]; onChanged: () => void; allowBrowse?: boolean }) {
   const [name, setName] = useState("");
@@ -16,7 +18,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
   const [renaming, setRenaming] = useState<Person | null>(null);
   const [patternEntry, setPatternEntry] = useState<Person | null>(null);
   const [imagePerson, setImagePerson] = useState<Person | null>(null);
-  const { filtered, tools } = useAttributeList(people, (person) => (person.cast_count ?? 0) + (person.artist_count ?? 0));
+  const { filtered, visible, tools, pagination } = useAttributeList(people, usageCount);
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -40,18 +42,20 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
     <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>Cast & artists</h1><p>One shared list of people: Cast for videos, Artists for comics and stories. Search names and patterns, or customize matching below.</p></div></div>
     <form className="category-form" onSubmit={add}><label htmlFor="new-person">New person</label><div><input id="new-person" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" maxLength={100} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div></form>
     {error && <p className="page-error" role="alert">{error}</p>}
-    <PeopleProfileScan onChanged={onChanged} />
+    <AttributeBulkUpload kind="people" onChanged={onChanged} />
     {tools}
-    <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : filtered.map((person) =>
+    <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : visible.map((person) =>
       <article className="person-profile-card" key={person.id}>
         <button type="button" className="person-profile-photo" title={`Set profile image for ${person.name}`} aria-label={`Set profile image for ${person.name}`} onClick={() => setImagePerson(person)}>
-          {person.profile_image ? <img src={vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`)} alt={person.name} loading="lazy" /> : <Users size={64} />}
+          {person.profile_image || person.avatar_url ? <img src={person.profile_image ? vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`) : person.avatar_url!} alt={person.name} loading="lazy" referrerPolicy="no-referrer" /> : <Users size={64} />}
           <span className="person-profile-photo-edit"><Pencil size={14} />{person.profile_image ? "Edit photo" : "Add photo"}</span>
         </button>
         <div className="person-profile-details">
           <h2 className="person-profile-name">{allowBrowse ? <AttributeBadge kind="artist" {...person} /> : <span>{person.name}</span>}</h2>
           <div className="person-profile-credits"><span><strong>{formatCount(person.cast_count ?? 0)}</strong> cast credits</span><span><strong>{formatCount(person.artist_count ?? 0)}</strong> artist credits</span></div>
           <AttributePatternSummary patterns={person.patterns} />
+          {(person.gender || person.country) && <p>{[person.gender, person.country].filter(Boolean).join(" · ")}</p>}
+          {person.profile_url && <a href={person.profile_url} target="_blank" rel="noreferrer">Source profile</a>}
         </div>
         <footer className="person-profile-actions">
           <AttributePatternButton name={person.name} onClick={() => setPatternEntry(person)} />
@@ -59,6 +63,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true }: { people: 
           <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${person.name}`} onClick={() => void remove(person)}><Trash2 size={17} /></button>
         </footer>
       </article>)}</div>
+    {pagination}
     {renaming && <RenameAttributeDialog kind="people" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
     {patternEntry && <AttributePatterns key={patternEntry.id} kind="people" attribute={patternEntry} onChanged={onChanged} editorOnly onClose={() => setPatternEntry(null)} />}
     {imagePerson && <PersonImageDialog person={imagePerson} onClose={() => setImagePerson(null)} onSaved={onChanged} />}

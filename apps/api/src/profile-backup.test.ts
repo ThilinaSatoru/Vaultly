@@ -110,11 +110,11 @@ test("profile images are stored locally, replaced, archived, and restored with p
 
     const fetchImage = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array(image)));
     try {
-      expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "https://example.com/photo.png" } })).statusCode).toBe(200);
-      expect(fetchImage).toHaveBeenCalledOnce();
+      expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "https://example.com/photo.png" } })).statusCode).toBe(400);
+      expect(fetchImage).not.toHaveBeenCalled();
       expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "file:///photo.png" } })).statusCode).toBe(400);
       expect((await app.inject({ method: "PUT", url: endpoint, payload: { data: Buffer.from("<svg/>").toString("base64") } })).statusCode).toBe(400);
-      expect(readdirSync(profileImageDirectory)).toHaveLength(1);
+      expect(readdirSync(profileImageDirectory)).toHaveLength(0);
       await app.inject({ method: "DELETE", url: `/api/people/${person.id}` });
       expect(readdirSync(profileImageDirectory)).toHaveLength(0);
     } finally { fetchImage.mockRestore(); }

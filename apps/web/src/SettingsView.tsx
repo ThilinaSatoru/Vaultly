@@ -3,6 +3,7 @@ import { vaultStorage, vaultFetch, getActiveProfile, exportVaultPreferences, res
 import { Download, Keyboard, RotateCcw, Settings2, Upload, X } from "lucide-react";
 import { type ChangeEvent, useRef, useState } from "react";
 import { api } from "./media";
+import { beginRequestActivity } from "./request-activity";
 import { defaultBindings, eventBinding, formatBinding, readBindings, readBooleanPreference, readNumberPreference, type ShortcutAction, writeBindings, writePreference } from "./preferences";
 import { readPaletteMode, readTheme, savePaletteMode, saveTheme, type Theme } from "./theme";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
@@ -37,6 +38,7 @@ export function SettingsView() {
 
   const createBackup = async () => {
     setBackupBusy(true); setBackupMessage("");
+    const finish = beginRequestActivity("Database backup", "Exporting and compressing database");
     try {
       const response = await vaultFetch("/api/backup/archive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ preferences: exportVaultPreferences() }) });
       if (!response.ok) throw new Error((await response.json()).message || "Could not create the backup.");
@@ -50,7 +52,7 @@ export function SettingsView() {
       setBackupMessage("Backup created successfully.");
     } catch (requestError) {
       setBackupMessage(requestError instanceof Error ? requestError.message : "Could not create the backup.");
-    } finally { setBackupBusy(false); }
+    } finally { finish(); setBackupBusy(false); }
   };
 
   const restoreBackup = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -59,9 +61,10 @@ export function SettingsView() {
     if (!file || !window.confirm("Restore this backup? Metadata and preferences in the active vault will be replaced.")) return;
     setBackupBusy(true); setBackupMessage("");
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
+      // Inspect only the gzip header; fetch can send the original file directly.
+      const bytes = new Uint8Array(await file.slice(0, 2).arrayBuffer());
       const compressed = bytes[0] === 0x1f && bytes[1] === 0x8b;
-      const restored = await api<{ preferences?: Record<string, unknown> }>("/api/backup/restore", { method: "POST", headers: { "Content-Type": compressed ? "application/gzip" : "application/json" }, body: compressed ? file : new TextDecoder().decode(bytes) });
+      const restored = await api<{ preferences?: Record<string, unknown> }>("/api/backup/restore", { method: "POST", headers: { "Content-Type": compressed ? "application/gzip" : "application/json" }, body: file });
       restoreVaultPreferences(restored.preferences);
       window.location.reload();
     } catch (requestError) {

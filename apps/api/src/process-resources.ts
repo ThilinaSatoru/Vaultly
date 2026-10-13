@@ -8,6 +8,7 @@ let active = 0;
 let scansActive = 0;
 let waiting = 0;
 const limit = 2;
+const mediaLimit = () => scansActive > 0 ? 1 : limit;
 export function getSystemResources() {
   const now = Date.now();
   if (now - sampledAt >= 500) {
@@ -24,7 +25,7 @@ export function getSystemResources() {
   }
   const freeBytes = os.freemem(), totalBytes = os.totalmem();
   return { cpuPercent, freeBytes, totalBytes, appBytes: process.memoryUsage().rss,
-    activeProcesses: active, waitingProcesses: waiting, processLimit: limit,
+    activeProcesses: active, waitingProcesses: waiting, processLimit: mediaLimit(),
     lowMemory: freeBytes < Math.min(512 * 1024 * 1024, totalBytes * 0.1) };
 }
 
@@ -35,7 +36,7 @@ async function withSlot<T>(scan: boolean, task: () => Promise<T>, signal?: Abort
     for (;;) {
       signal?.throwIfAborted();
       const resources = getSystemResources();
-      if ((scan ? scansActive < 1 : active < limit) && !resources.lowMemory
+      if ((scan ? scansActive < 1 && active <= 1 : active < mediaLimit()) && !resources.lowMemory
         && (resources.cpuPercent < 95 || Date.now() - started >= 5000)) break;
       await delay(250, undefined, { signal });
     }

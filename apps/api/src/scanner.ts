@@ -86,11 +86,11 @@ const scanPathKey = (value: string) => process.platform === "win32" ? value.toLo
 
 /** Commit each rename with its index update before honoring cancellation again. */
 async function normalizeHashMarkers(sourceId: number, rootPath: string, items: ScannedItem[], signal: AbortSignal) {
+  if (!items.some((item) => item.filename.startsWith("#"))) return;
   const existing = database.prepare(`SELECT id, media_type AS mediaType, title, filename,
     file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
     modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
     FROM media_items WHERE source_id = ?`).all(sourceId) as unknown as ExistingItem[];
-  if (!items.some((item) => item.filename.startsWith("#"))) return;
   const byPath = new Map(existing.map((item) => [`${item.mediaType}|${scanPathKey(item.relativePath)}`, item]));
   const incomingPaths = new Set(items.map((item) => `${item.mediaType}|${scanPathKey(item.relativePath)}`));
   const strictMatches = new Map<string, ExistingItem[]>();
@@ -419,8 +419,9 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         const patternedPeople = withAttributePatterns("people", people);
         const tagMatcher = new DescriptiveMatcher(patternedTags);
         const peopleMatcher = new FilenameMetadataMatcher(patternedPeople);
-        const metadataTagMatcher = new AttributeNameMatcher(patternedTags);
-        const metadataArtistMatcher = new AttributeNameMatcher(patternedPeople);
+        // Comic metadata requires additional alias indexes. Video/story scans do not.
+        let metadataTagMatcher: AttributeNameMatcher<{ id: number; name: string; patterns: string[] }> | undefined;
+        let metadataArtistMatcher: AttributeNameMatcher<{ id: number; name: string; patterns: string[] }> | undefined;
         const createArtist = database.prepare("INSERT OR IGNORE INTO people(name) VALUES (?)");
         const findArtist = database.prepare("SELECT id, name FROM people WHERE name = ? COLLATE NOCASE");
         const addCategory = database.prepare("INSERT OR IGNORE INTO item_categories(item_id, category_id) SELECT ?, id FROM categories WHERE id = ?");
@@ -522,6 +523,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
             addPerson.run(row.id, item.mediaType === "video" ? "cast" : "artist", person.id);
           }
           if (item.comicMetadata) {
+            metadataTagMatcher ??= new AttributeNameMatcher(patternedTags);
+            metadataArtistMatcher ??= new AttributeNameMatcher(patternedPeople);
             for (const name of item.comicMetadata.tags) {
               for (const tag of metadataTagMatcher.match(name)) addTag.run(row.id, tag.id);
             }
@@ -536,6 +539,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
               }
               for (const artist of artists) addPerson.run(row.id, "artist", artist.id);
             }
+            // Metadata has been persisted; it is unnecessary for covers and thumbnails.
+            delete item.comicMetadata;
           }
           progress.itemsProcessed = itemIndex + 1;
           progress.currentPath = item.relativePath;
@@ -596,10 +601,12 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         throw transactionError;
       }
       // Probe outside indexing transactions so library requests and cancellation stay responsive.
-      const videoSignatures = new Map((database.prepare("SELECT id, video_metadata_signature AS signature FROM media_items WHERE source_id = ? AND media_type = 'video'")
-        .all(sourceId) as Array<{ id: number; signature: string | null }>).map((row) => [row.id, row.signature]));
+      // Indexed entries retain the required item objects; release reconciliation-only arrays.
+      previousItems.length = 0;
+      items.length = 0;
+      const videoSignature = database.prepare("SELECT video_metadata_signature AS signature FROM media_items WHERE id = ?");
       const videos = indexedItems.filter(({ id, item }) => item.mediaType === "video"
-        && videoSignatures.get(id) !== `${item.sizeBytes}:${item.modifiedAtMs}`);
+        && (videoSignature.get(id) as { signature: string | null } | undefined)?.signature !== `${item.sizeBytes}:${item.modifiedAtMs}`);
       if (videos.length) {
         signal.throwIfAborted();
         progress.phase = "metadata";
@@ -628,11 +635,20 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
       const saveCover = database.prepare(`UPDATE media_items SET cover_path = ?, cover_width = ?, cover_height = ?, cover_signature = ?
         WHERE id = ? AND cover_data IS NULL
           AND (cover_path IS NOT ? OR cover_width IS NOT ? OR cover_height IS NOT ? OR cover_signature IS NOT ?)`);
+      const existingCover = database.prepare(`SELECT cover_data IS NOT NULL AS custom, cover_path, cover_width, cover_height, cover_signature
+        FROM media_items WHERE id = ?`);
       for (const { id, item } of indexedItems) {
         signal.throwIfAborted();
-        const custom = database.prepare("SELECT cover_data IS NOT NULL AS custom FROM media_items WHERE id = ?").get(id) as { custom: number };
-        if (custom.custom) continue;
-        const cover = await findMediaCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions, !item.fileExtension, coverDirectories);
+        const previous = existingCover.get(id) as { custom: number; cover_path: string | null; cover_width: number | null; cover_height: number | null; cover_signature: string | null };
+        if (previous.custom) continue;
+        if (previous.cover_path && previous.cover_width && previous.cover_height && previous.cover_signature) {
+          // File inspection still checks signature and candidate priority before reusing these dimensions.
+          coverDimensions.set(`${path.resolve(rootPath, previous.cover_path)}:${previous.cover_signature}`, { width: previous.cover_width, height: previous.cover_height });
+        }
+        const cover = await findMediaCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions, !item.fileExtension, coverDirectories, signal);
+        // Folder listings are hints; keep cache growth independent of library size.
+        if (coverDimensions.size > 256) coverDimensions.clear();
+        if (coverDirectories.size > 128) coverDirectories.clear();
         signal.throwIfAborted();
         const coverValues = [cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null] as const;
         saveCover.run(...coverValues, id, ...coverValues);

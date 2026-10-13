@@ -507,7 +507,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     }
   }, [availableSourceKey, loadCategories, loadTags, loadPeople]);
   useEffect(() => {
-    if (previousScanningSourceKey.current && previousScanningSourceKey.current !== scanningSourceKey) {
+    // During rescan-all, refresh large attribute lists once after the final source finishes.
+    if (previousScanningSourceKey.current && !scanningSourceKey) {
       void loadSources(true);
       setRefreshKey((value) => value + 1);
       void loadCategories(); void loadTags(); void loadPeople();

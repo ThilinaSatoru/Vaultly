@@ -1,14 +1,12 @@
 import { vaultUrl } from "./vault-session";
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useState, type ChangeEvent } from "react";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { api, type Person } from "./media";
 
 export function PersonImageDialog({ person, onClose, onSaved }: { person: Person; onClose: () => void; onSaved: () => void }) {
-  const [url, setUrl] = useState("");
-  const [referrer, setReferrer] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const save = async (input: { data: string } | { url: string; referrer?: string }) => {
+  const save = async (input: { data: string }) => {
     await api(`/api/people/${person.id}/image`, { method: "PUT", body: JSON.stringify(input) });
     onSaved(); onClose();
   };
@@ -29,12 +27,6 @@ export function PersonImageDialog({ person, onClose, onSaved }: { person: Person
     } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not upload image."); }
     finally { setBusy(false); }
   };
-  const fromUrl = async (event: FormEvent) => {
-    event.preventDefault(); setBusy(true); setError("");
-    try { await save({ url: url.trim(), ...(referrer.trim() ? { referrer: referrer.trim() } : {}) }); }
-    catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not download image."); }
-    finally { setBusy(false); }
-  };
   const remove = async () => {
     setBusy(true); setError("");
     try { await api(`/api/people/${person.id}/image`, { method: "DELETE" }); onSaved(); onClose(); }
@@ -43,9 +35,8 @@ export function PersonImageDialog({ person, onClose, onSaved }: { person: Person
   };
   return <AttributeEditorDialog title={`Profile image · ${person.name}`} onClose={onClose} busy={busy}>
     {person.profile_image && <img className="person-image-preview" src={vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`)} alt={person.name} />}
-    <p className="dialog-intro">Upload an image or download one from a URL. Images are saved on this computer and included in backups.</p>
+    <p className="dialog-intro">Upload a prepared image. Uploaded images are saved on this computer and included in backups.</p>
     <label className="person-image-upload">Upload image<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={(event) => void upload(event)} /></label>
-    <form className="category-form" onSubmit={(event) => void fromUrl(event)}><label htmlFor="person-image-url">Image URL</label><div><input id="person-image-url" type="url" placeholder="https://example.com/photo.jpg" value={url} onChange={(event) => setUrl(event.target.value)} disabled={busy} required /></div><label htmlFor="person-image-referrer">Source page URL (optional)</label><div><input id="person-image-referrer" type="url" placeholder="Page where you found the image" value={referrer} onChange={(event) => setReferrer(event.target.value)} disabled={busy} /></div><p className="dialog-intro">Some sites require the gallery or page URL to allow image downloads.</p><button className="primary-button" type="submit" disabled={busy || !url.trim()}>Save image</button></form>
     <p className="dialog-intro">PNG, JPEG, GIF, or WebP · up to 10 MB.</p>
     {error && <p className="page-error" role="alert">{error}</p>}
     {busy && <p role="status">Saving image…</p>}

@@ -1,4 +1,5 @@
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
+import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
 import { AttributeBadge } from "./AttributeBadge";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
@@ -6,13 +7,15 @@ import { Pencil, Plus, Tag as TagIcon, Trash2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { api, formatCount, type Tag } from "./media";
 
+const usageCount = (tag: Tag) => tag.item_count ?? 0;
+
 export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[]; onChanged: () => void; allowBrowse?: boolean }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
   const [renaming, setRenaming] = useState<Tag | null>(null);
   const [patternEntry, setPatternEntry] = useState<Tag | null>(null);
-  const { filtered, tools } = useAttributeList(tags, (tag) => tag.item_count ?? 0);
+  const { filtered, visible, tools, pagination } = useAttributeList(tags, usageCount);
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -50,8 +53,9 @@ export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[];
       </form>
       {error && <p className="page-error" role="alert">{error}</p>}
       {tools}
+      <AttributeBulkUpload kind="tags" onChanged={onChanged} />
       <div className="category-list">
-        {tags.length === 0 ? <div className="category-empty">No tags yet. Create one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No tags match. Try another search or filter.</div> : filtered.map((tag) => (
+        {tags.length === 0 ? <div className="category-empty">No tags yet. Create one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No tags match. Try another search or filter.</div> : visible.map((tag) => (
           <div className="category-row" key={tag.id}>
             <div className="category-symbol"><TagIcon size={20} /></div>
             <div><strong>{allowBrowse ? <AttributeBadge kind="tag" {...tag} /> : <span className="tag-badge">{tag.name}</span>}</strong><span>{formatCount(tag.item_count ?? 0)} items</span><AttributePatternSummary patterns={tag.patterns} /></div>
@@ -61,6 +65,7 @@ export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[];
           </div>
         ))}
       </div>
+      {pagination}
       {renaming && <RenameAttributeDialog kind="tags" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
       {patternEntry && <AttributePatterns key={patternEntry.id} kind="tags" attribute={patternEntry} onChanged={onChanged} editorOnly onClose={() => setPatternEntry(null)} />}
     </section>

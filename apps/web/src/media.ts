@@ -1,4 +1,5 @@
 import { vaultFetch } from "./vault-session";
+import { beginRequestActivity } from "./request-activity";
 export type MediaType = "comic" | "video" | "story";
 
 export interface MediaItem {
@@ -68,6 +69,13 @@ export interface Person {
   id: number;
   name: string;
   profile_image?: string | null;
+  gender?: string | null;
+  country_code?: string | null;
+  country?: string | null;
+  avatar_url?: string | null;
+  source?: string | null;
+  profile_url?: string | null;
+  scraped_at?: string | null;
   cast_count?: number;
   artist_count?: number;
   patterns?: string[];
@@ -137,17 +145,22 @@ export interface CircleDetail extends CircleSummary {
   series_ids: number[];
 }
 
-export const api = async <T,>(url: string, options?: RequestInit): Promise<T> => {
-  const response = await vaultFetch(url, {
-    ...options,
-    headers: options?.body ? { "Content-Type": "application/json", ...options.headers } : options?.headers,
-  });
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ message: "The request failed." }));
-    throw new Error(body.message || "The request failed.");
-  }
-  if (response.status === 204) return undefined as T;
-  return response.json();
+export const api = async <T,>(url: string, options?: RequestInit, trackActivity = true): Promise<T> => {
+  const writing = !["GET", "HEAD"].includes((options?.method ?? "GET").toUpperCase());
+  const importing = url.includes("/import");
+  const finish = writing && trackActivity ? beginRequestActivity(importing ? "Attribute upload" : "Saving changes", importing ? "Uploading, importing and indexing attributes" : "Updating database", url.includes("people") ? "people" : "sources") : undefined;
+  try {
+    const response = await vaultFetch(url, {
+      ...options,
+      headers: options?.body ? { "Content-Type": "application/json", ...options.headers } : options?.headers,
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({ message: "The request failed." }));
+      throw new Error(body.message || "The request failed.");
+    }
+    if (response.status === 204) return undefined as T;
+    return await response.json();
+  } finally { finish?.(); }
 };
 
 export const formatCount = (count: number) => new Intl.NumberFormat().format(count);
