@@ -5,6 +5,12 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-12
+
+### Changed
+
+- UI polishing. (48ee82f)
+
 ## [0.3.4] - 2026-10-12
 
 ### Changed
