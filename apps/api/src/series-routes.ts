@@ -77,6 +77,37 @@ function seriesPeople(ids: number[]) {
   return result;
 }
 
+/** Card metadata includes member attributes without changing shared set assignments. */
+function seriesCardAttributes(ids: number[]) {
+  type Attribute = { id: number; name: string };
+  const result = new Map<number, { tags: Attribute[]; categories: Attribute[]; people: Attribute[] }>();
+  const definitions = [
+    { kind: "tags", table: "tags", shared: "series_tags", effective: "effective_item_tags", column: "tag_id" },
+    { kind: "categories", table: "categories", shared: "series_categories", effective: "effective_item_categories", column: "category_id" },
+    { kind: "people", table: "people", shared: "series_people", effective: "effective_item_people", column: "person_id" },
+  ] as const;
+  for (let offset = 0; offset < ids.length; offset += 400) {
+    const batch = ids.slice(offset, offset + 400);
+    const placeholders = batch.map(() => "?").join(",");
+    for (const { kind, table, shared, effective, column } of definitions) {
+      const rows = database.prepare(`SELECT assignments.series_id, a.id, a.name FROM (
+        SELECT series_id, ${column} AS attribute_id FROM ${shared} WHERE series_id IN (${placeholders})
+        UNION
+        SELECT si.series_id, e.${column} AS attribute_id FROM series_items si
+          JOIN media_items m ON m.id = si.item_id AND m.available = 1
+          JOIN ${effective} e ON e.item_id = si.item_id WHERE si.series_id IN (${placeholders})
+        ) assignments JOIN ${table} a ON a.id = assignments.attribute_id
+        ORDER BY a.name COLLATE NOCASE, a.id`).all(...batch, ...batch) as Array<Attribute & { series_id: number }>;
+      for (const row of rows) {
+        const attributes = result.get(row.series_id) ?? { tags: [], categories: [], people: [] };
+        attributes[kind].push({ id: row.id, name: row.name });
+        result.set(row.series_id, attributes);
+      }
+    }
+  }
+  return result;
+}
+
 function getSeries(id: number) {
   const row = database.prepare(`
     SELECT s.id, s.title, s.description, s.preferred_type, s.favorite,
@@ -103,6 +134,7 @@ function getSeries(id: number) {
     tags: seriesTags([id]).get(id) ?? [],
     categories: seriesCategories([id]).get(id) ?? [],
     people: seriesPeople([id]).get(id) ?? [],
+    card_attributes: seriesCardAttributes([id]).get(id) ?? { tags: [], categories: [], people: [] },
   };
 }
 
@@ -151,7 +183,8 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
     const tagsBySeries = seriesTags(rows.map((row) => row.id));
     const categoriesBySeries = seriesCategories(rows.map((row) => row.id));
     const peopleBySeries = seriesPeople(rows.map((row) => row.id));
-    return rows.map((row) => ({ ...row, tags: tagsBySeries.get(row.id) ?? [], categories: categoriesBySeries.get(row.id) ?? [], people: peopleBySeries.get(row.id) ?? [] }));
+    const cardAttributes = seriesCardAttributes(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, tags: tagsBySeries.get(row.id) ?? [], categories: categoriesBySeries.get(row.id) ?? [], people: peopleBySeries.get(row.id) ?? [], card_attributes: cardAttributes.get(row.id) ?? { tags: [], categories: [], people: [] } }));
   });
 
   app.post("/api/series", async (request, reply) => {

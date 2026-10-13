@@ -92,6 +92,7 @@ export interface ItemPage {
 }
 
 export interface SeriesSummary {
+  card_attributes?: { tags: Tag[]; categories: Array<{ id: number; name: string }>; people: Person[] };
   id: number;
   title: string;
   description: string;

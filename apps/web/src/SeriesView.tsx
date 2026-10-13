@@ -75,11 +75,12 @@ function setType(entry: SeriesSummary): SetType {
 }
 
 function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: SeriesSummary; version: number; onOpen: () => void; onFavorite: () => void; mediaType?: MediaType }) {
+  const attributes = entry.card_attributes ?? entry;
   const badgeType = mediaType ?? (setType(entry) === "mixed" ? undefined : setType(entry) as MediaType);
   return <article className="series-card-wrap">
     <div className="series-card">
       <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} mediaType={mediaType} /></button>
-      <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{entry.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{entry.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(entry.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div></div>
+      <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{attributes.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{attributes.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(attributes.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div></div>
     </div>
     <button className={`series-card-favorite${entry.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={entry.favorite ? `Remove ${entry.title} from favorites` : `Add ${entry.title} to favorites`}><Heart size={17} fill={entry.favorite ? "currentColor" : "none"} /></button>
   </article>;
@@ -292,8 +293,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
 
   const visible = seriesList.filter((entry) => view !== "browse" || (
     (entry.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()) || entry.description.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
-    && selectedTagIds.every((id) => entry.tags.some((tag) => tag.id === id))
-    && selectedCategoryIds.every((id) => (entry.categories ?? []).some((category) => category.id === id))
+    && selectedTagIds.every((id) => (entry.card_attributes ?? entry).tags.some((tag) => tag.id === id))
+    && selectedCategoryIds.every((id) => ((entry.card_attributes ?? entry).categories ?? []).some((category) => category.id === id))
     && (groupFilter === "all" || setType(entry) === groupFilter)
     && (!mediaType || (mediaType === "video" ? entry.video_count : mediaType === "comic" ? entry.comic_count : entry.story_count) > 0)));
   const categorySections = [
@@ -301,9 +302,9 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       id: `category-${category.id}`,
       categoryId: category.id,
       title: category.name,
-      entries: visible.filter((entry) => (entry.categories ?? []).some((value) => value.id === category.id)),
+      entries: visible.filter((entry) => ((entry.card_attributes ?? entry).categories ?? []).some((value) => value.id === category.id)),
     })).filter((section) => section.entries.length > 0),
-    { id: "uncategorized", categoryId: null, title: "Uncategorized", entries: visible.filter((entry) => (entry.categories ?? []).length === 0) },
+    { id: "uncategorized", categoryId: null, title: "Uncategorized", entries: visible.filter((entry) => ((entry.card_attributes ?? entry).categories ?? []).length === 0) },
   ].filter((section) => section.entries.length > 0);
 
   if (selectedId !== null) return <section className="series-view">

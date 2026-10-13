@@ -48,8 +48,7 @@ export function VaultProfiles({ initial }: { initial: ProfileList }) {
     }
   };
   return <div className="vault-profiles">
-    <label htmlFor="active-vault">Active vault</label>
-    <div className="vault-profile-controls"><Select id="active-vault" value={getActiveProfile()?.id ?? initial.activeId} disabled={busy} onChange={(event) => void activate(event.target.value)}>
+    <div className="vault-profile-controls"><Select id="active-vault" aria-label="Active vault" value={getActiveProfile()?.id ?? initial.activeId} disabled={busy} onChange={(event) => void activate(event.target.value)}>
       {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
     </Select><button type="button" className="icon-button" disabled={busy} aria-label="Create new profile" title="Create new profile" onClick={() => { setCreating((value) => !value); setDeleting(false); setError(""); }}><Plus size={17} /></button><button type="button" className="icon-button" disabled={busy} aria-label="Delete profile" title="Delete profile" onClick={() => { setDeleting((value) => !value); setCreating(false); setError(""); }}><Trash2 size={17} /></button></div>
     {(creating || deleting || busy || error) && <div className="vault-profile-popover">

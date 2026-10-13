@@ -82,3 +82,31 @@ test("cleanup preserves offline credits and empty-set people; imports skip case-
     expect((await app.inject({ method: "POST", url: "/api/people/cleanup" })).json().removed).toBe(0);
   } finally { await app.close(); }
 });
+
+test("collection cards combine shared and available member attributes without changing shared assignments", async () => {
+  const app = await buildVaultlyServer(); app.log.level = "silent";
+  try {
+    const source = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES ('Cards', 'cards', 'cards')").run().lastInsertRowid);
+    const series = Number(database.prepare("INSERT INTO series(title) VALUES ('Card attributes')").run().lastInsertRowid);
+    const tag = Number(database.prepare("INSERT INTO tags(name) VALUES ('Member tag')").run().lastInsertRowid);
+    const category = Number(database.prepare("INSERT INTO categories(name) VALUES ('Source category')").run().lastInsertRowid);
+    const person = Number(database.prepare("INSERT INTO people(name) VALUES ('Member artist')").run().lastInsertRowid);
+    const hiddenTag = Number(database.prepare("INSERT INTO tags(name) VALUES ('Unavailable tag')").run().lastInsertRowid);
+    const insert = database.prepare("INSERT INTO media_items(source_id, media_type, title, filename, relative_path, available) VALUES (?, 'comic', ?, ?, ?, ?)");
+    const first = Number(insert.run(source, 'First', 'first', 'first', 1).lastInsertRowid);
+    const second = Number(insert.run(source, 'Second', 'second', 'second', 1).lastInsertRowid);
+    const hidden = Number(insert.run(source, 'Hidden', 'hidden', 'hidden', 0).lastInsertRowid);
+    for (const [position, item] of [first, second, hidden].entries()) database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)").run(series, item, position);
+    for (const item of [first, second]) database.prepare("INSERT INTO item_tags(item_id, tag_id) VALUES (?, ?)").run(item, tag);
+    database.prepare("INSERT INTO item_tags(item_id, tag_id) VALUES (?, ?)").run(hidden, hiddenTag);
+    database.prepare("INSERT INTO series_tags(series_id, tag_id) VALUES (?, ?)").run(series, tag);
+    database.prepare("INSERT INTO source_categories(source_id, category_id) VALUES (?, ?)").run(source, category);
+    database.prepare("INSERT INTO item_people(item_id, person_id, role) VALUES (?, ?, 'artist')").run(first, person);
+    const expected = { tags: [{ id: tag, name: 'Member tag' }], categories: [{ id: category, name: 'Source category' }], people: [{ id: person, name: 'Member artist' }] };
+    const detail = (await app.inject(`/api/series/${series}`)).json();
+    expect(detail.card_attributes).toEqual(expected);
+    expect(detail.categories).toEqual([]);
+    expect(detail.people).toEqual([]);
+    expect((await app.inject('/api/series')).json().find((entry: { id: number }) => entry.id === series).card_attributes).toEqual(expected);
+  } finally { await app.close(); }
+});

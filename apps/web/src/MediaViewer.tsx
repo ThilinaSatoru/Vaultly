@@ -115,7 +115,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     const focusViewer = () => viewerRef.current?.focus({ preventScroll: true });
     const frame = window.requestAnimationFrame(focusViewer);
     const keepFocusInside = (event: FocusEvent) => {
-      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .select-menu, .context-menu, .dialog-backdrop, .viewer-floating")) return;
+      if (event.target instanceof HTMLElement && event.target.closest(".tag-combobox-menu, .select-menu, .context-menu, .dialog-backdrop, .viewer-floating, .management-drawer, .management-editor-window, .management-dock")) return;
       if (viewerRef.current && event.target instanceof Node && !viewerRef.current.contains(event.target)) focusViewer();
     };
     document.addEventListener("focusin", keepFocusInside);

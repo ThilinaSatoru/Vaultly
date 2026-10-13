@@ -66,3 +66,24 @@ test("floating next-item actions keep the browsing page and full view restores t
   render()[0].props.onToggleFloating();
   expect(render()[0].props).toMatchObject({ itemId: 11, floating: false });
 });
+
+test("floating next and playlist navigation never reopen the original file", () => {
+  nav.update({ selectedItemId: 10 });
+  render()[0].props.onToggleFloating();
+  expect(state.fields.selectedItemId).toBeNull();
+  render()[0].props.onNavigateItem(11);
+  expect(render().map((viewer) => [viewer.props.itemId, viewer.props.floating])).toEqual([[11, true]]);
+  render()[0].props.onNavigatePlaylistItem(12);
+  expect(render().map((viewer) => [viewer.props.itemId, viewer.props.floating])).toEqual([[12, true]]);
+  render()[0].props.onClose();
+  expect(render()).toHaveLength(0);
+});
+
+test("floating a second normal viewer clears its navigation selection", () => {
+  nav.update({ selectedItemId: 10 });
+  render()[0].props.onToggleFloating();
+  nav.push({ selectedItemId: 20 });
+  render()[1].props.onToggleFloating();
+  render()[0].props.onNavigateItem(21);
+  expect(render().map((viewer) => [viewer.props.itemId, viewer.props.floating])).toEqual([[21, true]]);
+});

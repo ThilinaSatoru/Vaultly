@@ -977,12 +977,14 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         viewerGalleryContext: floatingSession.gallery,
       });
       setFloatingSession(null);
-    } else if (selectedItemId !== null)
+    } else if (selectedItemId !== null) {
       setFloatingSession({
         id: selectedItemId,
         series: viewerSeriesContext,
         gallery: viewerGalleryContext,
       });
+      navigation.update({ selectedItemId: null });
+    }
   };
   const [viewerSeriesContext, setViewerSeriesContext] =
     useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
@@ -997,6 +999,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [rescanningAll, setRescanningAll] = useState(false);
+  const [rescanMediaType, setRescanMediaType] = useState("");
   const previousScanningSourceKey = useRef("");
 
   const loadSources = useCallback(async (quiet = false) => {
@@ -1322,7 +1325,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     try {
       await api("/api/sources/scan", {
         method: "POST",
-        body: JSON.stringify({ englishAttributes }),
+        body: JSON.stringify({ englishAttributes, ...(rescanMediaType && { mediaType: rescanMediaType }) }),
       });
       await loadSources(true);
     } catch (requestError) {
@@ -1397,7 +1400,17 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               )}{" "}
               {rescanningAll ? "Cancelling…" : "Cancel all scans"}
             </button>
-          ) : (
+          ) : (<>
+            <Select aria-label="Rescan media type" value={rescanMediaType} onChange={(event) => setRescanMediaType(event.target.value)} disabled={rescanningAll}>
+              <option value="">All source media types</option>
+              <option value="movies">Movies only</option>
+              <option value="tv">TV series only</option>
+              <option value="anime">Anime only</option>
+              <option value="manga">Manga / comics only</option>
+              <option value="ebooks">E-books / documents only</option>
+              <option value="pictures">Pictures only</option>
+              <option value="mixed">Legacy mixed media only</option>
+            </Select>
             <button
               className="secondary-button"
               type="button"
@@ -1410,7 +1423,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               )}{" "}
               Rescan all
             </button>
-          )}
+          </>)}
           <button
             className="primary-button"
             type="button"
@@ -1772,13 +1785,14 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 seriesContext={viewerSeriesContext}
                 galleryContext={viewerGalleryContext}
                 floating={false}
-                onToggleFloating={() =>
+                onToggleFloating={() => {
                   setFloatingSession({
                     id: selectedItemId,
                     series: viewerSeriesContext,
                     gallery: viewerGalleryContext,
-                  })
-                }
+                  });
+                  navigation.update({ selectedItemId: null });
+                }}
                 onNavigateItem={(id) =>
                   navigation.push({ selectedItemId: id }, `File ${id}`)
                 }
