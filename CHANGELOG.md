@@ -5,6 +5,16 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-10-13
+
+### Changed
+
+- bug fixes. (660f971)
+- Floating player bug fix, Rescan all options, text inputs bug fix. (d2bd2b5)
+- Window bar update, UI fixes, scan option changes, (71c2677)
+- UI/UX  imprivements. peoples strict matching. performance fixes. (9cdaa9f)
+- performance optimizations (63411a3)
+
 ## [0.3.5] - 2026-10-12
 
 ### Changed

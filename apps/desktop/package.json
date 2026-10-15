@@ -1,6 +1,6 @@
 {
   "name": "@vaultly/desktop",
-  "version": "0.3.5",
+  "version": "0.4.6",
   "private": true,
   "type": "module",
   "description": "A local-first media library for comics, videos and PDF stories.",
