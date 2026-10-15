@@ -11,6 +11,7 @@ import { PdfContinuousPage } from "./PdfContinuousPage";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 import { ShortcutHelp } from "./ShortcutHelp";
+import { useUiState } from "./ui-state";
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -30,7 +31,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [fitMode, setFitMode] = useState<FitMode>(storedFitMode);
-  const [continuous, setContinuous] = useState(false);
+  const [continuous, setContinuous] = useUiState("vaultly.pdf.continuous", false);
   const [zoomPercent, setZoomPercent] = useState(storedZoom);
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
   const [loading, setLoading] = useState(true);

@@ -6,11 +6,12 @@ import path from "node:path";
 import { database } from "./database.js";
 import { cancelAllSourceScans, cancelSourceScan, collectItems, getScanProgress, scanSource } from "./scanner.js";
 import { buildVaultlyServer } from "./server.js";
-import { clearThumbnailCache, getPdfThumbnail, getVideoThumbnail, getVideoMetadata } from "./thumbnails.js";
+import { clearThumbnailCache, getCachedPdfThumbnail, getPdfThumbnail, getVideoThumbnail, getVideoMetadata } from "./thumbnails.js";
 
 vi.mock("./thumbnails.js", () => ({
   clearThumbnailCache: vi.fn().mockResolvedValue(undefined),
   getPdfThumbnail: vi.fn().mockResolvedValue("thumbnail.jpg"),
+  getCachedPdfThumbnail: vi.fn().mockResolvedValue(null),
   getVideoThumbnail: vi.fn().mockResolvedValue("thumbnail.jpg"),
   getVideoDuration: vi.fn().mockResolvedValue(null),
   getVideoMetadata: vi.fn().mockResolvedValue({ durationSeconds: 12, width: 1920, height: 1080 }),
@@ -231,4 +232,35 @@ test("API cancellation aborts thumbnail work without queuing the rest of the sou
     expect((await app.inject({ method: "POST", url: "/api/sources/scan/cancel" })).json()).toEqual({ count: 0 });
     expect((await app.inject({ method: "POST", url: "/api/sources/999999999/scan/cancel" })).statusCode).toBe(404);
   } finally { await app.close(); }
+});
+
+test("default scans prepare ebook thumbnails and gallery requests never start PDF rendering", async () => {
+  const { id, root } = await source();
+  await writeFile(path.join(root, "Book.pdf"), "fixture");
+  await scanSource(id, root);
+  expect(getPdfThumbnail).toHaveBeenCalledOnce();
+  const item = database.prepare("SELECT id FROM media_items WHERE source_id = ?").get(id) as { id: number };
+  vi.mocked(getPdfThumbnail).mockClear();
+  const app = await buildVaultlyServer();
+  app.log.level = "silent";
+  try {
+    expect((await app.inject(`/api/items/${item.id}/thumbnail`)).statusCode).toBe(404);
+    expect(getCachedPdfThumbnail).toHaveBeenCalled();
+    expect(getPdfThumbnail).not.toHaveBeenCalled();
+  } finally { await app.close(); }
+});
+
+test("rescans unchanged filenames assign newly added existing people with joined full names", async () => {
+  const { id, root } = await source();
+  const token = `Person${Date.now()}`;
+  await writeFile(path.join(root, `${token}JaneDoe - episode.mp4`), "fixture");
+  await scanSource(id, root);
+  const person = Number(database.prepare("INSERT INTO people(name) VALUES (?)").run(`${token} Jane Doe`).lastInsertRowid);
+  try {
+    await scanSource(id, root);
+    const item = database.prepare("SELECT id FROM media_items WHERE source_id = ?").get(id) as { id: number };
+    expect(database.prepare("SELECT person_id, role, origin FROM item_people WHERE item_id = ?").all(item.id)).toEqual([{ person_id: person, role: "cast", origin: "filename" }]);
+    await scanSource(id, root);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM item_people WHERE item_id = ?").get(item.id)).toEqual({ count: 1 });
+  } finally { database.prepare("DELETE FROM people WHERE id = ?").run(person); }
 });

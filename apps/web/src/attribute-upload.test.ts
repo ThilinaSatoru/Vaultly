@@ -61,7 +61,7 @@ test("more than 50k records are sent in bounded batches", async () => {
 
 test.each([
   '[{"name":"Valid"},]', '[{"name":"Valid"} {"name":"Missing comma"}]',
-  '{"records":[{"name":"Valid"}],"bad":true}', '[{"name":"Valid"}',
+  '[{"name":"Valid"}',
   '{"records":[],"records":[]}', '{"records":[],"total":-1}',
   '[{"name":"Valid"}] trailing',
 ])("rejects malformed JSON or metadata before sending any chunks: %s", async (text) => {
@@ -83,4 +83,10 @@ test("failed chunks stop upload and report already committed records", async () 
   await expect(uploadAttributeFile(fragmented(JSON.stringify(records)), sending, progress, { bytes: 1024, records: 2 })).rejects.toThrow("2 of 5 records saved. Invalid name");
   expect(sending).toHaveBeenCalledTimes(2);
   expect(progress).toHaveBeenLastCalledWith(2, 5, { created: 2, updated: 0, indexed: 1 });
+});
+
+test("accepts null envelope metadata and extra fields", async () => {
+  const sending = send();
+  await uploadAttributeFile(fragmented(JSON.stringify({ records: [null, { name: "Person", patterns: null }], total: null, scraped_at: null, extra: true })), sending, vi.fn());
+  expect(JSON.parse(sending.mock.calls[0][0])).toEqual({ records: [null, { name: "Person", patterns: null }] });
 });

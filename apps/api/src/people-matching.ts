@@ -8,11 +8,19 @@ export class PeopleMatcher<T extends Person> {
   private readonly root: Node<T> = { children: new Map() };
   private readonly names = new Map<string, Map<number, T>>();
   private readonly aliases = new Map<string, Map<number, T>>();
+  private readonly joinedNames = new Map<string, Map<number, T>>();
   constructor(entries: T[]) { for (const entry of entries) this.add(entry); }
   add(entry: T) {
     const name = normalizeMetadataPhrase(entry.name);
     const words = name.split(" ");
-    for (const [values, index] of [[[name], this.names], [entry.patterns ?? [], this.aliases]] as const) {
+    const joined = name.replaceAll(" ", "");
+    const joinedPeople = this.joinedNames.get(joined) ?? new Map<number, T>();
+    joinedPeople.set(entry.id, entry);
+    this.joinedNames.set(joined, joinedPeople);
+    // Release filenames often join a complete name (JaneDoe) into one token.
+    // Index this spelling too, with the same ambiguity and boundary checks.
+    const nameValues = name.includes(" ") ? [name, name.replaceAll(" ", "")] : [name];
+    for (const [values, index] of [[nameValues, this.names], [entry.patterns ?? [], this.aliases]] as const) {
       for (const raw of values) {
         const phrase = normalizeMetadataPhrase(raw);
         if (!phrase || phrase.length < 2) continue;
@@ -47,6 +55,16 @@ export class PeopleMatcher<T extends Person> {
         if (!child) break;
         node = child;
         if (node.people) hits.push({ start, end, people: node.people });
+      }
+    }
+    // A saved handle may join words that the filename separates.
+    for (let start = 0; start < words.length; start++) {
+      let joined = words[start];
+      for (let end = start + 1; end < words.length; end++) {
+        joined += words[end];
+        if (joined.length > 100) break;
+        const people = this.joinedNames.get(joined);
+        if (people && !hits.some((hit) => hit.start === start && hit.end === end)) hits.push({ start, end, people });
       }
     }
     const found = new Map<number, T>();

@@ -5,7 +5,7 @@ const hooks = vi.hoisted(() => ({ states: [] as unknown[], refs: [] as { current
   effectCursor: 0, effects: [] as { deps: unknown[]; cleanup?: () => void }[], jobs: [] as (() => void)[], fields: {} as Record<string, unknown> }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
-  useContext: () => ({ entry: { breadcrumbs: [] }, current: { current: { fields: hooks.fields } } }),
+  useContext: () => ({ entry: { breadcrumbs: [], fields: hooks.fields }, current: { current: { fields: hooks.fields } } }),
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
     if (!(index in hooks.states)) hooks.states[index] = typeof initial === "function" ? initial() : initial;
@@ -29,10 +29,13 @@ vi.mock("./navigation", () => ({
 vi.mock("./media", async (original) => ({ ...await original<typeof import("./media")>(), api: vi.fn() }));
 import { api, type SeriesSummary } from "./media";
 import { GalleryView } from "./GalleryView";
+import { TagCombobox } from "./TagCombobox";
+import { DeleteMediaDialog } from "./DeleteMediaDialog";
+import { ActionMenu } from "./ActionMenu";
 
 const props = { view: "browse" as const, type: "story" as const, search: "", categories: [], tags: [], people: [], sources: [], queuedVideoIds: [], refreshKey: 0,
   onTagCreated: vi.fn(), onCategoryCreated: vi.fn(), onPersonCreated: vi.fn(), onChanged: vi.fn(), onOpen: vi.fn(), onQueueVideo: vi.fn(), onOpenSeries: vi.fn(), onAddSource: vi.fn() };
-function render(extra: { view?: "browse" | "favorites" } = {}) {
+function render(extra: Partial<Parameters<typeof GalleryView>[0]> = {}) {
   hooks.cursor = 0; hooks.refCursor = 0; hooks.effectCursor = 0;
   const node = GalleryView({ ...props, ...extra });
   hooks.jobs.splice(0).forEach((job) => job());
@@ -49,6 +52,37 @@ beforeEach(() => {
   vi.stubGlobal("window", { setTimeout: vi.fn(), clearTimeout: vi.fn() });
 });
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
+
+test("filter dropdowns follow the selected media type and hide sets and circles without matching media", async () => {
+  const storyOptions = { tags: [{ id: 1, name: "Story tag" }], categories: [{ id: 2, name: "Story category" }], people: [{ id: 3, name: "Story artist" }] };
+  const videoOptions = { tags: [{ id: 4, name: "Video tag" }], categories: [], people: [{ id: 5, name: "Video cast" }] };
+  vi.mocked(api).mockImplementation(async (url) => url.startsWith("/api/attributes/filter-options")
+    ? url.endsWith("type=story") ? storyOptions : videoOptions
+    : url === "/api/series" ? [{ id: 1, title: "Story set", story_count: 1, video_count: 0 }, { id: 2, title: "Video set", story_count: 0, video_count: 1 }, { id: 3, title: "Empty set", story_count: 0, video_count: 0 }]
+    : url === "/api/circles" ? [{ id: 1, title: "Story circle", story_count: 1, video_count: 0 }, { id: 2, title: "Video circle", story_count: 0, video_count: 1 }]
+    : url.startsWith("/api/items?") ? { items: [], total: 0, pageSize: 48 } : []);
+  hooks.fields["gallery.all.browse.selectedType"] = "story";
+  hooks.fields["gallery.all.browse.advancedOpen"] = true;
+  render({ type: undefined }); await settle();
+  let node = render({ type: undefined });
+  const combo = (label: string) => find(node, (element) => element.type === TagCombobox && element.props.label.startsWith(label))!;
+  expect(combo("Tags").props.options).toEqual(storyOptions.tags);
+  expect(combo("Categories").props.options).toEqual(storyOptions.categories);
+  expect(combo("Artists").props.options).toEqual(storyOptions.people);
+  expect(find(node, (element) => element.type === "option" && element.props.children === "Story set")).toBeDefined();
+  expect(find(node, (element) => element.type === "option" && element.props.children === "Video set")).toBeUndefined();
+  expect(find(node, (element) => element.type === "option" && element.props.children === "Empty set")).toBeUndefined();
+  expect(find(node, (element) => element.type === "option" && element.props.children === "Story circle")).toBeDefined();
+  hooks.fields["gallery.all.browse.selectedType"] = "video";
+  node = render({ type: undefined });
+  expect(combo("Tags").props.options).toEqual([]);
+  expect(combo("Tags").props.disabled).toBe(true);
+  await settle(); node = render({ type: undefined });
+  expect(combo("Tags").props.options).toEqual(videoOptions.tags);
+  expect(combo("Cast").props.options).toEqual(videoOptions.people);
+  expect(find(node, (element) => element.type === "option" && element.props.children === "Story circle")).toBeUndefined();
+  expect(find(node, (element) => element.type === "option" && element.props.children === "Video circle")).toBeDefined();
+});
 
 test("a collection-only e-book page renders its cards and paginates by visible cards", async () => {
   vi.mocked(api).mockImplementation(async (url) => url.startsWith("/api/items?")
@@ -81,4 +115,25 @@ test("removing a standalone favorite updates both the card count and media count
   const node = render({ view: "favorites" });
   await find(node, (element) => element.props.className === "media-grid")!.props.children[0].props.onFavorite();
   expect(find(render({ view: "favorites" }), (element) => element.props.className === "result-count")!.props.children).toBe("0 cards · 0 items");
+});
+
+test("media card menus open deletion confirmation and refresh after deletion", async () => {
+  vi.mocked(api).mockImplementation(async (url) => url.startsWith("/api/items?")
+    ? { items: [{ id: 7, title: "Delete me", media_type: "story", tags: [], categories: [], cast: [], artists: [] }], total: 1, pageSize: 48, page: 0 } : []);
+  const onDeleted = vi.fn();
+  props.onChanged.mockClear();
+  render({ onDeleted }); await settle();
+  let node = render({ onDeleted });
+  const card = find(node, (element) => element.props.className === "media-grid")!.props.children[0];
+  const menu = find(card.type(card.props), (element) => element.type === ActionMenu)!;
+  const action = menu.props.actions.find((action: { danger?: boolean }) => action.danger);
+  expect(action.label).toBe("Delete permanently…");
+  action.onSelect();
+  node = render({ onDeleted });
+  const dialog = find(node, (element) => element.type === DeleteMediaDialog)!;
+  expect(dialog.props.itemIds).toEqual([7]);
+  expect(dialog.props.title).toBe("Delete me");
+  dialog.props.onDeleted([7]);
+  expect(onDeleted).toHaveBeenCalledWith([7]);
+  expect(props.onChanged).toHaveBeenCalledOnce();
 });

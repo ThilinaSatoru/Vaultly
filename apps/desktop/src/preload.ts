@@ -11,6 +11,7 @@ window.addEventListener("pointerdown", (event) => {
 
 contextBridge.exposeInMainWorld("vaultlyWindow", {
   platform: process.platform,
+  taskActivity: (running: boolean) => ipcRenderer.send("window:task-activity", running),
   appearance: (appearance: { color: string; symbolColor: string; title: string }) => ipcRenderer.send("window:appearance", appearance),
 });
 

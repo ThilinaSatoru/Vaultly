@@ -1,4 +1,5 @@
 import { findMediaCover } from "./video-covers.js";
+import { refactorSourceFilenames } from "./filename-refactoring.js";
 import { ebookExtensions, pictureExtensions, folderCollection, type SourceMediaType } from "./source-media.js";
 import { withAttributePatterns } from "./attribute-routes.js";
 import { isSourceConverting } from "./source-conversion.js";
@@ -360,7 +361,7 @@ export async function cancelAllSourceScans(): Promise<number> {
   return active.length;
 }
 
-export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean; englishAttributes?: boolean } = {}): Promise<void> {
+export function scanSource(sourceId: number, rootPath: string, options: { generateThumbnails?: boolean; regenerateThumbnails?: boolean; englishAttributes?: boolean; refactorFilenames?: boolean } = {}): Promise<void> {
   if (!database.prepare("SELECT id FROM sources WHERE id = ? AND enabled = 1").get(sourceId)) return Promise.resolve();
   if (isSourceConverting(sourceId)) return Promise.resolve();
   const existingScan = scans.get(sourceId);
@@ -369,8 +370,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
   const controller = new AbortController();
   const { signal } = controller;
   const progress = newProgress();
-  const previousSource = database.prepare("SELECT status, last_error, media_type FROM sources WHERE id = ?")
-    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType } | undefined;
+  const previousSource = database.prepare("SELECT status, last_error, media_type, filename_refactoring FROM sources WHERE id = ?")
+    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType; filename_refactoring: number } | undefined;
 
   database.prepare(
       "UPDATE sources SET status = 'scanning', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -557,8 +558,10 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
 
         const collectionGroups = new Map<string, { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> }>();
         for (const indexed of indexedItems) {
-          const folder = folderCollection(indexed.item.relativePath, indexed.item.filename, previousSource?.media_type ?? "mixed", path.basename(rootPath));
-          const pattern = folder ?? inferCollectionPattern(indexed.item.filename);
+          const sourceType = previousSource?.media_type ?? "mixed";
+          const folderType = indexed.item.mediaType === "video" && (sourceType === "mixed" || sourceType === "movies") ? "movies" : sourceType;
+          const folder = folderCollection(indexed.item.relativePath, indexed.item.filename, folderType, path.basename(rootPath));
+          const pattern = folder ?? (indexed.item.mediaType === "video" ? null : inferCollectionPattern(indexed.item.filename));
           if (!pattern) continue;
           // Image-folder comics must be sibling folders. Video/PDF sequels may span season or volume folders.
           const parent = indexed.item.mediaType === "comic" ? path.dirname(indexed.item.relativePath).replace(/\\/g, "/").toLocaleLowerCase() : "";
@@ -570,6 +573,18 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
         const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
         const addSeriesItem = database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?) ON CONFLICT(series_id, item_id) DO UPDATE SET position = excluded.position");
+        // Retire obsolete filename-based video sets on rescan. Collections the
+        // user has annotated, covered or placed in a circle remain intact.
+        const automaticVideoSets = database.prepare(`SELECT s.id, s.title, s.auto_key FROM series s
+          WHERE s.auto_key LIKE ? AND s.description = '' AND s.cover_data IS NULL AND s.favorite = 0
+            AND NOT EXISTS (SELECT 1 FROM series_tags st WHERE st.series_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM series_categories sc WHERE sc.series_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM series_people sp WHERE sp.series_id = s.id)
+            AND NOT EXISTS (SELECT 1 FROM circle_series cs WHERE cs.series_id = s.id)`)
+          .all(`${sourceId}|video|%`) as Array<{ id: number; title: string; auto_key: string }>;
+        for (const series of automaticVideoSets) {
+          if (!collectionGroups.has(series.auto_key) && series.auto_key.endsWith(`|${series.title.toLocaleLowerCase()}`)) database.prepare("DELETE FROM series WHERE id = ?").run(series.id);
+        }
         const groupedItemIds = new Set((database.prepare(`SELECT si.item_id FROM series_items si
           JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?`).all(sourceId) as Array<{ item_id: number }>).map((row) => row.item_id));
         progress.collectionsTotal = collectionGroups.size;
@@ -585,7 +600,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
             series = findAutoSeries.get(autoKey) as { id: number } | undefined;
           }
           if (!series) { progress.collectionsProcessed++; continue; }
-          group.entries.sort((a, b) => a.order - b.order || a.path.localeCompare(b.path));
+          group.entries.sort((a, b) => a.order - b.order || a.path.localeCompare(b.path, undefined, { numeric: true }));
           for (let position = 0; position < group.entries.length; position++) {
             const entry = group.entries[position];
             addSeriesItem.run(series.id, entry.id, position);
@@ -605,6 +620,15 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         throw transactionError;
       }
       // Probe outside indexing transactions so library requests and cancellation stay responsive.
+      let filenameWarning: string | null = null;
+      if (options.refactorFilenames && previousSource?.filename_refactoring) {
+        progress.currentPath = "Refactoring filenames";
+        const result = await refactorSourceFilenames(sourceId, rootPath, indexedItems, signal, (message) => {
+          progress.logs.push(message);
+          if (progress.logs.length > 100) progress.logs.shift();
+        });
+        if (result.skipped) filenameWarning = `Filename refactoring: ${result.renamed} renamed, ${result.skipped} skipped because of conflicts or file errors. Library paths have been synchronized.`;
+      }
       // Indexed entries retain the required item objects; release reconciliation-only arrays.
       previousItems.length = 0;
       items.length = 0;
@@ -649,7 +673,10 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
           // File inspection still checks signature and candidate priority before reusing these dimensions.
           coverDimensions.set(`${path.resolve(rootPath, previous.cover_path)}:${previous.cover_signature}`, { width: previous.cover_width, height: previous.cover_height });
         }
-        const cover = await findMediaCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions, !item.fileExtension, coverDirectories, signal);
+        const currentCover = await findMediaCover(rootPath, path.resolve(rootPath, item.relativePath), coverDimensions, !item.fileExtension, coverDirectories, signal);
+        // An existing sidecar keeps its original name when its media is renamed.
+        const retainedCover = previous.cover_path && (options.refactorFilenames || !currentCover) ? await findMediaCover(rootPath, path.resolve(rootPath, previous.cover_path), coverDimensions, false, coverDirectories, signal) : null;
+        const cover = retainedCover ?? currentCover;
         // Folder listings are hints; keep cache growth independent of library size.
         if (coverDimensions.size > 256) coverDimensions.clear();
         if (coverDirectories.size > 128) coverDirectories.clear();
@@ -657,13 +684,14 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         const coverValues = [cover?.path ?? null, cover?.width ?? null, cover?.height ?? null, cover?.signature ?? null] as const;
         saveCover.run(...coverValues, id, ...coverValues);
       }
-      if (options.generateThumbnails || options.regenerateThumbnails) {
+      if (options.generateThumbnails || options.regenerateThumbnails || indexedItems.some((entry) => entry.item.fileExtension === "pdf")) {
         signal.throwIfAborted();
         progress.phase = "thumbnails";
         progress.currentPath = "";
         if (options.regenerateThumbnails) await clearThumbnailCache([...new Set([...previousItemIds, ...indexedItems.map((entry) => entry.id)])]);
         signal.throwIfAborted();
-        const thumbnails = indexedItems.filter((entry) => entry.item.mediaType === "video" || entry.item.fileExtension === "pdf");
+        const thumbnails = indexedItems.filter((entry) => entry.item.fileExtension === "pdf" ||
+          (entry.item.mediaType === "video" && (options.generateThumbnails || options.regenerateThumbnails)));
         progress.thumbnailsTotal = thumbnails.length;
         let nextThumbnail = 0;
         // Schedule only two at a time so cancellation never leaves a library-sized queue.
@@ -687,10 +715,10 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
       signal.throwIfAborted();
       database.prepare(`
         UPDATE sources
-        SET status = 'ready', connected = 1, last_error = NULL, last_scanned_at = CURRENT_TIMESTAMP,
+        SET status = 'ready', connected = 1, last_error = ?, last_scanned_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(sourceId);
+      `).run(filenameWarning, sourceId);
     } catch (error) {
       if (signal.aborted) {
         database.prepare("UPDATE sources SET status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")

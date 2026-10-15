@@ -110,3 +110,42 @@ test("collection cards combine shared and available member attributes without ch
     expect((await app.inject('/api/series')).json().find((entry: { id: number }) => entry.id === series).card_attributes).toEqual(expected);
   } finally { await app.close(); }
 });
+
+test("tags and categories inherit to children while set and circle cards aggregate descendants without leaking sibling attributes", async () => {
+  const app = await buildVaultlyServer(); app.log.level = "silent";
+  try {
+    const source = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES ('Inheritance', 'inheritance', 'inheritance')").run().lastInsertRowid);
+    const series = Number(database.prepare("INSERT INTO series(title) VALUES ('Inherited set')").run().lastInsertRowid);
+    const circle = Number(database.prepare("INSERT INTO circles(title) VALUES ('Inherited circle')").run().lastInsertRowid);
+    database.prepare("INSERT INTO circle_series(circle_id, series_id, position) VALUES (?, ?, 0)").run(circle, series);
+    const tag = Number(database.prepare("INSERT INTO tags(name) VALUES ('Parent tag')").run().lastInsertRowid);
+    const childTag = Number(database.prepare("INSERT INTO tags(name) VALUES ('Child tag')").run().lastInsertRowid);
+    const category = Number(database.prepare("INSERT INTO categories(name) VALUES ('Parent category')").run().lastInsertRowid);
+    const person = Number(database.prepare("INSERT INTO people(name) VALUES ('Parent cast')").run().lastInsertRowid);
+    const insert = database.prepare("INSERT INTO media_items(source_id, media_type, title, filename, relative_path) VALUES (?, 'video', ?, ?, ?)");
+    const first = Number(insert.run(source, 'One', 'one.mp4', 'one.mp4').lastInsertRowid);
+    const second = Number(insert.run(source, 'Two', 'two.mp4', 'two.mp4').lastInsertRowid);
+    for (const [position, id] of [first, second].entries()) database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)").run(series, id, position);
+    database.prepare("INSERT INTO series_tags(series_id, tag_id) VALUES (?, ?)").run(series, tag);
+    database.prepare("INSERT INTO series_categories(series_id, category_id) VALUES (?, ?)").run(series, category);
+    database.prepare("INSERT INTO series_people(series_id, person_id) VALUES (?, ?)").run(series, person);
+    database.prepare("INSERT INTO item_tags(item_id, tag_id) VALUES (?, ?)").run(first, childTag);
+    database.prepare("INSERT INTO source_tags(source_id, tag_id) VALUES (?, ?)").run(source, tag);
+    const get = async (url: string) => (await app.inject(url)).json();
+    const firstDetail = await get(`/api/items/${first}`);
+    expect(firstDetail.tags.map((value: { id: number }) => value.id).sort()).toEqual([tag, childTag].sort());
+    expect(firstDetail.category_ids).toEqual([category]);
+    expect(firstDetail.cast).toEqual([{ id: person, name: 'Parent cast' }]);
+    expect((await get(`/api/items/${second}`)).tags).toEqual([{ id: tag, name: 'Parent tag' }]);
+    const expected = { tags: [{ id: childTag, name: 'Child tag' }, { id: tag, name: 'Parent tag' }], categories: [{ id: category, name: 'Parent category' }], people: [{ id: person, name: 'Parent cast' }] };
+    expect((await get(`/api/series/${series}`)).card_attributes).toEqual(expected);
+    expect((await get(`/api/circles/${circle}`)).card_attributes).toEqual(expected);
+    expect((await get('/api/circles')).find((value: { id: number }) => value.id === circle).card_attributes).toEqual(expected);
+    expect((await get(`/api/series?tags=${childTag}`)).some((value: { id: number }) => value.id === series)).toBe(true);
+    expect((await get(`/api/items?source=${source}&categories=${category}`)).items).toHaveLength(2);
+    await app.inject({ method: 'PUT', url: `/api/series/${series}/items`, payload: { itemIds: [first] } });
+    expect((await get(`/api/items/${second}`)).category_ids).toEqual([]);
+    expect((await get(`/api/items/${second}`)).cast).toEqual([]);
+    expect(database.prepare("SELECT * FROM item_categories WHERE item_id = ?").all(first)).toEqual([]);
+  } finally { await app.close(); }
+});

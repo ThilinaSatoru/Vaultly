@@ -219,13 +219,15 @@ database.exec(`
   DROP VIEW IF EXISTS effective_item_tags;
   CREATE VIEW effective_item_tags AS
     SELECT item_id, tag_id FROM item_tags
-    UNION ALL SELECT m.id AS item_id, st.tag_id FROM media_items m
+    UNION SELECT si.item_id, st.tag_id FROM series_items si JOIN series_tags st ON st.series_id = si.series_id
+    UNION SELECT m.id AS item_id, st.tag_id FROM media_items m
       JOIN source_tags st ON st.source_id = m.source_id
       WHERE NOT EXISTS (SELECT 1 FROM item_tags it WHERE it.item_id = m.id AND it.tag_id = st.tag_id);
   DROP VIEW IF EXISTS effective_item_categories;
   CREATE VIEW effective_item_categories AS
     SELECT item_id, category_id FROM item_categories
-    UNION ALL SELECT m.id AS item_id, sc.category_id FROM media_items m
+    UNION SELECT si.item_id, sc.category_id FROM series_items si JOIN series_categories sc ON sc.series_id = si.series_id
+    UNION SELECT m.id AS item_id, sc.category_id FROM media_items m
       JOIN source_categories sc ON sc.source_id = m.source_id
       WHERE NOT EXISTS (SELECT 1 FROM item_categories ic WHERE ic.item_id = m.id AND ic.category_id = sc.category_id);
 
@@ -243,6 +245,7 @@ for (const column of ["gender", "country_code", "country", "avatar_url", "source
 if (!sourceColumns.includes("media_type")) database.exec("ALTER TABLE sources ADD COLUMN media_type TEXT NOT NULL DEFAULT 'mixed'");
 if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD COLUMN connected INTEGER NOT NULL DEFAULT 1");
 if (!sourceColumns.includes("enabled")) database.exec("ALTER TABLE sources ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
+if (!sourceColumns.includes("filename_refactoring")) database.exec("ALTER TABLE sources ADD COLUMN filename_refactoring INTEGER NOT NULL DEFAULT 0");
 
 // Filename and format are stored separately from the relative path so a filename
 // filter never matches an unrelated parent directory.
@@ -375,6 +378,7 @@ export interface SourceRow {
   status: SourceStatus;
   connected: number;
   enabled: number;
+  filename_refactoring: number;
   last_error: string | null;
   last_scanned_at: string | null;
   created_at: string;

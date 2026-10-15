@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { database } from "./database.js";
+import { seriesCardAttributes } from "./series-routes.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const detailsInput = z.object({
@@ -22,6 +23,22 @@ interface CircleRow {
   story_count: number;
 }
 
+function circleCardAttributes(ids: number[]) {
+  const memberships = database.prepare("SELECT circle_id, series_id FROM circle_series WHERE circle_id IN (SELECT value FROM json_each(?))")
+    .all(JSON.stringify(ids)) as Array<{ circle_id: number; series_id: number }>;
+  const sets = seriesCardAttributes([...new Set(memberships.map((row) => row.series_id))]);
+  const result = new Map<number, { tags: Array<{ id: number; name: string }>; categories: Array<{ id: number; name: string }>; people: Array<{ id: number; name: string }> }>();
+  for (const { circle_id, series_id } of memberships) {
+    const attributes = result.get(circle_id) ?? { tags: [], categories: [], people: [] };
+    for (const kind of ["tags", "categories", "people"] as const) {
+      const unique = new Map([...attributes[kind], ...sets.get(series_id)?.[kind] ?? []].map((value) => [value.id, value]));
+      attributes[kind] = [...unique.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id - b.id);
+    }
+    result.set(circle_id, attributes);
+  }
+  return result;
+}
+
 function getCircle(id: number) {
   const circle = database.prepare(`
     SELECT c.id, c.title, c.description, c.preferred_type,
@@ -39,7 +56,7 @@ function getCircle(id: number) {
   if (!circle) return undefined;
   const seriesIds = (database.prepare("SELECT series_id FROM circle_series WHERE circle_id = ? ORDER BY position, series_id")
     .all(id) as Array<{ series_id: number }>).map((row) => row.series_id);
-  return { ...circle, series_ids: seriesIds };
+  return { ...circle, series_ids: seriesIds, card_attributes: circleCardAttributes([id]).get(id) ?? { tags: [], categories: [], people: [] } };
 }
 
 export async function registerCircleRoutes(app: FastifyInstance) {
@@ -61,7 +78,8 @@ export async function registerCircleRoutes(app: FastifyInstance) {
           JOIN media_items m ON m.id = si.item_id WHERE cs.circle_id = c.id AND m.available = 1 AND m.media_type = 'story') AS story_count
       FROM circles c ${where} ORDER BY c.title COLLATE NOCASE, c.id
     `).all(...values) as unknown as CircleRow[];
-    return rows;
+    const attributes = circleCardAttributes(rows.map((row) => row.id));
+    return rows.map((row) => ({ ...row, card_attributes: attributes.get(row.id) ?? { tags: [], categories: [], people: [] } }));
   });
 
   app.post("/api/circles", async (request, reply) => {

@@ -15,7 +15,7 @@ export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[];
   const [working, setWorking] = useState(false);
   const [renaming, setRenaming] = useState<Tag | null>(null);
   const [patternEntry, setPatternEntry] = useState<Tag | null>(null);
-  const { filtered, visible, tools, pagination } = useAttributeList(tags, usageCount);
+  const { filtered, visible, tools, pagination } = useAttributeList(tags, usageCount, undefined, "tags");
 
   const add = async (event: FormEvent) => {
     event.preventDefault();

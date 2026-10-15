@@ -218,6 +218,11 @@ export function getVideoThumbnail(
   return task;
 }
 
+export async function getCachedPdfThumbnail(id: number, sizeBytes: number, modifiedAtMs: number): Promise<string | null> {
+  const targetPath = path.join(thumbnailDirectory, `pdf-${id}-${sizeBytes}-${Math.round(modifiedAtMs)}.jpg`);
+  return await exists(targetPath) ? targetPath : null;
+}
+
 export function getPdfThumbnail(
   id: number,
   inputPath: string,

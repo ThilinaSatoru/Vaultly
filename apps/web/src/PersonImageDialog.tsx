@@ -6,7 +6,8 @@ import { api, type Person } from "./media";
 export function PersonImageDialog({ person, onClose, onSaved }: { person: Person; onClose: () => void; onSaved: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const save = async (input: { data: string }) => {
+  const [url, setUrl] = useState("");
+  const save = async (input: { data: string } | { url: string }) => {
     await api(`/api/people/${person.id}/image`, { method: "PUT", body: JSON.stringify(input) });
     onSaved(); onClose();
   };
@@ -35,9 +36,16 @@ export function PersonImageDialog({ person, onClose, onSaved }: { person: Person
   };
   return <AttributeEditorDialog title={`Profile image · ${person.name}`} onClose={onClose} busy={busy}>
     {person.profile_image && <img className="person-image-preview" src={vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`)} alt={person.name} />}
-    <p className="dialog-intro">Upload a prepared image. Uploaded images are saved on this computer and included in backups.</p>
+    <p className="dialog-intro">Upload an image or paste an image link. Images are saved on this computer and included in backups.</p>
     <label className="person-image-upload">Upload image<input type="file" accept="image/png,image/jpeg,image/gif,image/webp" disabled={busy} onChange={(event) => void upload(event)} /></label>
     <p className="dialog-intro">PNG, JPEG, GIF, or WebP · up to 10 MB.</p>
+    <form onSubmit={(event) => {
+      event.preventDefault(); setBusy(true); setError("");
+      void save({ url: url.trim() }).catch((error: unknown) => setError(error instanceof Error ? error.message : "Could not download image.")).finally(() => setBusy(false));
+    }}>
+      <label>Image link<input type="url" required value={url} placeholder="https://example.com/photo.jpg" disabled={busy} onChange={(event) => setUrl(event.target.value)} /></label>
+      <button className="secondary-button" type="submit" disabled={busy || !url.trim()}>Download image</button>
+    </form>
     {error && <p className="page-error" role="alert">{error}</p>}
     {busy && <p role="status">Saving image…</p>}
     {person.profile_image && <button className="secondary-button" type="button" disabled={busy} onClick={() => void remove()}>Remove image</button>}

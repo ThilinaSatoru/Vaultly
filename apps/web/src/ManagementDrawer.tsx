@@ -1,7 +1,8 @@
 import { ChevronDown, Folder, HardDrive, Maximize2, Minimize2, Minus, Settings, Tag, Users, Wrench, X } from "lucide-react";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ManagementPanelContext } from "./management-panel";
+import { useUiState } from "./ui-state";
 
 export type ManagementTab = "tags" | "categories" | "people" | "sources" | "settings";
 export const managementTabs = [
@@ -19,7 +20,7 @@ export function ManagementDrawer({ open, minimized, expanded, active, visited, o
 }) {
   const id = useId();
   const drawer = useRef<HTMLElement>(null);
-  const [dockExpanded, setDockExpanded] = useState(false);
+  const [dockExpanded, setDockExpanded] = useUiState("vaultly.ui.managementDockExpanded", false);
   const select = (tab: ManagementTab) => {
     setDockExpanded(false);
     onOpen(tab);

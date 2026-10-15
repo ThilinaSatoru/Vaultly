@@ -1,16 +1,17 @@
-import { vaultUrl } from "./vault-session";
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { AttributeBadge } from "./AttributeBadge";
+import { PersonPhoto } from "./PersonProfile";
 import { PersonImageDialog } from "./PersonImageDialog";
 import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { PeopleMatchingRepair } from "./PeopleMatchingRepair";
 import { Select } from "./Select";
 import { filterPeopleCredits, type PeopleCreditFilter } from "./people-filter";
-import { Pencil, Plus, Trash2, Users } from "lucide-react";
+import { Pencil, Plus, Trash2 } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, formatCount, type Person } from "./media";
+import { useUiState } from "./ui-state";
 
 const usageCount = (person: Person) => (person.cast_count ?? 0) + (person.artist_count ?? 0) + (person.set_count ?? 0);
 
@@ -22,14 +23,14 @@ export function PeopleView({ people, onChanged, allowBrowse = true, creditFilter
   const [renaming, setRenaming] = useState<Person | null>(null);
   const [patternEntry, setPatternEntry] = useState<Person | null>(null);
   const [imagePerson, setImagePerson] = useState<Person | null>(null);
-  const [creditFilter, setCreditFilter] = useState<PeopleCreditFilter>(creditFilterRequest?.filter ?? "all");
+  const [creditFilter, setCreditFilter] = useUiState<PeopleCreditFilter>("vaultly.ui.people.creditFilter", creditFilterRequest?.filter ?? "all");
   const [previousRequest, setPreviousRequest] = useState(creditFilterRequest);
   if (creditFilterRequest !== previousRequest) {
     setPreviousRequest(creditFilterRequest);
     setCreditFilter(creditFilterRequest?.filter ?? "all");
   }
   const creditPeople = filterPeopleCredits(people, creditFilter);
-  const { filtered, visible, tools, pagination } = useAttributeList(creditPeople, usageCount, creditFilter);
+  const { filtered, visible, tools, pagination } = useAttributeList(creditPeople, usageCount, creditFilter, "people");
 
   const add = async (event: FormEvent) => {
     event.preventDefault();
@@ -71,10 +72,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true, creditFilter
     {tools}
     <div className="people-profile-grid">{people.length === 0 ? <div className="category-empty">No people yet. Add one here or while editing an item.</div> : filtered.length === 0 ? <div className="category-empty">No people match. Try another search or filter.</div> : visible.map((person) =>
       <article className="person-profile-card" key={person.id}>
-        <button type="button" className="person-profile-photo" title={`Set profile image for ${person.name}`} aria-label={`Set profile image for ${person.name}`} onClick={() => setImagePerson(person)}>
-          {person.profile_image || person.avatar_url ? <img src={person.profile_image ? vaultUrl(`/api/people/${person.id}/image?v=${person.profile_image}`) : person.avatar_url!} alt={person.name} loading="lazy" referrerPolicy="no-referrer" /> : <Users size={64} />}
-          <span className="person-profile-photo-edit"><Pencil size={14} />{person.profile_image ? "Edit photo" : "Add photo"}</span>
-        </button>
+        {allowBrowse ? <AttributeBadge kind={creditFilter === "cast" ? "cast" : "artist"} {...person} className="person-profile-photo"><PersonPhoto person={person} /></AttributeBadge> : <button type="button" className="person-profile-photo" aria-label={`Set profile image for ${person.name}`} onClick={() => setImagePerson(person)}><PersonPhoto person={person} /></button>}
         <div className="person-profile-details">
           <h2 className="person-profile-name">{allowBrowse ? <AttributeBadge kind={creditFilter === "cast" ? "cast" : "artist"} {...person} mediaType={creditFilter === "cast" ? "video" : undefined} /> : <span>{person.name}</span>}</h2>
           <div className="person-profile-credits"><span><strong>{formatCount(person.cast_count ?? 0)}</strong> cast credits</span><span><strong>{formatCount(person.artist_count ?? 0)}</strong> artist credits</span></div>
@@ -84,6 +82,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true, creditFilter
           {person.profile_url && <a href={person.profile_url} target="_blank" rel="noreferrer">Source profile</a>}
         </div>
         <footer className="person-profile-actions">
+          <button className="secondary-button" type="button" onClick={() => setImagePerson(person)} aria-label={`Set profile image for ${person.name}`}><Pencil size={14} />{person.profile_image || person.avatar_url ? "Edit photo" : "Add photo"}</button>
           <AttributePatternButton name={person.name} onClick={() => setPatternEntry(person)} />
           <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${person.name}`} onClick={() => setRenaming(person)}><Pencil size={17} /></button>
           <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${person.name}`} onClick={() => void remove(person)}><Trash2 size={17} /></button>

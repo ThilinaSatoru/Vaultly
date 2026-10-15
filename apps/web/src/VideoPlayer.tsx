@@ -17,6 +17,7 @@ interface VideoPlayerProps {
   autoPlay: boolean;
   compact?: boolean;
   onEnded?: () => void;
+  onPlaybackStarted?: () => void;
   onError: (message: string) => void;
 }
 
@@ -50,7 +51,7 @@ function formatTime(seconds: number) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, onError }: VideoPlayerProps) {
+export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, onPlaybackStarted, onError }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
@@ -387,6 +388,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
         style={{ objectFit: fit as "contain" | "cover" }}
         onCanPlay={() => { if (!unsupported && autoPlay && wantsPlayback.current && !externalAudioRef.current && videoRef.current?.paused) void videoRef.current.play().catch(() => undefined); }}
         onEnded={() => { wantsPlayback.current = false; setWaitingToPlay(false); onEnded?.(); }}
+        onPlaying={onPlaybackStarted}
         onClick={() => {
           togglePlay(); hideControls();
           containerRef.current?.focus({ preventScroll: true });
@@ -419,6 +421,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
       {volumeFeedback !== null && <div className="video-volume-feedback" role="status" aria-live="polite">Volume {volumeFeedback}%</div>}
 
       {actionFeedback && <div className="video-action-feedback" role="status">{actionFeedback}</div>}
+      {!unsupported && <div className="video-idle-progress" aria-hidden="true"><span style={{ width: `${progressPct}%` }} /></div>}
       <div className="video-controls" hidden={unsupported} inert={!showControls}>
 
         <div className="video-progress" onPointerMove={(event) => {

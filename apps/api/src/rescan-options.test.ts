@@ -37,7 +37,7 @@ test("rescan all scans only enabled sources of the selected media type and defau
     const selected = await app.inject({ method: 'POST', url: '/api/sources/scan', payload: { mediaType: 'movies', englishAttributes: false } });
     expect(selected.statusCode).toBe(202);
     expect(selected.json().count).toBe(1);
-    expect(scanSource).toHaveBeenCalledExactlyOnceWith(movies, 'movies', { generateThumbnails: true, englishAttributes: false, mediaType: 'movies' });
+    expect(scanSource).toHaveBeenCalledExactlyOnceWith(movies, 'movies', { generateThumbnails: true, englishAttributes: false, mediaType: 'movies', refactorFilenames: false, confirmFilenameChanges: false });
     vi.mocked(scanSource).mockClear();
     expect((await app.inject({ method: 'POST', url: '/api/sources/scan', payload: { mediaType: 'tv' } })).json().count).toBe(0);
     expect(scanSource).not.toHaveBeenCalled();

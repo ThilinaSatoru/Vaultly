@@ -510,3 +510,29 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 :root:not([data-palette="dark"]) input::placeholder,
 :root:not([data-palette="dark"]) textarea::placeholder { opacity: 1; }
 .management-dock .management-dock-toggle { color: var(--on-accent); }
+
+/* Text on application surfaces follows the active palette. Artwork overlays and
+   the video controls keep their own contrasting foregrounds. */
+.result-count, .gallery-filter-field, .gallery-filter-check, .gallery-selection-bar,
+.dialog label span, .settings-panel-heading::after, .backup-note, .setting-number small,
+.temporary-playlist > div:last-child > div > button:first-child span,
+.temporary-playlist > div:last-child > div > button:last-child,
+.category-empty, .gallery-empty, .series-member-art { color: var(--muted); }
+.result-count { border-color: var(--border); }
+.gallery-more-button:hover { color: var(--acid); }
+.gallery-filter-field input::placeholder, .tag-combobox-control input::placeholder { color: var(--muted); }
+.bulk-action-fields select, .dialog select, .setting-select select,
+.gallery-filter-field select, .gallery-filter-field select option,
+.select-wrap select, .select-wrap select option, .pdf-toolbar select option {
+  color: var(--text); background: var(--field); border-color: var(--border);
+}
+.pdf-toolbar select { color: var(--text); }
+.pdf-toolbar button:disabled, .comic-toolbar button:disabled { color: var(--muted); }
+.pdf-rendering { color: var(--text); background: var(--panel); }
+.media-card-queue, .media-quality-badge { color: var(--text); background: var(--panel-2); border-color: var(--border); }
+.media-card-queue:hover, .media-card-queue.is-queued { color: var(--acid); background: var(--accent-soft); border-color: var(--accent-border); }
+.temporary-playlist > div:last-child > div > button:last-child:hover { color: var(--danger); }
+.viewer.viewer-sidebar-hidden { grid-template-columns: minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); }
+.viewer.viewer-sidebar-hidden .viewer-details { display: none; }
+.circle-card-open { flex-shrink: 0; padding: 0; border: 0; color: var(--acid); background: transparent; }
+.circle-card .media-card-tags { margin-top: 12px; }

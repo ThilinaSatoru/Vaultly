@@ -3,15 +3,18 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import type { MediaType } from "./media";
 import { NavigationContext } from "./navigation";
 import { attributeGalleryFields, mediaLabels, type AttributeMediaType, type BrowseAttribute } from "./attribute-navigation";
+import { PersonBadge } from "./PersonProfile";
+import type { Person } from "./media";
 
 export const AttributeMediaContext = createContext<MediaType | undefined>(undefined);
 export const AttributeBrowseContext = createContext<((attribute: BrowseAttribute, mediaType?: MediaType) => void) | null>(null);
 
-export function AttributeBadge({ kind, id, name, mediaType, children, disabled = false, onBrowse }: BrowseAttribute & { mediaType?: MediaType; children?: ReactNode; disabled?: boolean; onBrowse?: () => void }) {
+export function AttributeBadge({ kind, id, name, mediaType, children, disabled = false, onBrowse, className, ...profile }: BrowseAttribute & Partial<Person> & { mediaType?: MediaType; children?: ReactNode; disabled?: boolean; onBrowse?: () => void; className?: string }) {
   const browse = useContext(AttributeBrowseContext);
   const scope = useContext(AttributeMediaContext);
+  if (kind === "cast" || kind === "artist") return <PersonBadge person={{ ...profile, id, name }} disabled={disabled} className={className ?? `tag-badge attribute-badge attribute-badge-${kind}`} onClick={() => { onBrowse?.(); browse?.({ kind, id, name }, mediaType ?? scope); }}>{children}</PersonBadge>;
   return <button className={`tag-badge attribute-badge attribute-badge-${kind}`} type="button" disabled={disabled}
-    title={`Browse ${name}`} aria-label={`Browse ${kind === "artist" ? "artist" : kind} ${name}`}
+    title={`Browse ${name}`} aria-label={`Browse ${kind} ${name}`}
     onClick={(event) => { event.stopPropagation(); onBrowse?.(); browse?.({ kind, id, name }, mediaType ?? scope); }}>
     {children ?? name}
   </button>;
@@ -59,6 +62,11 @@ export function AttributeBrowseProvider({ children, onNavigate }: { children: Re
     // Management remains independent of library browsing; callers may still
     // handle navigation without closing the drawer or discarding its drafts.
     onNavigate?.();
+    if (attribute.kind === "cast" || attribute.kind === "artist") {
+      setPending(null);
+      navigation.push({ ...attributeGalleryFields(attribute, "all"), personProfileId: attribute.id }, attribute.name);
+      return;
+    }
     const section = navigation.current.current.fields.section;
     const type = mediaType ?? (section === "video" || section === "comic" || section === "story" ? section : undefined);
     if (type) open(attribute, type);

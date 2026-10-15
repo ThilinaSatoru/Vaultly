@@ -7,12 +7,16 @@ export const pictureExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".gi
 
 /** Preserve the original tree; only strip recognized season containers for a series. */
 export function folderCollection(relativePath: string, filename: string, sourceType: SourceMediaType, rootTitle = "Series") {
-  if (sourceType !== "tv" && sourceType !== "anime" && sourceType !== "manga") return null;
+  if (sourceType !== "tv" && sourceType !== "anime" && sourceType !== "manga" && sourceType !== "movies") return null;
   const parts = relativePath.replace(/\\/g, "/").split("/");
   parts.pop();
+  // Root-level movies are independent. Multiple videos in a dedicated folder form a set.
+  if (sourceType === "movies" && !parts.length) return null;
 
   const seasonIndex = parts.findIndex((part) => /^(?:season|series|s)[ ._-]*\d+$/i.test(part));
-  const containers = seasonIndex >= 0 ? parts.slice(0, seasonIndex) : parts.slice(0, 1);
+  const extrasIndex = parts.findIndex((part) => /^(?:extras?|specials?|bonus|ova|oad)$/i.test(part));
+  const containerIndex = [seasonIndex, extrasIndex].filter((index) => index >= 0).sort((a, b) => a - b)[0];
+  const containers = containerIndex === undefined ? parts : parts.slice(0, containerIndex);
   const season = seasonIndex >= 0 ? Number(parts[seasonIndex].match(/\d+/)?.[0] ?? 0) : Number(filename.match(/s(\d+)e\d+/i)?.[1] ?? 0);
   const episode = filename.match(/(?:s\d+e|episode[ ._-]*|ep[ ._-]*|chapter[ ._-]*|ch[ ._-]*)(\d+)/i)
     ?? path.basename(filename, path.extname(filename)).match(/(?:^|[ ._-])(\d{1,4})(?:[ ._-]|$)/);

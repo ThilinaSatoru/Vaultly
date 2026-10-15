@@ -107,15 +107,17 @@ test("unchanged rescans avoid media writes while removed and returning files upd
   }
 });
 
-test("scan creates and extends an ordered collection from matching sequel prefixes", async () => {
+test("scan groups videos by their dedicated folder and extends the ordered collection", async () => {
   const token = `Scan Set ${randomUUID().slice(0, 8)}`;
   const root = await mkdtemp(path.join(tmpdir(), "vaultly-series-"));
   let sourceId = 0;
   let seriesId = 0;
   try {
+    const folder = path.join(root, token);
+    await mkdir(folder);
     await Promise.all([
-      writeFile(path.join(root, `${token} Part 02.mp4`), "two"),
-      writeFile(path.join(root, `${token} Part 01.mp4`), "one"),
+      writeFile(path.join(folder, "Episode 10.mp4"), "two"),
+      writeFile(path.join(folder, "Episode 02.mp4"), "one"),
     ]);
     sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)")
       .run(token, root, process.platform === "win32" ? root.toLowerCase() : root).lastInsertRowid);
@@ -125,14 +127,46 @@ test("scan creates and extends an ordered collection from matching sequel prefix
     expect(series.auto_key).toBeTruthy();
     expect(database.prepare(`SELECT m.filename FROM series_items si JOIN media_items m ON m.id = si.item_id
       WHERE si.series_id = ? ORDER BY si.position, si.item_id`).all(seriesId)).toEqual([
-        { filename: `${token} Part 01.mp4` }, { filename: `${token} Part 02.mp4` },
+        { filename: "Episode 02.mp4" }, { filename: "Episode 10.mp4" },
       ]);
-    await writeFile(path.join(root, `${token} Part 03.mp4`), "three");
+    await writeFile(path.join(folder, "Episode 11.mp4"), "three");
     await scanSource(sourceId, root);
     expect(database.prepare("SELECT COUNT(*) AS count FROM series_items WHERE series_id = ?").get(seriesId)).toEqual({ count: 3 });
   } finally {
     if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
     if (seriesId) database.prepare("DELETE FROM series WHERE id = ?").run(seriesId);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("movie and mixed sources never group root videos by prefixes and retire untouched legacy automatic sets", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-no-video-prefix-"));
+  const sources: number[] = [];
+  try {
+    await Promise.all(["Same title Part 01.mp4", "Same title Part 02.mp4"].map((name) => writeFile(path.join(root, name), name)));
+    for (const mediaType of ['movies', 'mixed']) {
+      const source = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path, media_type) VALUES (?, ?, ?, ?)")
+        .run(`Prefix ${mediaType}`, root, `${root}-${mediaType}`, mediaType).lastInsertRowid);
+      sources.push(source);
+      await scanSource(source, root);
+      const items = database.prepare("SELECT id FROM media_items WHERE source_id = ? ORDER BY id").all(source) as Array<{ id: number }>;
+      expect(database.prepare("SELECT si.* FROM series_items si JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?").all(source)).toEqual([]);
+      const legacy = Number(database.prepare("INSERT INTO series(title, auto_key) VALUES ('Same title', ?)").run(`${source}|video||same title`).lastInsertRowid);
+      const manual = Number(database.prepare("INSERT INTO series(title) VALUES ('My manual grouping')").run().lastInsertRowid);
+      for (const [position, item] of items.entries()) {
+        database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)").run(legacy, item.id, position);
+        database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)").run(manual, item.id, position);
+      }
+      await scanSource(source, root);
+      expect(database.prepare("SELECT id FROM series WHERE id = ?").get(legacy)).toBeUndefined();
+      expect(database.prepare("SELECT item_id FROM series_items WHERE series_id = ?").all(manual)).toHaveLength(2);
+      database.prepare("DELETE FROM series WHERE id = ?").run(manual);
+    }
+  } finally {
+    for (const source of sources) {
+      database.prepare("DELETE FROM series WHERE auto_key LIKE ?").run(`${source}|%`);
+      database.prepare("DELETE FROM sources WHERE id = ?").run(source);
+    }
     await rm(root, { recursive: true, force: true });
   }
 });

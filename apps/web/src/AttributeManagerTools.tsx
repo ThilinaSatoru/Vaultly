@@ -2,13 +2,15 @@ import { Select } from "./Select";
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { filterAttributes, type AttributeSearchScope, type AttributeSort, type AttributeUsage, type SearchableAttribute } from "./attribute-search";
+import { useUiState } from "./ui-state";
 
-export function useAttributeList<T extends SearchableAttribute>(entries: T[], count: (entry: T) => number, filterKey?: string) {
-  const [query, setQuery] = useState("");
-  const [scope, setScope] = useState<AttributeSearchScope>("all");
-  const [usage, setUsage] = useState<AttributeUsage>("all");
-  const [sort, setSort] = useState<AttributeSort>("relevance");
-  const [requestedPage, setPage] = useState(1);
+export function useAttributeList<T extends SearchableAttribute>(entries: T[], count: (entry: T) => number, filterKey?: string, stateKey = "attributes") {
+  const prefix = `vaultly.ui.${stateKey}.`;
+  const [query, setQuery] = useUiState(prefix + "query", "");
+  const [scope, setScope] = useUiState<AttributeSearchScope>(prefix + "scope", "all");
+  const [usage, setUsage] = useUiState<AttributeUsage>(prefix + "usage", "all");
+  const [sort, setSort] = useUiState<AttributeSort>(prefix + "sort", "relevance");
+  const [requestedPage, setPage] = useUiState(prefix + "page", 1);
   const [previousFilterKey, setPreviousFilterKey] = useState(filterKey);
   if (previousFilterKey !== filterKey) { setPreviousFilterKey(filterKey); setPage(1); }
   const filtered = useMemo(() => filterAttributes(entries, { query, scope, usage, sort }, count), [entries, query, scope, usage, sort, count]);

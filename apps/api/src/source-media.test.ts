@@ -33,7 +33,11 @@ test("series grouping handles root seasons, nested shows, episode season numbers
   expect(folderCollection("Show/S02E04.mkv", "S02E04.mkv", "tv")?.order).toBe(20004);
   expect(folderCollection("Show/Extras/01.mkv", "01.mkv", "tv")?.order).toBe(1000001);
   expect(folderCollection("Show/Chapter 02", "Chapter 02", "manga")?.order).toBe(2);
-  expect(folderCollection("Movie/movie.mp4", "movie.mp4", "movies")).toBeNull();
+  expect(folderCollection("Movie/movie.mp4", "movie.mp4", "movies")).toMatchObject({ title: "Movie", key: "movie" });
+  expect(folderCollection("Movie Part 1.mp4", "Movie Part 1.mp4", "movies")).toBeNull();
+  expect(folderCollection("Shelf/Movie A/film.mp4", "film.mp4", "movies")).toMatchObject({ title: "Movie A", key: "shelf/movie a" });
+  expect(folderCollection("Shelf/Movie B/film.mp4", "film.mp4", "movies")).toMatchObject({ title: "Movie B", key: "shelf/movie b" });
+  expect(folderCollection("Shelf/Show/Extras/01.mkv", "01.mkv", "tv")).toMatchObject({ title: "Show", key: "shelf/show" });
 });
 test("folder browsing keeps sibling names and separate source roots, including Windows paths", () => {
   const rows = [

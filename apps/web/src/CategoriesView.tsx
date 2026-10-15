@@ -21,7 +21,7 @@ export function CategoriesView({ categories, onChanged, allowBrowse = true }: Ca
   const [working, setWorking] = useState(false);
   const [renaming, setRenaming] = useState<Category | null>(null);
   const [patternEntry, setPatternEntry] = useState<Category | null>(null);
-  const { filtered, visible, tools, pagination } = useAttributeList(categories, usageCount);
+  const { filtered, visible, tools, pagination } = useAttributeList(categories, usageCount, undefined, "categories");
 
   const add = async (event: FormEvent) => {
     event.preventDefault();

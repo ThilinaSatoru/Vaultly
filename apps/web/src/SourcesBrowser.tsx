@@ -1,6 +1,7 @@
 import { Select } from "./Select";
 import { rankSearchResults } from "./search-relevance";
-import { Fragment, type ReactNode, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useMemo } from "react";
+import { useUiState } from "./ui-state";
 import { Folder, HardDrive, Search } from "lucide-react";
 
 const sourceLabels: Record<string, string> = { movies: "Movies", tv: "TV series", anime: "Anime", manga: "Manga", ebooks: "E-books", pictures: "Pictures" };
@@ -55,27 +56,25 @@ export function buildSourceTree<T extends SourceSummary>(sources: T[]): SourceTr
 export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource }: {
   sources: T[]; renderSource: (source: T, expanded: boolean, toggle: () => void) => ReactNode;
 }) {
-  const [query, setQuery] = useState("");
-  const [media, setMedia] = useState<MediaFilter>("all");
-  const [status, setStatus] = useState("all");
-  const [category, setCategory] = useState("all");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [query, setQuery] = useUiState("vaultly.ui.sources.query", "");
+  const [media, setMedia] = useUiState<MediaFilter>("vaultly.ui.sources.media", "all");
+  const [status, setStatus] = useUiState("vaultly.ui.sources.status", "all");
+  const [category, setCategory] = useUiState("vaultly.ui.sources.category", "all");
+  const [collapsed, setCollapsed] = useUiState<string[]>("vaultly.ui.sources.collapsed", []);
+  const [expanded, setExpanded] = useUiState<number[]>("vaultly.ui.sources.expanded", []);
   const visible = useMemo(() => rankSearchResults(sources.filter((source) => matchesSource(source, media, status, query) && (category === "all" || sourceMediaGroup(source) === category)), query, (source) => [source.name, source.root_path]), [sources, media, status, query, category]);
   const tree = useMemo(() => buildSourceTree(visible), [visible]);
   const categories = [...new Set(sources.map(sourceMediaGroup))].sort();
   const renderBranch = (node: SourceTreeNode<T>, depth: number): ReactNode => <li key={node.key}>
-    <details className="source-tree-branch" open={!collapsed.has(node.key)} onToggle={(event) => { const open = event.currentTarget.open; setCollapsed((current) => { const next = new Set(current); if (open) next.delete(node.key); else next.add(node.key); return next; }); }}>
+    <details className="source-tree-branch" open={!collapsed.includes(node.key)} onToggle={(event) => { const open = event.currentTarget.open; setCollapsed((current) => open ? current.filter((key) => key !== node.key) : current.includes(node.key) ? current : [...current, node.key]); }}>
       <summary>{depth === 0 ? <HardDrive size={16} /> : <Folder size={15} />}<span>{node.label}</span></summary>
-      {node.sources.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.has(source.id), () => toggle(source.id))}</Fragment>)}
+      {node.sources.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.includes(source.id), () => toggle(source.id))}</Fragment>)}
       {node.children.length > 0 && <ul>{node.children.map((child) => renderBranch(child, depth + 1))}</ul>}
     </details>
   </li>;
   const filters: Array<{ value: MediaFilter; label: string }> = [{ value: "all", label: "All" }, { value: "comic", label: "Comics" }, { value: "video", label: "Videos" }, { value: "story", label: "Stories" }, { value: "mixed", label: "Mixed" }];
   const toggle = (id: number) => setExpanded((current) => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
+    return current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
   });
   return <section className="sources-browser" aria-label="Browse sources">
     <div className="source-filter-tools">
@@ -91,10 +90,10 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
       </button>)}
     </div>
     <div className="source-list-tools"><span>{visible.length} / {sources.length} sources</span><div>
-      <button type="button" onClick={() => { setCollapsed(new Set()); setExpanded((current) => new Set([...current, ...visible.map((source) => source.id)])); }}>Expand all</button>
-      <button type="button" onClick={() => { setCollapsed(new Set(tree.map((node) => node.key))); setExpanded(new Set()); }}>Collapse all</button>
+      <button type="button" onClick={() => { setCollapsed([]); setExpanded((current) => [...new Set([...current, ...visible.map((source) => source.id)])]); }}>Expand all</button>
+      <button type="button" onClick={() => { setCollapsed(tree.map((node) => node.key)); setExpanded([]); }}>Collapse all</button>
     </div></div>
-    {query.trim() ? <div className="source-search-results">{visible.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.has(source.id), () => toggle(source.id))}</Fragment>)}</div> : <ul className="source-tree">{tree.map((node) => renderBranch(node, 0))}</ul>}
+    {query.trim() ? <div className="source-search-results">{visible.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.includes(source.id), () => toggle(source.id))}</Fragment>)}</div> : <ul className="source-tree">{tree.map((node) => renderBranch(node, 0))}</ul>}
     {visible.length === 0 && <div className="source-filter-empty"><p>No sources match these filters.</p><button className="secondary-button" onClick={() => { setMedia("all"); setCategory("all"); setStatus("all"); setQuery(""); }}>Clear filters</button></div>}
   </section>;
 }

@@ -6,6 +6,7 @@ import { ReaderAutoScroll } from "./ReaderAutoScroll";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 import { ShortcutHelp } from "./ShortcutHelp";
+import { useUiState } from "./ui-state";
 
 interface Chapter { html?: string; text?: string; base?: string }
 function safeBlocks(chapter: Chapter, itemId: number) {
@@ -38,7 +39,7 @@ export function EbookReader({ itemId, extension }: { itemId: number; extension: 
   const [appearance, setAppearance] = useReaderAppearance();
   const [chapters, setChapters] = useState<Chapter[] | null>(null);
   const [error, setError] = useState("");
-  const [fontSize, setFontSize] = useState(19);
+  const [fontSize, setFontSize] = useUiState("vaultly.ebook.fontSize", 19);
   const scrollRef = useRef<HTMLDivElement>(null);
   const content = useMemo(() => chapters?.map((chapter, index) => <article key={index} className="ebook-chapter">{safeBlocks(chapter, itemId)}</article>), [chapters, itemId]);
   useContinuousReaderScroll(scrollRef, Boolean(chapters), itemId);

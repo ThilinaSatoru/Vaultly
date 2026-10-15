@@ -282,3 +282,17 @@
 }
 
 .video-player.controls-hidden:fullscreen { cursor: none; }
+
+/* Reserve two pixels beneath the picture, including fullscreen. */
+.video-player > video { height: calc(100% - 2px); }
+.video-idle-progress { position: absolute; inset: auto 0 0; height: 2px; background: #ffffff25; pointer-events: none; visibility: hidden; }
+.video-idle-progress span { display: block; height: 100%; background: var(--accent, #4da3ff); }
+.video-player.controls-hidden .video-idle-progress { visibility: visible; }
+.video-progress, .video-player.compact .video-progress { height: 26px; }
+.video-progress-input { height: 26px; }
+.video-progress-track { height: 3px; transition: height .12s ease; }
+.video-progress:hover .video-progress-track, .video-progress:focus-within .video-progress-track { height: 7px; }
+.video-progress-input::-webkit-slider-thumb { width: 10px; height: 10px; }
+.video-progress-input:hover::-webkit-slider-thumb, .video-progress-input:focus-visible::-webkit-slider-thumb { width: 16px; height: 16px; }
+.video-progress-input::-moz-range-thumb { width: 10px; height: 10px; }
+.video-progress-input:hover::-moz-range-thumb, .video-progress-input:focus-visible::-moz-range-thumb { width: 16px; height: 16px; }

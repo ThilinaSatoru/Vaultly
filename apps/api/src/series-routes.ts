@@ -78,7 +78,7 @@ function seriesPeople(ids: number[]) {
 }
 
 /** Card metadata includes member attributes without changing shared set assignments. */
-function seriesCardAttributes(ids: number[]) {
+export function seriesCardAttributes(ids: number[]) {
   type Attribute = { id: number; name: string };
   const result = new Map<number, { tags: Attribute[]; categories: Attribute[]; people: Attribute[] }>();
   const definitions = [
@@ -157,7 +157,10 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
     }
     if (favorite) conditions.push("s.favorite = 1");
     for (const tagId of new Set(tags?.split(",").map(Number) ?? [])) {
-      conditions.push("EXISTS (SELECT 1 FROM series_tags st WHERE st.series_id = s.id AND st.tag_id = ?)");
+      conditions.push(`(EXISTS (SELECT 1 FROM series_tags st WHERE st.series_id = s.id AND st.tag_id = ?)
+        OR EXISTS (SELECT 1 FROM series_items si JOIN media_items m ON m.id = si.item_id AND m.available = 1
+          JOIN effective_item_tags it ON it.item_id = si.item_id WHERE si.series_id = s.id AND it.tag_id = ?))`);
+      values.push(tagId);
       values.push(tagId);
     }
     const rows = database.prepare(`

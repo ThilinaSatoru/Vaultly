@@ -42,6 +42,15 @@ export function BackgroundStatus({ onOpen }: { onOpen: (target: BackgroundTask["
   const [available, setAvailable] = useState<boolean | null>(null);
   const [resources, setResources] = useState<SystemResources | null>(null);
   useEffect(() => {
+    const bridge = (window as Window & { vaultlyWindow?: { taskActivity?: (running: boolean) => void } }).vaultlyWindow;
+    bridge?.taskActivity?.(requests.length > 0);
+    if (bridge) return;
+    if (!requests.length && !tasks.length) return;
+    const confirmExit = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", confirmExit);
+    return () => window.removeEventListener("beforeunload", confirmExit);
+  }, [requests.length, tasks.length]);
+  useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const controller = new AbortController();

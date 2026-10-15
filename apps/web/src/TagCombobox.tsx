@@ -10,6 +10,7 @@ import { AttributeManagerContext } from "./attribute-manager";
 interface TagComboboxProps {
   label: string;
   tags: Tag[];
+  options?: Tag[];
   selectedIds: number[];
   onChange: (ids: number[]) => void;
   onCreate?: (name: string) => Promise<Tag>;
@@ -18,7 +19,7 @@ interface TagComboboxProps {
   attributeKind: AttributeKind;
 }
 
-export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disabled, attributeKind, placeholder = "Search tags" }: TagComboboxProps) {
+export function TagCombobox({ label, tags, options, selectedIds, onChange, onCreate, disabled, attributeKind, placeholder = "Search tags" }: TagComboboxProps) {
   const manager = useContext(AttributeManagerContext);
   const mediaType = useContext(AttributeMediaContext);
   const managerKind = attributeKind === "tag" ? "tags" : attributeKind === "category" ? "categories" : attributeKind === "cast" || attributeKind === "artist" ? "people" : null;
@@ -35,7 +36,7 @@ export function TagCombobox({ label, tags, selectedIds, onChange, onCreate, disa
   const listId = useRef(`tag-list-${Math.random().toString(36).slice(2)}`).current;
   const selectedSet = new Set(selectedIds);
   const selected = tags.filter((tag) => selectedSet.has(tag.id));
-  const matches = useMemo(() => open ? searchAttributes(tags, query) : [], [tags, query, open]);
+  const matches = useMemo(() => open ? searchAttributes(options ?? tags, query) : [], [options, tags, query, open]);
   const filtered = matches.slice(0, 100);
   const canCreate = Boolean(onCreate && query.trim() && !tags.some((tag) => tag.name.toLocaleLowerCase() === query.trim().toLocaleLowerCase()));
   useEffect(() => { setActiveIndex(0); }, [query, tags]);

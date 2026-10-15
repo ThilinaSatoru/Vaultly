@@ -18,7 +18,7 @@ import { browseFolders } from "./folder-browse.js";
 import { openBookArchive, epubChapters } from "./book-archive.js";
 import { ebookExtensions, sourceMediaTypes, pictureExtensions } from "./source-media.js";
 import { getScanProgress, isVideoFile } from "./scanner.js";
-import { getPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
+import { getCachedPdfThumbnail, getVideoDuration, getVideoThumbnail } from "./thumbnails.js";
 import { openVideoInDefaultPlayer } from "./open-video.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
@@ -760,20 +760,8 @@ export async function registerMediaRoutes(
     try {
       if (item.media_type !== "video") {
         if (path.extname(filePath).toLowerCase() !== ".pdf") return reply.code(404).send({ message: "Book thumbnail unavailable." });
-        const generation = getPdfThumbnail(id, filePath, item.size_bytes, item.modified_at_ms)
-          .catch((error: unknown) => {
-            app.log.warn({ err: error, id }, "Could not generate PDF thumbnail");
-            return null;
-          });
-        const thumbnailPath = await Promise.race([
-          generation,
-          new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 75)),
-        ]);
-        if (thumbnailPath === undefined) {
-          return reply.code(202).header("Cache-Control", "no-store").header("Retry-After", "3")
-            .send({ message: "Thumbnail is being prepared." });
-        }
-        if (thumbnailPath === null) return reply.code(404).send({ message: "Thumbnail unavailable." });
+        const thumbnailPath = await getCachedPdfThumbnail(id, item.size_bytes, item.modified_at_ms);
+        if (thumbnailPath === null) return reply.code(404).header("Cache-Control", "no-store").send({ message: "Rescan the source to prepare this book thumbnail." });
         return sendLocalFile(reply, thumbnailPath, undefined);
       }
       const thumbnailPath = await getVideoThumbnail(id, filePath, item.size_bytes, item.modified_at_ms);

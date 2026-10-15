@@ -11,6 +11,8 @@ import { CircleView } from "./CircleView";
 import { useArtworkOrientation } from "./artwork";
 import { api, type Category, type CircleSummary, type ItemPage, type MediaType, type Person, type SeriesDetail, type SeriesSummary, type SeriesViewerContext, type Tag } from "./media";
 import type { LibraryView } from "./App";
+import { useLastPlayed } from "./last-played";
+import { CollectionAttributes } from "./CollectionAttributes";
 
 interface SeriesViewProps {
   view: LibraryView;
@@ -92,6 +94,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
   const [seriesList, setSeriesList] = useState<SeriesSummary[]>([]);
   const [selectedId, setSelectedId] = useNavigationField<number | null>("SeriesView.selectedId", initialSeriesId, "Collection");
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
+  const lastPlayed = useLastPlayed(selectedId ?? undefined);
   const [search, setSearch] = useNavigationField("SeriesView.search", "");
   const [selectedTagIds, setSelectedTagIds] = useNavigationField<number[]>("SeriesView.selectedTagIds", []);
   const [selectedCategoryIds, setSelectedCategoryIds] = useNavigationField<number[]>("SeriesView.selectedCategoryIds", []);
@@ -323,6 +326,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
             <div><button className="primary-button" type="submit" disabled={busy}>Save</button><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button></div>
           </form> : <><h1>{detail.title}</h1><p>{detail.description || "A set for related comics, videos, PDFs, and sequels."}</p></>}
           <div className="series-actions">
+            {lastPlayed && detail.items.some((item) => item.id === lastPlayed.itemId) && <button className="primary-button" type="button" onClick={() => onOpenItem(lastPlayed.itemId, { seriesId: detail.id, seriesTitle: detail.title, items: detail.items.map(({ id, title }) => ({ id, title })) })}>Continue: {lastPlayed.title}</button>}
             <button className={`secondary-button${detail.favorite ? " is-favorite" : ""}`} type="button" onClick={() => void toggleFavorite(detail)}><Heart size={15} fill={detail.favorite ? "currentColor" : "none"} /> {detail.favorite ? "Favorited" : "Add favorite"}</button>
             <button className="secondary-button" type="button" onClick={() => setEditing(true)} disabled={busy}><Pencil size={15} /> Edit details</button>
             <label className="secondary-button series-upload"><Upload size={15} /> {detail.has_cover ? "Change cover" : "Add cover"}<input type="file" accept="image/png,image/jpeg,image/webp" disabled={busy} onChange={(event) => { void uploadCover(event.target.files?.[0]); event.target.value = ""; }} /></label>
@@ -332,7 +336,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
           <AttributeMediaContext.Provider value={mediaType ?? (setType(detail) === "mixed" ? undefined : setType(detail) as MediaType)}><TagCombobox attributeKind="tag" label="Set tags" tags={tags} selectedIds={detail.tags.map((tag) => tag.id)} onChange={(ids) => void updateTags(ids)} onCreate={onTagCreated} disabled={busy} placeholder="Search or create tags" />
           <TagCombobox attributeKind="category" label="Set categories" tags={categories} selectedIds={(detail.categories ?? []).map((category) => category.id)} onChange={(ids) => void updateCategories(ids)} onCreate={onCategoryCreated} disabled={busy} placeholder="Search or create categories" />
           <TagCombobox attributeKind={setType(detail) === "video" ? "cast" : "artist"} label="Shared people" tags={people} selectedIds={(detail.people ?? []).map((person) => person.id)} onChange={(ids) => void updatePeople(ids)} onCreate={onPersonCreated} disabled={busy} placeholder="Search or create people" />
-          <p className="series-shared-people-hint">Shared people apply to every item in this set: Cast for videos, Artists for comics and stories.</p>
+          <p className="series-shared-people-hint">Set tags, categories and people apply to every child. These combined attributes also include the children's own attributes.</p>
+          <CollectionAttributes attributes={detail.card_attributes} mediaType={mediaType ?? (setType(detail) === "mixed" ? undefined : setType(detail) as MediaType)} />
           <TagCombobox attributeKind="circle" label="In story circles" tags={circleOptions} selectedIds={circleIds} onChange={(ids) => void updateCircles(ids)} onCreate={createCircle} disabled={busy} placeholder="Search or create circles" /></AttributeMediaContext.Provider>
         </div>
       </div>

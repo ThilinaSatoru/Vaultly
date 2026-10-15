@@ -4,6 +4,7 @@ import { NavigationContext, useNavigationField } from "./navigation";
 import { ArrowDown, ArrowLeft, ArrowUp, Layers3, LoaderCircle, Orbit, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api, type CircleDetail, type CircleSummary, type MediaType, type SeriesSummary } from "./media";
+import { CollectionAttributes } from "./CollectionAttributes";
 
 interface CircleViewProps {
   series: SeriesSummary[];
@@ -105,7 +106,7 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
     (circle.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()) || circle.description.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
     && (!mediaType || (circle.item_count === 0 ? circle.preferred_type === mediaType
       : mediaType === "video" ? circle.video_count > 0 : mediaType === "comic" ? circle.comic_count > 0 : circle.story_count > 0))), search, (circle) => [circle.title, circle.description]);
-  const renderCards = (entries: CircleSummary[]) => <div className="circle-grid">{entries.map((circle) => <button className="circle-card" type="button" key={circle.id} onClick={() => setSelectedId(circle.id)}><span><Orbit size={28} /></span><div><h2>{circle.title}</h2><p>{circle.description || "A story circle"}</p><small>{circle.set_count} {circle.set_count === 1 ? "set" : "sets"} · {circle.item_count} items</small></div></button>)}</div>;
+  const renderCards = (entries: CircleSummary[]) => <div className="circle-grid">{entries.map((circle) => <article className="circle-card" key={circle.id}><button className="circle-card-open" type="button" aria-label={`Open circle ${circle.title}`} onClick={() => setSelectedId(circle.id)}><Orbit size={28} /></button><div><h2><button className="card-title-open" type="button" onClick={() => setSelectedId(circle.id)}>{circle.title}</button></h2><p>{circle.description || "A story circle"}</p><small>{circle.set_count} {circle.set_count === 1 ? "set" : "sets"} · {circle.item_count} items</small><CollectionAttributes attributes={circle.card_attributes} mediaType={mediaType ?? (circleType(circle) === "mixed" ? undefined : circleType(circle) as MediaType)} /></div></article>)}</div>;
 
   if (selectedId !== null) return <section className="circle-view">
     <button className="series-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setSelectedId(null); setEditing(false); setMemberSearch(""); } }}><ArrowLeft size={17} /> All circles</button>
@@ -115,6 +116,7 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
         <p className="eyebrow">Story circle · {detail.set_count} {detail.set_count === 1 ? "set" : "sets"}</p>
         {editing ? <form className="series-edit" onSubmit={updateDetails}><input aria-label="Circle title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required /><textarea aria-label="Circle description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" /><div><button className="primary-button" type="submit" disabled={busy}>Save</button><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button></div></form> : <><h1>{detail.title}</h1><p>{detail.description || "An ordered story made from several sets or episodes."}</p></>}
         <div className="series-actions"><button className="secondary-button" type="button" onClick={() => setEditing(true)} disabled={busy}><Pencil size={15} /> Edit details</button><button className="secondary-button series-danger" type="button" onClick={() => void removeCircle()} disabled={busy}><Trash2 size={15} /> Delete circle</button></div>
+        <CollectionAttributes attributes={detail.card_attributes} mediaType={mediaType ?? (circleType(detail) === "mixed" ? undefined : circleType(detail) as MediaType)} />
       </div></div>
       <div className="series-content-heading"><div><h2>Sets in this story</h2><p>Arrange collections in episode or reading order.</p></div></div>
       <div className="series-members">

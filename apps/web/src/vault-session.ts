@@ -32,7 +32,9 @@ export interface VaultProfile { id: string; name: string }
 export interface VaultProfiles { activeId: string; profiles: VaultProfile[] }
 
 let activeProfile: VaultProfile | undefined;
+let preferenceRevision = 0;
 export const getActiveProfile = () => activeProfile;
+export const getPreferenceRevision = () => preferenceRevision;
 export function setActiveProfile(profile: VaultProfile) {
   activeProfile = profile;
   if (window.history.state?.vaultProfile !== profile.id) {
@@ -73,6 +75,7 @@ export function exportVaultPreferences() {
   return result;
 }
 export function restoreVaultPreferences(preferences?: Record<string, unknown>) {
+  preferenceRevision++;
   for (const key of Object.keys(exportVaultPreferences())) vaultStorage.removeItem(key);
   for (const [key, value] of Object.entries(preferences ?? {})) {
     if (preferenceKey(key) && typeof value === "string") vaultStorage.setItem(key, value);
@@ -80,6 +83,7 @@ export function restoreVaultPreferences(preferences?: Record<string, unknown>) {
 }
 
 export function removeVaultPreferences(profileId: string) {
+  if (profileId === activeProfile?.id) preferenceRevision++;
   const prefix = profileId === "default" ? "" : `vaultly.profile.${profileId}.`;
   const keys: string[] = [];
   for (let index = 0; index < preferenceStorage().length; index++) {

@@ -7,6 +7,24 @@ import { runtimeDirectory, onVaultChanged } from "./database.js";
 export let profileImageDirectory = path.join(runtimeDirectory, "profile-images");
 onVaultChanged(() => { profileImageDirectory = path.join(runtimeDirectory, "profile-images"); });
 export const maxProfileImageBytes = 10 * 1024 * 1024;
+export async function downloadProfileImage(url: string) {
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) throw new Error(`Image download failed (HTTP ${response.status}).`);
+  if (!response.body) throw new Error("Image download returned no data.");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > maxProfileImageBytes) throw new Error("Choose an image smaller than 10 MB.");
+      chunks.push(value);
+    }
+    return Buffer.concat(chunks);
+  } finally { await reader.cancel(); reader.releaseLock(); }
+}
 export function profileImagePath(filename: string) {
   if (!/^[0-9a-f-]{36}\.png$/.test(filename)) throw new Error("Invalid profile image filename.");
   return path.join(profileImageDirectory, filename);

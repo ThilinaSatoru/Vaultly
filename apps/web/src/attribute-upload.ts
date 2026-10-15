@@ -81,11 +81,11 @@ export async function* attributeRecords(file: JsonFile, metadata: Envelope): Asy
     if (!ended || inRecords || !foundRecords) throw new Error("Invalid JSON: incomplete document or missing records array.");
     if (root === "{") {
       const parsed = JSON.parse(envelope) as Record<string, unknown>;
-      if (Object.keys(parsed).some((key) => !["records", "scraped_at", "total"].includes(key))) throw new Error("Unsupported field in the records object.");
-      if (parsed.scraped_at !== undefined && (typeof parsed.scraped_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(parsed.scraped_at) || !Number.isFinite(Date.parse(parsed.scraped_at)))) throw new Error("scraped_at must be an ISO timestamp.");
-      if (parsed.total !== undefined && (typeof parsed.total !== "number" || !Number.isInteger(parsed.total) || parsed.total < 0)) throw new Error("total must be a nonnegative integer.");
-      if (parsed.scraped_at !== undefined) metadata.scraped_at = parsed.scraped_at as string;
-      if (parsed.total !== undefined) metadata.total = parsed.total as number;
+
+      if (parsed.scraped_at != null && (typeof parsed.scraped_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(parsed.scraped_at) || !Number.isFinite(Date.parse(parsed.scraped_at)))) throw new Error("scraped_at must be an ISO timestamp.");
+      if (parsed.total != null && (typeof parsed.total !== "number" || !Number.isInteger(parsed.total) || parsed.total < 0)) throw new Error("total must be a nonnegative integer.");
+      if (parsed.scraped_at != null) metadata.scraped_at = parsed.scraped_at as string;
+      if (parsed.total != null) metadata.total = parsed.total as number;
     }
   } finally { await reader.cancel(); reader.releaseLock(); }
 }

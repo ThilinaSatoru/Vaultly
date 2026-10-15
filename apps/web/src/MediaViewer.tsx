@@ -17,6 +17,8 @@ import { viewerNavigationItems, type GalleryVideoContext } from "./video-playlis
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 import { ActionMenu } from "./ActionMenu";
 import { ShortcutHelp } from "./ShortcutHelp";
+import { rememberLastPlayed } from "./last-played";
+import { useUiState } from "./ui-state";
 
 const EbookReader = lazy(async () => ({ default: (await import("./EbookReader")).EbookReader }));
 const PdfReader = lazy(async () => ({ default: (await import("./PdfReader")).PdfReader }));
@@ -63,7 +65,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [item, setItem] = useState<MediaDetail | null>(null);
   const [pages, setPages] = useState<string[]>([]);
   const [appearance, setAppearance] = useReaderAppearance();
-  const [comicContinuous, setComicContinuous] = useState(false);
+  const [comicContinuous, setComicContinuous] = useUiState("vaultly.comic.continuous", false);
   const [archive, setArchive] = useState(false);
   const [page, setPage] = useState(0);
   const [fit, setFit] = useState<ComicFit>(storedComicFit);
@@ -71,6 +73,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [comicFullscreen, setComicFullscreen] = useState(false);
   const [floatSize, setFloatSize] = useState(() => ({ width: readNumberPreference("vaultly.video.floatWidth", 520, 320, 1000), height: readNumberPreference("vaultly.video.floatHeight", 342, 160, 900) }));
   const [floatDetails, setFloatDetails] = useState(() => readBooleanPreference("vaultly.video.floatDetails", false));
+  const [sidebarVisible, setSidebarVisible] = useUiState("vaultly.video.sidebarVisible", true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [showRename, setShowRename] = useState(false);
@@ -364,10 +367,11 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
 
   return (
     <div className={`viewer-backdrop${floating ? " is-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} role="presentation" onMouseDown={floating ? undefined : onClose}>
-      <section ref={viewerRef} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} className={`viewer${floating ? " viewer-floating" : ""}${hasPlaylist ? " has-playlist" : ""}${floating && floatDetails ? " show-float-details" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+      <section ref={viewerRef} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} className={`viewer${floating ? " viewer-floating" : ""}${hasPlaylist ? " has-playlist" : ""}${floating && floatDetails ? " show-float-details" : ""}${!floating && item?.media_type === "video" && !sidebarVisible ? " viewer-sidebar-hidden" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <header className="viewer-header">
           <div className="viewer-title"><strong>{item?.title || "Opening media…"}</strong><span>{galleryContext && seriesIndex >= 0 ? `Gallery page ${galleryContext.page + 1} · ${seriesIndex + 1} / ${galleryContext.videos.length}` : playlistIndex >= 0 ? `Temporary playlist · ${playlistIndex + 1} / ${playlist.length}` : seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
           <div className="viewer-header-actions">
+            {!floating && item?.media_type === "video" && <button type="button" aria-label={sidebarVisible ? "Hide side panel" : "Show side panel"} aria-expanded={sidebarVisible} onClick={() => setSidebarVisible((value) => !value)}><ListVideo size={17} />{sidebarVisible ? "Hide panel" : "Show panel"}</button>}
             {floating && <label className="float-size-control" title="Player size"><input type="range" aria-label="Floating player size" min="320" max={Math.max(320, Math.min(1000, window.innerWidth - 36))} step="20" value={floatSize.width} onChange={(event) => { const width = Number(event.target.value); setFloatSize({ width, height: Math.min(window.innerHeight - 36, width * 9 / 16 + (floatDetails ? 189 : 49)) }); }} /></label>}
             {floating && hasPlaylist && <button type="button" aria-label="Show floating playlist and details" aria-pressed={floatDetails} onClick={() => { setFloatDetails((value) => !value); setFloatSize((value) => ({ ...value, height: Math.max(230, Math.min(window.innerHeight - 36, value.height + (floatDetails ? -140 : 140))) })); }}><ListVideo size={17} /></button>}
             {manager && <button type="button" onClick={() => manager.open("tags")} title="Manage attributes without leaving this media" aria-label="Manage attributes"><SlidersHorizontal size={17} /><span className="viewer-manage-label">Attributes</span></button>}
@@ -382,7 +386,10 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {!item && !error && <div className="viewer-loading"><LoaderCircle className="spin" size={30} /> Loading…</div>}
           {item?.media_type === "video" && (
             <div className="video-stage">
-              <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={readBooleanPreference("vaultly.video.autoplay", true)} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
+              <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={readBooleanPreference("vaultly.video.autoplay", true)} onPlaybackStarted={() => {
+                const series = seriesContext ?? seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) => ({ seriesId: entry.id, seriesTitle: entry.name }))[0];
+                rememberLastPlayed({ itemId: item.id, title: item.title, ...(series ? { seriesId: series.seriesId, seriesTitle: series.seriesTitle } : {}) });
+              }} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
           {(item?.media_type === "story" || (item?.media_type === "comic" && item.file_extension === "pdf")) && (

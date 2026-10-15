@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { database } from "./database.js";
 import { withAttributePatterns } from "./attribute-routes.js";
-import { normalizeProfileImage, readProfileImage, removeProfileImage, storeProfileImage } from "./profile-images.js";
+import { downloadProfileImage, normalizeProfileImage, readProfileImage, removeProfileImage, storeProfileImage } from "./profile-images.js";
 import { getPeopleRepairProgress, repairPeopleMatches } from "./people-repair.js";
 
 const idInput = z.object({ id: z.coerce.number().int().positive() });
@@ -39,12 +39,15 @@ export async function registerPeopleRoutes(app: FastifyInstance) {
   });
   app.put("/api/people/:id/image", { bodyLimit: 15 * 1024 * 1024 }, async (request, reply) => {
     const { id } = idInput.parse(request.params);
-    const parsed = z.object({ data: z.string().min(1).max(14 * 1024 * 1024) }).strict().safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ message: "Upload an image file. Image URL downloads are no longer supported." });
+    const parsed = z.union([
+      z.object({ data: z.string().min(1).max(14 * 1024 * 1024) }).strict(),
+      z.object({ url: z.string().trim().url().refine((value) => /^https?:\/\//i.test(value)) }).strict(),
+    ]).safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ message: "Upload an image file or enter an HTTP or HTTPS image link." });
     const input = parsed.data;
     if (!database.prepare("SELECT id FROM people WHERE id = ?").get(id)) return reply.code(404).send({ message: "Person not found." });
     let data: Buffer;
-    try { data = await normalizeProfileImage(Buffer.from(input.data, "base64")); }
+    try { data = await normalizeProfileImage("url" in input ? await downloadProfileImage(input.url) : Buffer.from(input.data, "base64")); }
     catch (error) { return reply.code(400).send({ message: error instanceof Error ? error.message : "Could not load image." }); }
     const filename = await storeProfileImage(data);
     const person = database.prepare("SELECT profile_image FROM people WHERE id = ?").get(id) as { profile_image: string | null } | undefined;

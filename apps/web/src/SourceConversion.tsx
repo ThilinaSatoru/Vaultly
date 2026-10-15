@@ -11,9 +11,10 @@ interface Progress {
   failed?: number;
 }
 
-export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, expanded, onScan, onExpand, onChanged, onRunning }: {
+export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, expanded, filenameRefactoring, onScan, onExpand, onChanged, onRunning }: {
   sourceId: number; enabled: boolean; scanEnabled: boolean; scanBusy: boolean; expanded: boolean;
-  onScan: (englishAttributes: boolean) => Promise<void>; onExpand: () => void;
+  filenameRefactoring?: boolean;
+  onScan: (englishAttributes: boolean, refactorFilenames?: boolean) => Promise<void>; onExpand: () => void;
   onChanged: () => void; onRunning: (running: boolean) => void;
 }) {
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -48,7 +49,7 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
     if (!cancel) {
       if (!expanded) onExpand();
       if (selection.startsWith("scan-")) {
-        await onScan(selection === "scan-all");
+        await onScan(true, selection === "scan-refactor");
         return;
       }
     }
@@ -65,10 +66,11 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
     <div className="source-operations">
       <Select aria-label="Scan or convert source" value={selection} onChange={(event) => setSelection(event.target.value)} disabled={busy || scanBusy || running}>
         <option value="scan-all" disabled={!scanEnabled}>Scan</option>
+        <option value="scan-refactor" disabled={!scanEnabled || !filenameRefactoring}>Scan + refactor filenames</option>
         <option value="quick" disabled={!enabled}>Convert (quick)</option>
         <option value="slow" disabled={!enabled}>Convert (slow)</option>
       </Select>
-      <button className="secondary-button" type="button" disabled={busy || scanBusy || running || (selection.startsWith("scan-") ? !scanEnabled : !enabled)} onClick={() => void action()}>
+      <button className="secondary-button" type="button" disabled={busy || scanBusy || running || (selection.startsWith("scan-") ? !scanEnabled || (selection === "scan-refactor" && !filenameRefactoring) : !enabled)} onClick={() => void action()}>
         {busy || scanBusy ? "Working…" : "Run"}
       </button>
     </div>

@@ -71,8 +71,9 @@ test("prepared JSON imports skip duplicate people, validate atomically, index cr
     expect((await app.inject("/api/people")).json().find((row: { id: number }) => row.id === person.id)).toMatchObject({ patterns: [], country: "United States" });
     expect((await upload("people", [{ name, country: null }])).statusCode).toBe(200);
     const rejected = await upload("people", [{ name: `Rejected ${token}` }, { name, avatar_url: "file:///private" }]);
-    expect(rejected.statusCode).toBe(400);
-    expect(database.prepare("SELECT id FROM people WHERE name = ?").get(`Rejected ${token}`)).toBeUndefined();
+    expect(rejected.statusCode).toBe(200);
+    expect(database.prepare("SELECT id FROM people WHERE name = ?").get(`Rejected ${token}`)).toBeDefined();
+    database.prepare("DELETE FROM people WHERE name = ?").run(`Rejected ${token}`);
     for (const kind of ["tags", "categories"]) {
       const result = await upload(kind, { records: [{ name, patterns: [name] }] });
       expect(result.statusCode, result.body).toBe(200);
@@ -81,7 +82,7 @@ test("prepared JSON imports skip duplicate people, validate atomically, index cr
     }
     expect((await upload("tags", { records: [{ name, patterns: ["*"] }] })).statusCode).toBe(400);
     expect((await upload("people", { records: [] })).statusCode).toBe(400);
-    expect((await app.inject({ method: "PUT", url: `/api/people/${person.id}/image`, payload: { url: "https://example.com/image.jpg" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "PUT", url: `/api/people/${person.id}/image`, payload: { url: "file:///image.jpg" } })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: "/api/people/profile-scan" })).statusCode).toBe(404);
     expect(download).not.toHaveBeenCalled();
     const backup = (await app.inject("/api/backup")).json();
@@ -96,4 +97,32 @@ test("prepared JSON imports skip duplicate people, validate atomically, index cr
     for (const kind of ["people", "tags", "categories"]) database.prepare(`DELETE FROM ${kind} WHERE name = ?`).run(name);
     await app.close();
   }
+});
+
+test("people import tolerates nulls, extra fields, invalid rows and long sources and URLs", async () => {
+  const name = `Tolerant ${randomUUID()}`;
+  const app = await buildVaultlyServer();
+  app.log.level = "silent";
+  try {
+    const source = "s".repeat(5000);
+    const avatar_url = `https://example.com/${"a".repeat(5000)}`;
+    const response = await app.inject({ method: "POST", url: "/api/attributes/people/import", payload: {
+      scraped_at: null, total: null, extra: true, records: [null, 42, { name: null }, { name, source, avatar_url, patterns: null, gender: null, extra: { anything: true } }],
+    } });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({ total: 4, created: 1, skipped: 3 });
+    expect(database.prepare("SELECT source, avatar_url, gender FROM people WHERE name = ?").get(name)).toEqual({ source, avatar_url, gender: null });
+  } finally { database.prepare("DELETE FROM people WHERE name = ?").run(name); await app.close(); }
+});
+
+test("people import preserves embedded avatars larger than 4096 characters with null country fields", async () => {
+  const name = `Embedded ${randomUUID()}`;
+  const app = await buildVaultlyServer();
+  app.log.level = "silent";
+  const avatar_url = `data:image/png;base64,${Buffer.alloc(4000).toString("base64")}`;
+  try {
+    const response = await app.inject({ method: "POST", url: "/api/attributes/people/import", payload: [{ name, gender: "unknown", country_code: null, country: null, avatar_url }] });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(database.prepare("SELECT gender, country_code, country, avatar_url FROM people WHERE name = ?").get(name)).toEqual({ gender: "unknown", country_code: null, country: null, avatar_url });
+  } finally { database.prepare("DELETE FROM people WHERE name = ?").run(name); await app.close(); }
 });

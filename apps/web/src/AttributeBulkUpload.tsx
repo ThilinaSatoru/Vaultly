@@ -107,7 +107,7 @@ export function AttributeBulkUpload({
         </p>
         {kind === "people" && (
           <p>
-            Avatar and profile URLs are saved as references. Avatar previews
+            Avatar URLs accept HTTP/HTTPS links or base64 PNG, JPEG, GIF, and WebP data URLs. Avatar and profile URLs are saved as references. Avatar previews
             load from their original URL; upload an image separately to keep a
             local copy.
             Use null to clear an optional profile field. scraped_at must be an

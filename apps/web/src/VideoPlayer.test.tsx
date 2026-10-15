@@ -111,6 +111,9 @@ test.each([false, true])("controls hide after mouse inactivity even with focused
   expect(render().props.className).toContain("controls-visible");
   vi.advanceTimersByTime(100);
   expect(render().props.className).toContain("controls-hidden");
+  const indicator = find(render(), (node) => node.props.className === "video-idle-progress");
+  expect(indicator.props["aria-hidden"]).toBe("true");
+  expect(find(render(), (node) => node.props.className === "video-controls").props.inert).toBe(true);
   expect(video.focus).toHaveBeenCalled();
 });
 

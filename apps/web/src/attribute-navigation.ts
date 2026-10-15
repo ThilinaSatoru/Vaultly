@@ -10,7 +10,7 @@ export function attributeGalleryFields(attribute: BrowseAttribute, mediaType: At
   const prefix = `gallery.${mediaType}.browse.`;
   const filters: Record<string, unknown> = {
     selectedCategoryIds: [], selectedTagIds: [], selectedCastIds: [], selectedArtistIds: [],
-    filename: "", pathText: "", selectedType: "", sourceId: "", extension: "", seriesFilter: "", circleFilter: "",
+    filename: "", pathText: "", selectedType: "", sourceType: "", sourceId: "", folderPath: "", extension: "", seriesFilter: "", circleFilter: "",
     minMb: "", maxMb: "", modifiedFrom: "", modifiedTo: "", uncategorized: false, untagged: false,
     browseCategory: null, page: 0, sort: "title", advancedOpen: ["cast", "artist", "series", "circle"].includes(attribute.kind),
   };
@@ -19,7 +19,7 @@ export function attributeGalleryFields(attribute: BrowseAttribute, mediaType: At
   const key = { tag: "selectedTagIds", category: "selectedCategoryIds", cast: "selectedCastIds", artist: "selectedArtistIds", series: "seriesFilter", circle: "circleFilter" }[kind];
   filters[key] = attribute.kind === "series" || attribute.kind === "circle" ? String(attribute.id) : [attribute.id];
   return {
-    section: mediaType, libraryView: "browse", search: "", selectedItemId: null, selectedSeriesId: null,
+    section: mediaType, libraryView: "browse", search: "", selectedItemId: null, selectedSeriesId: null, personProfileId: null,
     "SeriesView.selectedId": null, "CircleView.selectedId": null,
     viewerSeriesContext: null, viewerGalleryContext: null, viewerFloating: false,
     ...Object.fromEntries(Object.entries(filters).map(([name, value]) => [prefix + name, value])),

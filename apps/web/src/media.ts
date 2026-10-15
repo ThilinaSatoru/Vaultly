@@ -136,6 +136,7 @@ export interface SeriesViewerContext {
 }
 
 export interface CircleSummary {
+  card_attributes?: SeriesSummary["card_attributes"];
   id: number;
   title: string;
   description: string;

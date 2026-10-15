@@ -6,6 +6,7 @@ import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } f
 import os from "node:os";
 import path from "node:path";
 import { focusActiveRenderer, focusInputSender } from "./input-focus.js";
+import { createExitGuard } from "./exit-confirmation.js";
 
 const currentDirectory = __dirname;
 const developmentUrl = process.env.VAULTLY_DEV_SERVER_URL;
@@ -14,6 +15,24 @@ let closeServer: (() => Promise<void>) | null = null;
 let serverAddress: string | null = null;
 let shuttingDown = false;
 let shutdownComplete = false;
+let rendererTasksRunning = false;
+const exitGuard = createExitGuard(async () => {
+  if (rendererTasksRunning) return true;
+  if (!serverAddress) return false;
+  try {
+    const response = await fetch(`${serverAddress}/api/activity`, { signal: AbortSignal.timeout(3000) });
+    if (!response.ok) return true;
+    return (await response.json() as unknown[]).length > 0;
+  } catch { return true; }
+}, async () => {
+  const options: Electron.MessageBoxOptions = {
+    type: "question", title: "Tasks are still running", message: "Exit Vaultly while tasks are running?",
+    detail: "Running tasks will be stopped. Wait for them to finish or choose Exit to close now.",
+    buttons: ["Keep running", "Exit"], defaultId: 0, cancelId: 0, noLink: true,
+  };
+  const result = mainWindow ? await dialog.showMessageBox(mainWindow, options) : await dialog.showMessageBox(options);
+  return result.response === 1;
+});
 let preferences: Record<string, string> | undefined;
 function readPreferences() {
   if (!preferences) {
@@ -26,6 +45,9 @@ function readPreferences() {
 function trustedPreferencesSender(event: Electron.IpcMainEvent) {
   return event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame;
 }
+ipcMain.on("window:task-activity", (event, running) => {
+  if (trustedPreferencesSender(event) && typeof running === "boolean") rendererTasksRunning = running;
+});
 ipcMain.on("window:focus-input", (event) => {
   focusInputSender(event, mainWindow);
 });
@@ -81,6 +103,11 @@ async function createWindow() {
 
   mainWindow.once("ready-to-show", () => mainWindow?.show());
   mainWindow.webContents.on("render-process-gone", (_event, details) => recordCrash(`Renderer: ${JSON.stringify(details)}`));
+  mainWindow.on("close", (event) => {
+    if (shuttingDown || exitGuard.approved) return;
+    event.preventDefault();
+    void exitGuard.request(() => app.quit()).catch((error) => recordCrash(String(error)));
+  });
   mainWindow.on("closed", () => { mainWindow = null; });
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
@@ -177,6 +204,11 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 app.on("before-quit", (event) => {
+  if (!exitGuard.approved && !shuttingDown && closeServer) {
+    event.preventDefault();
+    void exitGuard.request(() => app.quit()).catch((error) => recordCrash(String(error)));
+    return;
+  }
   if (closeServer && !shutdownComplete) {
     event.preventDefault();
     if (shuttingDown) return;

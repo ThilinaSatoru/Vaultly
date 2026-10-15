@@ -21,6 +21,14 @@ function setup(section: string) {
 beforeEach(() => { hooks.contexts.clear(); hooks.pending = null; hooks.setPending.mockReset(); });
 
 describe("attribute badge browsing", () => {
+  it.each(["cast", "artist"] as const)("opens a %s profile with all media even from a scoped viewer", (kind) => {
+    const { browse, push } = setup("video");
+    browse({ kind, id: 4, name: "Alex" }, "story");
+    expect(push).toHaveBeenCalledWith(expect.objectContaining({ section: "all", personProfileId: 4,
+      selectedItemId: null, "gallery.all.browse.selectedCastIds": [4],
+      "gallery.all.browse.selectedArtistIds": [], "gallery.all.browse.sourceType": "", "gallery.all.browse.folderPath": "" }), "Alex");
+    expect(hooks.setPending).toHaveBeenCalledWith(null);
+  });
   it("runs the optional navigation callback before showing an unscoped media chooser", () => {
     hooks.contexts.set(NavigationContext, { entry: { id: "page" }, current: { current: { fields: { section: "home" } } }, push: vi.fn() });
     const onNavigate = vi.fn();

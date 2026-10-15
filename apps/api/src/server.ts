@@ -15,6 +15,7 @@ import { registerMediaRoutes } from "./media-routes.js";
 import { registerSeriesRoutes } from "./series-routes.js";
 import { registerPeopleRoutes } from "./people-routes.js";
 import { registerBulkRoutes } from "./bulk-routes.js";
+import { registerMediaDeletionRoutes } from "./media-deletion.js";
 import { registerCircleRoutes } from "./circle-routes.js";
 import { registerBackupRoutes } from "./backup-routes.js";
 import { getBackgroundActivity } from "./background-activity.js";
@@ -53,6 +54,7 @@ await app.register(registerMediaRoutes, { revealPath: options.revealPath, openVi
 await app.register(registerSeriesRoutes);
 await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);
+await app.register(registerMediaDeletionRoutes);
 await app.register(registerCircleRoutes);
 await app.register(registerBackupRoutes);
 await app.register(registerAttributeRoutes);
@@ -190,9 +192,10 @@ app.post("/api/sources", async (request, reply) => {
   }
 });
 
-const scanOptionsInput = z.object({ englishAttributes: z.boolean().default(true), mediaType: z.enum(sourceMediaTypes).optional() });
+const scanOptionsInput = z.object({ englishAttributes: z.boolean().default(true), mediaType: z.enum(sourceMediaTypes).optional(), refactorFilenames: z.boolean().default(false), confirmFilenameChanges: z.boolean().default(false) });
 app.post("/api/sources/scan", async (request, reply) => {
   const scanOptions = scanOptionsInput.parse(request.body ?? {});
+  if (scanOptions.refactorFilenames && !scanOptions.confirmFilenameChanges) return reply.code(400).send({ message: "Confirm filename changes before running filename refactoring." });
   const sources = database.prepare("SELECT * FROM sources WHERE enabled = 1 AND (? IS NULL OR media_type = ?) ORDER BY id")
     .all(scanOptions.mediaType ?? null, scanOptions.mediaType ?? null) as unknown as SourceRow[];
   if (sources.some((source) => isSourceConverting(source.id))) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
@@ -202,16 +205,28 @@ app.post("/api/sources/scan", async (request, reply) => {
 
 app.post("/api/sources/:id/scan", async (request, reply) => {
   const scanOptions = scanOptionsInput.parse(request.body ?? {});
+  if (scanOptions.refactorFilenames && !scanOptions.confirmFilenameChanges) return reply.code(400).send({ message: "Confirm filename changes before running filename refactoring." });
   const { id } = sourceIdInput.parse(request.params);
   const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
   if (!source) return reply.code(404).send({ message: "Library source not found." });
   if (!source.enabled) return reply.code(409).send({ message: "Enable this source before scanning." });
+  if (scanOptions.refactorFilenames && !source.filename_refactoring) return reply.code(409).send({ message: "Enable filename refactoring for this source first." });
   if (isSourceConverting(id)) return reply.code(409).send({ message: "Wait for video conversion to finish before rescanning." });
   void scanSource(source.id, source.root_path, { generateThumbnails: true, ...scanOptions }).catch((error) => app.log.error(error, "Source scan failed"));
   return reply.code(202).send({ status: "scanning" });
 });
 
 app.post("/api/sources/scan/cancel", async () => ({ count: await cancelAllSourceScans() }));
+
+app.patch("/api/sources/:id/filename-refactoring", async (request, reply) => {
+  const { id } = sourceIdInput.parse(request.params);
+  const { enabled } = z.object({ enabled: z.boolean() }).parse(request.body);
+  const source = database.prepare("SELECT * FROM sources WHERE id = ?").get(id) as SourceRow | undefined;
+  if (!source) return reply.code(404).send({ message: "Library source not found." });
+  if (source.status === "scanning" || isSourceConverting(id)) return reply.code(409).send({ message: "Wait for this source's tasks to finish before changing filename refactoring." });
+  database.prepare("UPDATE sources SET filename_refactoring = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(enabled ? 1 : 0, id);
+  return { enabled };
+});
 
 app.post("/api/sources/:id/scan/cancel", async (request, reply) => {
   const { id } = sourceIdInput.parse(request.params);

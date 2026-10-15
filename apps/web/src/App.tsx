@@ -8,8 +8,10 @@ import {
   type SourceAttributeOptions,
 } from "./SourceAttributesDialog";
 import { SourceConversion } from "./SourceConversion";
+import { FilenameRefactoringDialog } from "./FilenameRefactoringDialog";
 import { SourcesBrowser } from "./SourcesBrowser";
 import { AttributeBadge, AttributeBrowseProvider } from "./AttributeBadge";
+import { PersonDirectoryContext } from "./PersonProfile";
 import { ManagementDrawer, type ManagementTab } from "./ManagementDrawer";
 import { BackgroundStatus } from "./BackgroundStatus";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
@@ -71,6 +73,8 @@ import { ThemeToggle } from "./DesktopTitleBar";
 import { MediaViewer } from "./MediaViewer";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
+import { useUiState } from "./ui-state";
+import { useLastPlayed } from "./last-played";
 import { HelpView } from "./HelpView";
 import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
 import {
@@ -81,6 +85,7 @@ import {
   type MediaType,
   type Person,
   type SeriesViewerContext,
+  type SeriesDetail,
   type Tag,
 } from "./media";
 
@@ -88,6 +93,7 @@ type SourceStatus = "idle" | "scanning" | "ready" | "error";
 
 interface LibrarySource {
   enabled?: number;
+  filename_refactoring?: number;
   id: number;
   name: string;
   root_path: string;
@@ -381,6 +387,7 @@ function SourceCard({
 }) {
   const [converting, setConverting] = useState(false);
   const [attributesOpen, setAttributesOpen] = useState(false);
+  const [confirmRefactoring, setConfirmRefactoring] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [actionError, setActionError] = useState("");
@@ -412,14 +419,16 @@ function SourceCard({
     }
   };
 
-  const rescan = async (englishAttributes = true) => {
+  const rescan = async (englishAttributes = true, refactorFilenames = false, confirmed = false) => {
+    if (refactorFilenames && !confirmed) { setConfirmRefactoring(true); return; }
+    setConfirmRefactoring(false);
     setWorking(true);
     setMenuOpen(false);
     setActionError("");
     try {
       await api(`/api/sources/${source.id}/scan`, {
         method: "POST",
-        body: JSON.stringify({ englishAttributes }),
+        body: JSON.stringify({ englishAttributes, refactorFilenames, confirmFilenameChanges: confirmed }),
       });
       onChanged();
     } catch (requestError) {
@@ -629,6 +638,7 @@ function SourceCard({
             enabled && source.path_available && source.status !== "scanning"
           }
           scanBusy={working}
+          filenameRefactoring={Boolean(source.filename_refactoring)}
           expanded={expanded}
           onScan={rescan}
           onExpand={onToggle}
@@ -672,6 +682,18 @@ function SourceCard({
             <option value="pictures">Pictures</option>
           </Select>
         </label>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={Boolean(source.filename_refactoring)} disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              setWorking(true); setActionError("");
+              void api(`/api/sources/${source.id}/filename-refactoring`, { method: "PATCH", body: JSON.stringify({ enabled: event.target.checked }) })
+                .then(onChanged)
+                .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change filename refactoring."))
+                .finally(() => setWorking(false));
+            }} />
+          Enable filename refactoring
+        </label>
+        <p className="attribute-help">Use “Scan + refactor filenames” to rename files using assigned casts and tags. Each run asks for confirmation.</p>
         <div className="source-common-attributes">
           <div className="attribute-badges">
             {(source.tags ?? []).map((tag) => (
@@ -707,6 +729,7 @@ function SourceCard({
           onSaved={onChanged}
         />
       )}
+      {confirmRefactoring && <FilenameRefactoringDialog sourceNames={[source.name]} onClose={() => setConfirmRefactoring(false)} onConfirm={() => void rescan(true, true, true)} />}
       <footer hidden={!expanded && source.status !== "scanning"}>
         <span>
           {source.status === "scanning"
@@ -930,11 +953,11 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showAddSource, setShowAddSource] = useState(false);
-  const [managementOpen, setManagementOpen] = useState(false);
-  const [managementMinimized, setManagementMinimized] = useState(false);
-  const [managementExpanded, setManagementExpanded] = useState(false);
-  const [managementTab, setManagementTab] = useState<ManagementTab>("tags");
-  const [managementVisited, setManagementVisited] = useState<ManagementTab[]>(
+  const [managementOpen, setManagementOpen] = useUiState("vaultly.ui.managementOpen", false);
+  const [managementMinimized, setManagementMinimized] = useUiState("vaultly.ui.managementMinimized", false);
+  const [managementExpanded, setManagementExpanded] = useUiState("vaultly.ui.managementExpanded", false);
+  const [managementTab, setManagementTab] = useUiState<ManagementTab>("vaultly.ui.managementTab", "tags");
+  const [managementVisited, setManagementVisited] = useUiState<ManagementTab[]>("vaultly.ui.managementVisited",
     [],
   );
   const [attributeRevision, setAttributeRevision] = useState(0);
@@ -967,7 +990,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     "selectedItemId",
     null,
   );
-  const [temporaryPlaylist, setTemporaryPlaylist] = useState<MediaItem[]>([]);
+  const [temporaryPlaylist, setTemporaryPlaylist] = useUiState<MediaItem[]>("vaultly.ui.playlist", []);
+  const lastPlayed = useLastPlayed();
   const [floatingSession, setFloatingSession] = useState<{
     id: number;
     series: SeriesViewerContext | null;
@@ -1329,13 +1353,18 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         gallery: viewerGalleryContext,
       });
   };
-  const rescanAll = async (englishAttributes = true) => {
+  const [refactorAllFilenames, setRefactorAllFilenames] = useState(false);
+  const [confirmAllRefactoring, setConfirmAllRefactoring] = useState(false);
+  const refactoringSources = sources.filter((source) => source.enabled !== 0 && source.filename_refactoring && (!rescanMediaType || source.media_type === rescanMediaType));
+  const rescanAll = async (englishAttributes = true, confirmed = false) => {
+    if (refactorAllFilenames && refactoringSources.length && !confirmed) { setConfirmAllRefactoring(true); return; }
+    setConfirmAllRefactoring(false);
     setRescanningAll(true);
     setError("");
     try {
       await api("/api/sources/scan", {
         method: "POST",
-        body: JSON.stringify({ englishAttributes, ...(rescanMediaType && { mediaType: rescanMediaType }) }),
+        body: JSON.stringify({ englishAttributes, refactorFilenames: refactorAllFilenames && refactoringSources.length > 0, confirmFilenameChanges: confirmed, ...(rescanMediaType && { mediaType: rescanMediaType }) }),
       });
       await loadSources(true);
     } catch (requestError) {
@@ -1420,6 +1449,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               <option value="ebooks">E-books / documents only</option>
               <option value="pictures">Pictures only</option>
               <option value="mixed">Legacy mixed media only</option>
+            </Select>
+            <Select aria-label="Scan options" value={refactorAllFilenames ? "refactor" : "scan"} onChange={(event) => setRefactorAllFilenames(event.target.value === "refactor")} disabled={rescanningAll}>
+              <option value="scan">Scan</option>
+              <option value="refactor" disabled={!refactoringSources.length}>Scan + refactor enabled sources</option>
             </Select>
             <button
               className="secondary-button"
@@ -1517,6 +1550,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         </section>
       )}
 
+      {confirmAllRefactoring && <FilenameRefactoringDialog sourceNames={refactoringSources.map((source) => source.name)} onClose={() => setConfirmAllRefactoring(false)} onConfirm={() => void rescanAll(true, true)} />}
       {showAddSource && (
         <AddSourceDialog
           {...attributeOptions}
@@ -1536,6 +1570,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         open: openAttributeManager,
         isOpen: managementOpen && !managementMinimized,
       }}>
+      <PersonDirectoryContext.Provider value={people}>
       <AttributeBrowseProvider>
         <div className="app-shell">
           {initializing && <div className="app-startup-overlay" role="status" aria-live="polite"><LoaderCircle className="spin" size={32} /><strong>Loading your library…</strong><span>Reading sources and metadata</span></div>}
@@ -1641,6 +1676,19 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 />
               </div>
               <div className="topbar-actions">
+                {lastPlayed && <button className="playlist-launch" type="button" title={[lastPlayed.seriesTitle, lastPlayed.title].filter(Boolean).join(" · ")} onClick={() => {
+                  void (async () => {
+                    try {
+                      await api(`/api/items/${lastPlayed.itemId}`);
+                      let context: SeriesViewerContext | null = null;
+                      if (lastPlayed.seriesId !== undefined) {
+                        const series = await api<SeriesDetail>(`/api/series/${lastPlayed.seriesId}`).catch(() => null);
+                        if (series?.items.some((item) => item.id === lastPlayed.itemId)) context = { seriesId: series.id, seriesTitle: series.title, items: series.items.map(({ id, title }) => ({ id, title })) };
+                      }
+                      openItem(lastPlayed.itemId, context);
+                    } catch (reason) { setError(reason instanceof Error ? reason.message : "The last played video is unavailable."); }
+                  })();
+                }}><Clapperboard size={17} /> Continue watching</button>}
                 <ThemeToggle />
                 <VaultProfiles initial={profiles} />
                 {temporaryPlaylist.length > 0 && (
@@ -1735,6 +1783,11 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                   onCategoryCreated={createCategory}
                   onPersonCreated={createPerson}
                   onChanged={refreshMedia}
+                  onDeleted={(ids) => {
+                    setTemporaryPlaylist((items) => items.filter((item) => !ids.includes(item.id)));
+                    setFloatingSession((session) => session && ids.includes(session.id) ? null : session);
+                    void loadSources(true);
+                  }}
                   sources={sources
                     .filter(
                       (source) => source.enabled !== 0 && source.path_available,
@@ -1846,6 +1899,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
           />
         </div>
       </AttributeBrowseProvider>
+      </PersonDirectoryContext.Provider>
     </AttributeManagerContext.Provider>
   );
 }

@@ -1,5 +1,6 @@
 import { Select } from "./Select";
-import { LoaderCircle, X } from "lucide-react";
+import { LoaderCircle, Trash2, X } from "lucide-react";
+import { DeleteMediaDialog } from "./DeleteMediaDialog";
 import { useState } from "react";
 import { TagCombobox } from "./TagCombobox";
 import { api, type Category, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
@@ -19,13 +20,15 @@ interface BulkActionDialogProps {
   onSeriesCreated: (name: string) => Promise<SeriesSummary>;
   onClose: () => void;
   onDone: () => void;
+  onDeleted: (ids: number[]) => void;
 }
 
 const labels: Record<BulkField, string> = {
   tags: "Tags", categories: "Categories", series: "Series & sets", people: "Cast & artists",
 };
 
-export function BulkActionDialog({ itemIds, mediaType, tags, categories, people, series, onTagCreated, onCategoryCreated, onPersonCreated, onSeriesCreated, onClose, onDone }: BulkActionDialogProps) {
+export function BulkActionDialog({ itemIds, mediaType, tags, categories, people, series, onTagCreated, onCategoryCreated, onPersonCreated, onSeriesCreated, onClose, onDone, onDeleted }: BulkActionDialogProps) {
+  const [deleting, setDeleting] = useState(false);
   const [field, setField] = useState<BulkField>("tags");
   const [mode, setMode] = useState<"add" | "remove">("add");
   const [valueIds, setValueIds] = useState<number[]>([]);
@@ -51,6 +54,8 @@ export function BulkActionDialog({ itemIds, mediaType, tags, categories, people,
     } finally { setBusy(false); }
   };
 
+  if (deleting) return <DeleteMediaDialog itemIds={itemIds} onDeleted={onDeleted} onClose={onClose} />;
+
   return <div className="dialog-backdrop" role="presentation" onMouseDown={onClose}>
     <section className="dialog bulk-dialog" role="dialog" aria-modal="true" aria-label="Bulk edit selected media" onMouseDown={(event) => event.stopPropagation()}>
       <button className="icon-button dialog-close" type="button" onClick={onClose} aria-label="Close"><X size={19} /></button>
@@ -63,6 +68,7 @@ export function BulkActionDialog({ itemIds, mediaType, tags, categories, people,
       <TagCombobox attributeKind={field === "tags" ? "tag" : field === "categories" ? "category" : field === "people" ? mediaType === "video" ? "cast" : "artist" : "series"} label={`Choose ${fieldLabel.toLowerCase()}`} tags={options} selectedIds={valueIds} onChange={setValueIds} onCreate={onCreate} disabled={busy} placeholder={`Search ${fieldLabel.toLowerCase()}`} />
       {field === "people" && <p className="attribute-help">People are credited as Cast on videos and Artists on comics and stories.</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
+      <button className="danger-button" type="button" disabled={busy || !itemIds.length} onClick={() => setDeleting(true)}><Trash2 size={17} /> Delete selected media permanently…</button>
       <div className="dialog-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="button" onClick={() => void apply()} disabled={busy || !valueIds.length}>{busy ? <LoaderCircle className="spin" size={17} /> : null}{mode === "add" ? "Add" : "Remove"} {fieldLabel.toLowerCase()}</button></div>
     </section>
   </div>;

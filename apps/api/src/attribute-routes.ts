@@ -66,10 +66,35 @@ export function withAttributePatterns<T extends { id: number }>(kind: keyof type
 }
 
 export async function registerAttributeRoutes(app: FastifyInstance) {
+  app.get("/api/attributes/filter-options", async (request) => {
+    const { type } = z.object({ type: z.enum(["comic", "video", "story"]).optional() }).parse(request.query);
+    const typeClause = type ? "AND m.media_type = ?" : "";
+    const values = type ? [type] : [];
+    const credited = (kind: "tags" | "categories", column: "tag_id" | "category_id") => withAttributePatterns(kind, database.prepare(`
+      SELECT a.id, a.name, COUNT(DISTINCT m.id) AS item_count
+      FROM ${kind} a JOIN effective_item_${kind} credit ON credit.${column} = a.id
+      JOIN media_items m ON m.id = credit.item_id AND m.available = 1 ${typeClause}
+      GROUP BY a.id ORDER BY a.name COLLATE NOCASE
+    `).all(...values) as Array<{ id: number; name: string; item_count: number }>);
+    const people = withAttributePatterns("people", database.prepare(`
+      SELECT p.*,
+        COUNT(DISTINCT CASE WHEN credit.role = 'cast' THEN m.id END) AS cast_count,
+        COUNT(DISTINCT CASE WHEN credit.role = 'artist' THEN m.id END) AS artist_count
+      FROM people p JOIN effective_item_people credit ON credit.person_id = p.id
+      JOIN media_items m ON m.id = credit.item_id AND m.available = 1 ${typeClause}
+      GROUP BY p.id ORDER BY p.name COLLATE NOCASE
+    `).all(...values) as Array<{ id: number; name: string; cast_count: number; artist_count: number }>);
+    return { categories: credited("categories", "category_id"), tags: credited("tags", "tag_id"), people };
+  });
+
   app.post("/api/attributes/:kind/import", { bodyLimit: 20 * 1024 * 1024 }, async (request) => {
     const { kind } = z.object({ kind: z.enum(["tags", "categories", "people"]) }).parse(request.params);
     const { existingOnly } = z.object({ existingOnly: z.enum(["true", "false"]).default("false").transform((value) => value === "true") }).parse(request.query);
-    const httpUrl = z.string().url().max(4096).refine((value) => /^https?:\/\//i.test(value), "Use an HTTP or HTTPS URL.");
+    const httpUrl = z.string().trim().refine((value) => /^https?:\/\//i.test(value), "Use an HTTP or HTTPS URL.");
+    const avatarUrl = z.union([httpUrl, z.string().trim().regex(
+      /^data:image\/(?:png|jpeg|gif|webp);base64,(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/i,
+      "Use an image link or a base64 PNG, JPEG, GIF, or WebP data URL.",
+    ).refine((value) => !value.endsWith(","), "Image data must not be empty.")]);
     const record = z.object({
       name: z.string().trim().min(1).max(kind === "people" ? 100 : 80),
       patterns: patternsInput.shape.patterns.optional(),
@@ -77,19 +102,37 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
         gender: z.string().trim().max(100).nullable().optional(),
         country_code: z.string().trim().max(10).nullable().optional(),
         country: z.string().trim().max(100).nullable().optional(),
-        avatar_url: httpUrl.nullable().optional(),
-        source: z.string().trim().max(4096).nullable().optional(),
+        avatar_url: avatarUrl.nullable().optional(),
+        source: z.string().trim().nullable().optional(),
         profile_url: httpUrl.nullable().optional(),
       } : {}),
     }).strict();
-    const records = z.array(record).min(1).max(50000);
+    let invalidRecords = 0;
+    const peopleRecord = z.unknown().transform((value) => {
+      if (typeof value === "string") value = { name: value };
+      if (!value || typeof value !== "object" || Array.isArray(value)) { invalidRecords++; return null; }
+      const raw = value as Record<string, unknown>;
+      const clean: Record<string, unknown> = {};
+      for (const key of Object.keys(record.shape)) {
+        if (!(key in raw)) continue;
+        const field = record.shape[key as keyof typeof record.shape];
+        const parsed = field!.safeParse(raw[key]);
+        if (parsed.success) clean[key] = parsed.data;
+        else if (key === "name") { invalidRecords++; return null; }
+        else if (raw[key] === null || raw[key] === "") clean[key] = key === "patterns" ? [] : null;
+      }
+      const parsed = record.safeParse(clean);
+      if (!parsed.success) { invalidRecords++; return null; }
+      return parsed.data;
+    });
+    const records = z.array(kind === "people" ? peopleRecord : record).min(1).max(50000);
     const input = z.union([records, z.object({
-      records, scraped_at: z.string().datetime().optional(), total: z.number().int().nonnegative().optional(),
-    }).strict()]).parse(request.body);
-    const entries = Array.isArray(input) ? input : input.records;
-    const scrapedAt = Array.isArray(input) ? undefined : input.scraped_at;
+      records, scraped_at: z.string().datetime().nullish(), total: z.number().int().nonnegative().nullish(),
+    })]).parse(request.body);
+    const entries = (Array.isArray(input) ? input : input.records).filter((entry) => entry !== null);
+    const scrapedAt = Array.isArray(input) ? undefined : input.scraped_at ?? undefined;
     const { table, column } = definitions[kind];
-    let created = 0, updated = 0, indexed = 0, skipped = 0;
+    let created = 0, updated = 0, indexed = 0, skipped = invalidRecords;
     database.exec("BEGIN IMMEDIATE");
     try {
       const ids = new Set<number>();
@@ -128,7 +171,7 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
       }
       if (!ids.size) {
         database.exec("COMMIT");
-        return { total: entries.length, created, updated, indexed, skipped };
+        return { total: entries.length + invalidRecords, created, updated, indexed, skipped };
       }
       const importedEntries: Array<{ id: number; name: string }> = [];
       const importedIds = [...ids];
@@ -158,7 +201,7 @@ export async function registerAttributeRoutes(app: FastifyInstance) {
       }
       database.exec("COMMIT");
     } catch (error) { database.exec("ROLLBACK"); throw error; }
-    return { total: entries.length, created, updated, indexed, ...(skipped ? { skipped } : {}) };
+    return { total: entries.length + invalidRecords, created, updated, indexed, ...(skipped ? { skipped } : {}) };
   });
   app.get("/api/attributes/:kind/:id/patterns", async (request, reply) => {
     const { kind, id } = attributeParams.parse(request.params);

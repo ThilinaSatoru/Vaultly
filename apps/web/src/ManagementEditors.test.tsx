@@ -5,6 +5,7 @@ const hooks = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useMemo: (compute: () => unknown) => compute(),
+  useEffect: vi.fn(),
   useState: (initial: unknown) => {
     const index = hooks.cursor++;
     if (!(index in hooks.states)) hooks.states[index] = typeof initial === "function" ? initial() : initial;

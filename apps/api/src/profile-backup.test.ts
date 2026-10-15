@@ -36,11 +36,15 @@ test("video quality survives backups and older backups restore without resolutio
     VALUES (?, 'video', 'Quality', 'quality.mp4', '.mp4', 'quality.mp4', 12, 34, 1, 1920, 1080, '12:34')`).run(sourceId);
   try {
     const backup = (await app.inject("/api/backup")).json();
+    expect(backup.data.sources[0].filename_refactoring).toBe(0);
+    backup.data.sources[0].filename_refactoring = 1;
     expect(backup.data.sources[0].enabled).toBe(0);
     expect(backup.data.media_items[0]).toMatchObject({ video_width: 1920, video_height: 1080, video_metadata_signature: "12:34" });
     expect((await app.inject({ method: "POST", url: "/api/backup/restore", payload: backup })).statusCode).toBe(200);
     expect(database.prepare("SELECT video_height FROM media_items WHERE source_id = ?").get(sourceId)).toMatchObject({ video_height: 1080 });
     expect(database.prepare("SELECT enabled FROM sources WHERE id = ?").get(sourceId)).toMatchObject({ enabled: 0 });
+    expect(database.prepare("SELECT filename_refactoring FROM sources WHERE id = ?").get(sourceId)).toMatchObject({ filename_refactoring: 1 });
+    delete backup.data.sources[0].filename_refactoring;
     delete backup.data.sources[0].enabled;
     for (const item of backup.data.media_items) {
       delete item.video_width;
@@ -51,6 +55,7 @@ test("video quality survives backups and older backups restore without resolutio
     expect(database.prepare("SELECT video_height, video_metadata_signature FROM media_items WHERE source_id = ?").get(sourceId))
       .toMatchObject({ video_height: null, video_metadata_signature: null });
     expect(database.prepare("SELECT enabled FROM sources WHERE id = ?").get(sourceId)).toMatchObject({ enabled: 1 });
+    expect(database.prepare("SELECT filename_refactoring FROM sources WHERE id = ?").get(sourceId)).toMatchObject({ filename_refactoring: 0 });
   } finally {
     database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
     await app.close();
@@ -114,13 +119,33 @@ test("profile images are stored locally, replaced, archived, and restored with p
 
     const fetchImage = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new Uint8Array(image)));
     try {
-      expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "https://example.com/photo.png" } })).statusCode).toBe(400);
-      expect(fetchImage).not.toHaveBeenCalled();
+      expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "https://example.com/photo.png" } })).statusCode).toBe(200);
+      expect(fetchImage).toHaveBeenCalledOnce();
       expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "file:///photo.png" } })).statusCode).toBe(400);
       expect((await app.inject({ method: "PUT", url: endpoint, payload: { data: Buffer.from("<svg/>").toString("base64") } })).statusCode).toBe(400);
-      expect(readdirSync(profileImageDirectory)).toHaveLength(0);
+      expect(readdirSync(profileImageDirectory)).toHaveLength(1);
       await app.inject({ method: "DELETE", url: `/api/people/${person.id}` });
       expect(readdirSync(profileImageDirectory)).toHaveLength(0);
     } finally { fetchImage.mockRestore(); }
   } finally { await app.close(); }
+});
+
+test("image links download and save locally; failed downloads preserve the image", async () => {
+  const app = Fastify();
+  await app.register(registerPeopleRoutes);
+  const id = Number(database.prepare("INSERT INTO people(name) VALUES ('Download test')").run().lastInsertRowid);
+  const fetchMock = vi.spyOn(globalThis, "fetch");
+  const endpoint = `/api/people/${id}/image`;
+  try {
+    const image = createCanvas(4, 4).toBuffer("image/png");
+    fetchMock.mockResolvedValueOnce(new Response(new Uint8Array(image)));
+    const result = await app.inject({ method: "PUT", url: endpoint, payload: { url: "https://example.com/photo.png" } });
+    expect(result.statusCode, result.body).toBe(200);
+    expect((await app.inject(endpoint)).statusCode).toBe(200);
+    const filename = result.json().profile_image;
+    fetchMock.mockResolvedValueOnce(new Response("not an image"));
+    expect((await app.inject({ method: "PUT", url: endpoint, payload: { url: "https://example.com/bad" } })).statusCode).toBe(400);
+    expect(database.prepare("SELECT profile_image FROM people WHERE id = ?").get(id)).toMatchObject({ profile_image: filename });
+    await app.inject({ method: "DELETE", url: endpoint });
+  } finally { fetchMock.mockRestore(); database.prepare("DELETE FROM people WHERE id = ?").run(id); await app.close(); }
 });
