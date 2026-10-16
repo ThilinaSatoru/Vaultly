@@ -1,3 +1,4 @@
+import { populateYoutubeVideos, youtubeBackupColumns } from "./youtube-schema.js";
 import type { FastifyInstance } from "fastify";
 import { getConversionActivity } from "./source-conversion.js";
 import { z } from "zod";
@@ -19,14 +20,16 @@ const tableOrder = [
   "series_categories", "series_people", "circle_series",
   "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories",
   ...Object.keys(musicBackupColumns) as Array<keyof typeof musicBackupColumns>,
+  ...Object.keys(youtubeBackupColumns) as Array<keyof typeof youtubeBackupColumns>,
 ] as const;
 
-const optionalTables = new Set<string>(["series_people", "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories", ...Object.keys(musicBackupColumns)]);
+const optionalTables = new Set<string>(["series_people", "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories", ...Object.keys(musicBackupColumns), ...Object.keys(youtubeBackupColumns)]);
 
 const deleteOrder = [...tableOrder].reverse();
 
 const columns: Record<(typeof tableOrder)[number], string[]> = {
   ...Object.fromEntries(Object.entries(musicBackupColumns).map(([table, cols]) => [table, [...cols]])) as Record<keyof typeof musicBackupColumns, string[]>,
+  ...Object.fromEntries(Object.entries(youtubeBackupColumns).map(([table, cols]) => [table, [...cols]])) as Record<keyof typeof youtubeBackupColumns, string[]>,
   sources: ["id", "media_type", "name", "root_path", "normalized_path", "status", "connected", "enabled", "filename_refactoring", "last_error", "last_scanned_at", "created_at", "updated_at"],
   media_items: ["id", "source_id", "media_type", "title", "filename", "file_extension", "relative_path", "size_bytes", "modified_at_ms", "file_count", "favorite", "duration_seconds", "video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature", "indexed", "available", "created_at", "updated_at"],
   categories: ["id", "name", "created_at"],
@@ -141,6 +144,7 @@ export async function registerBackupRoutes(app: FastifyInstance) {
           insert.run(...tableColumns.map((column) => importValue(table, column, row[column]) as never));
         }
       }
+      populateYoutubeVideos(database);
       // Treat restored paths as unverified until the source health check runs on the new host.
       database.exec("UPDATE sources SET connected = 0");
       database.exec("UPDATE media_items SET available = 0");

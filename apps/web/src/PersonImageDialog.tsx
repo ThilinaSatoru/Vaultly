@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { vaultUrl } from "./vault-session";
 import { useState, type ChangeEvent } from "react";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
@@ -43,7 +44,7 @@ export function PersonImageDialog({ person, onClose, onSaved }: { person: Person
       event.preventDefault(); setBusy(true); setError("");
       void save({ url: url.trim() }).catch((error: unknown) => setError(error instanceof Error ? error.message : "Could not download image.")).finally(() => setBusy(false));
     }}>
-      <label>Image link<input type="url" required value={url} placeholder="https://example.com/photo.jpg" disabled={busy} onChange={(event) => setUrl(event.target.value)} /></label>
+      <label>Image link<ClearableInput type="url" required value={url} placeholder="https://example.com/photo.jpg" disabled={busy} onChange={(event) => setUrl(event.target.value)} /></label>
       <button className="secondary-button" type="submit" disabled={busy || !url.trim()}>Download image</button>
     </form>
     {error && <p className="page-error" role="alert">{error}</p>}

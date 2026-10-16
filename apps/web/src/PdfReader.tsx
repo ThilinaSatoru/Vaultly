@@ -1,8 +1,10 @@
+import { useReaderPages } from "./useReaderPages";
+import { ReaderFullscreen } from "./ReaderFullscreen";
 import { Select } from "./Select";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
-import { ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ChevronsLeft, ChevronLeft, ChevronRight, LoaderCircle, Minus, Plus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions, type PDFDocumentProxy, type RenderTask } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
@@ -40,7 +42,10 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   const [error, setError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useContinuousReaderScroll(scrollRef, Boolean(pdfDocument), `${itemId}:${pageNumber}:${fitMode}`);
+  const readerRef = useRef<HTMLDivElement>(null);
+  const updatePage = useCallback((page: number) => setPageNumber(page + 1), []);
+  const goToPage = useReaderPages(scrollRef, "[data-pdf-page]", continuous, pageNumber - 1, pdfDocument?.numPages ?? 0, updatePage, `${itemId}:${fitMode}:${zoomPercent}:${containerSize.width}`);
+  useContinuousReaderScroll(scrollRef, Boolean(pdfDocument), `${itemId}:${continuous ? "continuous" : pageNumber}:${fitMode}`);
 
   useEffect(() => { vaultStorage.setItem("vaultly.pdf.fit", fitMode); }, [fitMode]);
   useEffect(() => { vaultStorage.setItem("vaultly.pdf.zoom", String(zoomPercent)); }, [zoomPercent]);
@@ -84,13 +89,6 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
     });
     return () => { active = false; void task.destroy(); };
   }, [itemId]);
-
-  useLayoutEffect(() => {
-    if (scrollRef.current) {
-      const destination = continuous ? scrollRef.current.querySelector<HTMLElement>(`[data-pdf-page="${pageNumber}"]`) : null;
-      scrollRef.current.scrollTo({ top: destination ? destination.offsetTop - scrollRef.current.offsetTop : 0, left: 0, behavior: "instant" });
-    }
-  }, [itemId, pageNumber, fitMode, continuous]);
 
   useEffect(() => {
     if (continuous) { setRendering(false); return; }
@@ -153,15 +151,16 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
       const targetElement = event.target instanceof HTMLElement ? event.target : null;
       if (targetElement?.closest(".viewer") && targetElement.closest(".viewer") !== scrollRef.current?.closest(".viewer")) return;
       if (targetElement?.closest("input, textarea, select, [contenteditable], .dialog-backdrop, .management-drawer, .management-dock")) return;
+      if (event.key === "Home" && !event.altKey && !event.shiftKey) { event.preventDefault(); goToPage(0); return; }
       const activatingControl = Boolean(targetElement?.closest("button, a"));
       if (matchesShortcut(event, "reader.nextPage")) {
         event.preventDefault();
-        if (pageNumber < pdfDocument.numPages) setPageNumber(pageNumber + 1);
+        if (pageNumber < pdfDocument.numPages) goToPage(pageNumber);
         else if (onNextItem && readBooleanPreference("vaultly.reader.continuous", true)) onNextItem();
       }
       if (matchesShortcut(event, "reader.previousPage")) {
         event.preventDefault();
-        if (pageNumber > 1) setPageNumber(pageNumber - 1);
+        if (pageNumber > 1) goToPage(pageNumber - 2);
         else if (onPreviousItem && readBooleanPreference("vaultly.reader.continuous", true)) onPreviousItem();
       }
       if (matchesShortcut(event, "reader.zoomIn") && !activatingControl) {
@@ -176,7 +175,7 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [pdfDocument, pageNumber, onPreviousItem, onNextItem]);
+  }, [pdfDocument, pageNumber, onPreviousItem, onNextItem, goToPage]);
 
   const changeZoom = (delta: number) => {
     setZoomPercent((value) => Math.max(25, Math.min(400, value + delta)));
@@ -184,22 +183,24 @@ export function PdfReader({ itemId, onPreviousItem, onNextItem }: { itemId: numb
   };
 
   return (
-    <div className={`pdf-reader page-tone-${appearance}`}>
+    <div ref={readerRef} className={`pdf-reader page-tone-${appearance}`}>
       <div className="pdf-toolbar">
         <ShortcutHelp kind="pdf" />
+        <ReaderFullscreen target={readerRef} />
+        <button type="button" disabled={!pdfDocument} aria-label="First page / scroll to top" title="First page / scroll to top (Home)" onClick={() => goToPage(0)}><ChevronsLeft size={18} /></button>
         <ReaderAppearance value={appearance} onChange={setAppearance} />
         <label><input type="checkbox" checked={continuous} onChange={(event) => { setContinuous(event.target.checked); setFitMode("width"); }} /> Continuous view</label>
-        <ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(pdfDocument) && !rendering && (continuous || fitMode !== "page")} contentKey={`${itemId}:${continuous}:${pageNumber}`} />
-        <button type="button" onClick={() => pageNumber > 1 ? setPageNumber(pageNumber - 1) : onPreviousItem?.()} disabled={!pdfDocument || (pageNumber <= 1 && !onPreviousItem)} aria-label="Previous page"><ChevronLeft size={18} /></button>
+        <ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(pdfDocument) && !rendering && (continuous || fitMode !== "page")} contentKey={`${itemId}:${continuous}:${continuous ? "continuous" : pageNumber}`} />
+        <button type="button" onClick={() => pageNumber > 1 ? goToPage(pageNumber - 2) : onPreviousItem?.()} disabled={!pdfDocument || (pageNumber <= 1 && !onPreviousItem)} aria-label="Previous page"><ChevronLeft size={18} /></button>
         <label className="pdf-page-control">
           <span className="visually-hidden">Page number</span>
           <input type="number" min={1} max={pdfDocument?.numPages ?? 1} value={pageNumber} onChange={(event) => {
             if (!pdfDocument || !event.target.value) return;
-            setPageNumber(Math.max(1, Math.min(pdfDocument.numPages, Number(event.target.value))));
+            goToPage(Number(event.target.value) - 1);
           }} />
           <span>/ {pdfDocument?.numPages ?? "—"}</span>
         </label>
-        <button type="button" onClick={() => pdfDocument && pageNumber < pdfDocument.numPages ? setPageNumber(pageNumber + 1) : onNextItem?.()} disabled={!pdfDocument || (pageNumber >= pdfDocument.numPages && !onNextItem)} aria-label="Next page"><ChevronRight size={18} /></button>
+        <button type="button" onClick={() => pdfDocument && pageNumber < pdfDocument.numPages ? goToPage(pageNumber) : onNextItem?.()} disabled={!pdfDocument || (pageNumber >= pdfDocument.numPages && !onNextItem)} aria-label="Next page"><ChevronRight size={18} /></button>
         <div className="pdf-toolbar-divider" />
         <Select aria-label="Page fit" value={fitMode} onChange={(event) => { setFitMode(event.target.value as FitMode); window.requestAnimationFrame(() => scrollRef.current?.focus({ preventScroll: true })); }}>
           <option value="page">Fit page</option>

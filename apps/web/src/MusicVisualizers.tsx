@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-export function MusicVisualizer({ analyser, mode, active }: { analyser: AnalyserNode | null; mode: "spectrum" | "scope"; active: boolean }) {
+export function MusicVisualizer({ analyser, mode, active, compact = false }: { analyser: AnalyserNode | null; mode: "spectrum" | "scope"; active: boolean; compact?: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const element = canvas.current;
@@ -11,6 +11,7 @@ export function MusicVisualizer({ analyser, mode, active }: { analyser: Analyser
     const waveform = new Uint8Array(analyser?.fftSize ?? 2048);
     const draw = () => {
       const width = element.clientWidth, height = element.clientHeight, ratio = window.devicePixelRatio || 1;
+      if (width <= 0 || height <= 0) return;
       if (element.width !== Math.round(width * ratio) || element.height !== Math.round(height * ratio)) { element.width = Math.round(width * ratio); element.height = Math.round(height * ratio); }
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, width, height);
@@ -49,5 +50,5 @@ export function MusicVisualizer({ analyser, mode, active }: { analyser: Analyser
     draw();
     return () => { cancelAnimationFrame(frame); observer.disconnect(); document.removeEventListener("visibilitychange", restart); };
   }, [analyser, mode, active]);
-  return <section className="music-visualizer"><header>{mode === "spectrum" ? "Spectrum analyzer" : "Oscilloscope"}<small>{active ? "LIVE" : "IDLE"}</small></header><canvas ref={canvas} role="img" aria-label={mode === "spectrum" ? "Live audio frequency spectrum" : "Live audio waveform"} /><footer>{mode === "spectrum" ? "20 Hz · · · 1 kHz · · · 20 kHz" : "Amplitude / time"}</footer></section>;
+  return <section className={`music-visualizer${compact ? " music-visualizer--compact" : ""}`}>{!compact && <header>{mode === "spectrum" ? "Spectrum analyzer" : "Oscilloscope"}<small>{active ? "LIVE" : "IDLE"}</small></header>}<canvas ref={canvas} role="img" aria-label={mode === "spectrum" ? "Live audio frequency spectrum" : "Live audio waveform"} />{!compact && <footer>{mode === "spectrum" ? "20 Hz · · · 1 kHz · · · 20 kHz" : "Amplitude / time"}</footer>}</section>;
 }

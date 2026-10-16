@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { useId, useState, type FormEvent } from "react";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { api, type MediaDetail } from "./media";
@@ -32,7 +33,7 @@ export function RenameMediaDialog({ item, onClose, onSaved }: {
   return <AttributeEditorDialog title="Rename title" onClose={onClose} busy={saving} focusReady={!saving}>
     <form onSubmit={save}>
       <label htmlFor={inputId}>Title</label>
-      <input id={inputId} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={255 - extension.length} disabled={saving || rootFolder} required />
+      <ClearableInput id={inputId} value={title} onChange={(event) => setTitle(event.target.value)} maxLength={255 - extension.length} disabled={saving || rootFolder} required />
       <p className="detail-hint">This also renames the {extension ? "file, keeping its extension" : "comic folder"}.</p>
       <p className="detail-hint">New {extension ? "file" : "folder"} name: <strong>{fileName}</strong></p>
       {rootFolder && <p className="form-error" role="alert">The library root folder cannot be renamed here. Rename the source instead.</p>}

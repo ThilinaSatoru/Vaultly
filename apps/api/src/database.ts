@@ -1,3 +1,4 @@
+import { initializeYoutubeSchema } from "./youtube-schema.js";
 import { DatabaseSync } from "node:sqlite";
 import { initializeMusicSchema } from "./music-schema.js";
 import { mkdirSync } from "node:fs";
@@ -339,6 +340,7 @@ database.exec(`
 `);
 initializeSearchIndex(database);
 initializeMusicSchema(database);
+initializeYoutubeSchema(database);
 
 database.exec("PRAGMA optimize");
 

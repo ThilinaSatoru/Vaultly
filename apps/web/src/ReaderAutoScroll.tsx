@@ -51,6 +51,7 @@ export function ReaderAutoScroll({ scrollRef, enabled = true, contentKey }: { sc
     };
     frame = requestAnimationFrame(animate);
     element.addEventListener("wheel", pause, { passive: true });
+    element.addEventListener("reader-navigate", pause);
     element.addEventListener("touchstart", pause, { passive: true });
     element.addEventListener("pointerdown", hold);
     window.addEventListener("pointerup", release);
@@ -61,6 +62,7 @@ export function ReaderAutoScroll({ scrollRef, enabled = true, contentKey }: { sc
     return () => {
       cancelAnimationFrame(frame);
       element.removeEventListener("wheel", pause);
+      element.removeEventListener("reader-navigate", pause);
       element.removeEventListener("touchstart", pause);
       element.removeEventListener("pointerdown", hold);
       window.removeEventListener("pointerup", release);

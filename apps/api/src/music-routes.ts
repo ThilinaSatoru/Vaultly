@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import { database, runtimeDirectory } from "./database.js";
 import { musicBackupColumns } from "./music-schema.js";
-import { scanMusicSource, cancelMusicScan, musicScanProgress } from "./music-scanner.js";
+import { scanMusicSource, cancelMusicScan, musicScanProgress, musicVideoExtensions } from "./music-scanner.js";
 import { runCommand } from "./background-processes.js";
 import { withMediaProcess } from "./process-resources.js";
 
@@ -21,9 +21,10 @@ const trackSelect = `SELECT ${trackColumns}, a.title AS album, s.name AS source_
   FROM music_tracks t JOIN music_sources s ON s.id=t.source_id LEFT JOIN music_albums a ON a.id=t.album_id`;
 function serialize(row: Record<string, unknown>) {
   const { attributes_json, ...track } = row;
-  return { ...track, attributes: JSON.parse(String(attributes_json)) };
+  return { ...track, is_video: musicVideoExtensions.has(path.extname(String(track.filename)).toLowerCase()), attributes: JSON.parse(String(attributes_json)) };
 }
 const queryInput = z.object({
+  ids: z.string().regex(/^\d+(?:,\d+)*$/).max(6000).optional(),
   q: z.string().max(500).default(""), artist: z.coerce.number().int().positive().optional(),
   album: z.coerce.number().int().positive().optional(), playlist: z.coerce.number().int().positive().optional(),
   attribute: z.coerce.number().int().positive().optional(), source: z.coerce.number().int().positive().optional(),
@@ -37,6 +38,10 @@ function trackQuery(input: z.infer<typeof queryInput>) {
   const add = (condition: string, value: string | number | undefined) => { if (value !== undefined && value !== "") { conditions.push(condition); values.push(value); } };
   add("EXISTS(SELECT 1 FROM music_track_artists ar WHERE ar.track_id=t.id AND ar.artist_id=?)", input.artist);
   add("t.album_id=?", input.album);
+  if (input.ids) {
+    const ids = input.ids.split(",").map(Number);
+    conditions.push(`t.id IN (${ids.map(() => "?").join(",")})`); values.push(...ids);
+  }
   add("t.source_id=?", input.source);
   add("EXISTS(SELECT 1 FROM music_playlist_tracks p WHERE p.track_id=t.id AND p.playlist_id=?)", input.playlist);
   add("EXISTS(SELECT 1 FROM music_track_attributes ta WHERE ta.track_id=t.id AND ta.attribute_id=?)", input.attribute);
@@ -80,6 +85,11 @@ export async function registerMusicRoutes(app: FastifyInstance) {
     const origin = request.headers.origin;
     if (request.method !== "GET" && origin && !["http://127.0.0.1:5173", "http://localhost:5173", `http://${request.headers.host}`].includes(origin))
       return reply.code(403).send({ message: "Manage music from Vaultly." });
+  });
+  app.get("/api/music/sources", async () => {
+    const sources = database.prepare(`SELECT s.*, (SELECT COUNT(*) FROM music_tracks t WHERE t.source_id=s.id AND t.available=1) AS track_count FROM music_sources s ORDER BY s.name`).all();
+    return Promise.all(sources.map(async (source) => ({ ...source, media_type: "music", progress: musicScanProgress(Number(source.id)),
+      path_available: Boolean((await stat(String(source.root_path)).catch(() => null))?.isDirectory()) })));
   });
   app.get("/api/music/library", async () => ({
     sources: (database.prepare(`SELECT s.*, (SELECT COUNT(*) FROM music_tracks t WHERE t.source_id=s.id AND t.available=1) AS track_count FROM music_sources s ORDER BY s.name`).all() as Array<{ id: number }>).map((s) => ({ ...s, progress: musicScanProgress(s.id) })),
@@ -146,7 +156,8 @@ export async function registerMusicRoutes(app: FastifyInstance) {
     if (compatible || [".wma", ".aiff", ".aif", ".ape", ".wv", ".alac"].includes(path.extname(filename).toLowerCase())) {
       filename = await compatibleAudio(filename, info); info = await stat(filename);
     }
-    const types: Record<string, string> = { ".mp3": "audio/mpeg", ".flac": "audio/flac", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav" };
+    const types: Record<string, string> = { ".mp3": "audio/mpeg", ".flac": "audio/flac", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+      ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".ogv": "video/ogg" };
     reply.type(types[path.extname(filename).toLowerCase()] ?? "application/octet-stream").header("Accept-Ranges", "bytes");
     if (!request.headers.range) return reply.header("Content-Length", info.size).send(createReadStream(filename));
     const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range);

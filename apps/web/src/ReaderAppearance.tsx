@@ -23,5 +23,5 @@ export function useReaderAppearance() {
   return [appearance, updateAppearance] as const;
 }
 export function ReaderAppearance({ value, onChange }: { value: PageAppearance; onChange: (value: PageAppearance) => void }) {
-  return <label className="reader-appearance"><span>Page tone</span><Select aria-label="Page appearance" title="Dim softens artwork; night inverts bright document pages" value={value} onChange={(event) => onChange(event.target.value as PageAppearance)}><option value="original">Original</option><option value="dim">Soft dim</option><option value="night">Night ink</option></Select></label>;
+  return <label className="reader-appearance"><span>Page tone</span><Select aria-label="Page appearance" title="Dim softens artwork; night darkens the reading background and preserves artwork colors" value={value} onChange={(event) => onChange(event.target.value as PageAppearance)}><option value="original">Original</option><option value="dim">Soft dim</option><option value="night">Night ink</option></Select></label>;
 }

@@ -1,5 +1,7 @@
+import { useReaderPages } from "./useReaderPages";
+import { ReaderFullscreen } from "./ReaderFullscreen";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, ExternalLink, LoaderCircle } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, ChevronsLeft, ExternalLink, LoaderCircle } from "lucide-react";
 import { api } from "./media";
 import { vaultUrl } from "./vault-session";
 import { ReaderAutoScroll } from "./ReaderAutoScroll";
@@ -41,6 +43,20 @@ export function EbookReader({ itemId, extension }: { itemId: number; extension: 
   const [error, setError] = useState("");
   const [fontSize, setFontSize] = useUiState("vaultly.ebook.fontSize", 19);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const readerRef = useRef<HTMLDivElement>(null);
+  const [chapter, setChapter] = useState(0);
+  const goToChapter = useReaderPages(scrollRef, ".ebook-chapter", true, chapter, chapters?.length ?? 0, setChapter, `${itemId}:${fontSize}`);
+  useEffect(() => {
+    const home = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.key !== "Home" || event.altKey || event.shiftKey) return;
+      if (event.target instanceof HTMLElement && event.target.closest("input, textarea, select, button, [contenteditable], [role=combobox], .dialog-backdrop")) return;
+      const viewer = event.target instanceof HTMLElement ? event.target.closest(".viewer") : null;
+      if (viewer && viewer !== readerRef.current?.closest(".viewer")) return;
+      event.preventDefault(); goToChapter(0);
+    };
+    window.addEventListener("keydown", home);
+    return () => window.removeEventListener("keydown", home);
+  }, [goToChapter]);
   const content = useMemo(() => chapters?.map((chapter, index) => <article key={index} className="ebook-chapter">{safeBlocks(chapter, itemId)}</article>), [chapters, itemId]);
   useContinuousReaderScroll(scrollRef, Boolean(chapters), itemId);
   useEffect(() => {
@@ -53,5 +69,5 @@ export function EbookReader({ itemId, extension }: { itemId: number; extension: 
     api<{ chapters: Chapter[] }>(`/api/items/${itemId}/ebook`, { signal: controller.signal }).then((book) => setChapters(book.chapters)).catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not read this book."); });
     return () => controller.abort();
   }, [itemId, extension]);
-  return <div className={`ebook-reader page-tone-${appearance}`}><div className="ebook-toolbar"><ShortcutHelp kind="ebook" /><ReaderAppearance value={appearance} onChange={setAppearance} /><ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(chapters)} contentKey={itemId} /><label>Text size <input type="range" aria-label="Book text size" min="14" max="36" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} /></label><button type="button" onClick={() => { void api(`/api/items/${itemId}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open book.")); }}><ExternalLink size={16} /> Open in desktop reader</button></div><div className="ebook-scroll" ref={scrollRef} tabIndex={0} style={{ fontSize }}>{!chapters && !error && <p><LoaderCircle className="spin" size={22} /> Opening book…</p>}{error && <p role="alert"><BookOpen size={24} /> {error}</p>}{content}</div></div>;
+  return <div ref={readerRef} className={`ebook-reader page-tone-${appearance}`}><div className="ebook-toolbar"><ShortcutHelp kind="ebook" /><ReaderFullscreen target={readerRef} /><button type="button" disabled={!chapters?.length} aria-label="First page / scroll to top" title="First page / scroll to top (Home)" onClick={() => goToChapter(0)}><ChevronsLeft size={17} /></button><button type="button" aria-label="Previous chapter" disabled={!chapter} onClick={() => goToChapter(chapter - 1)}><ChevronLeft size={17} /></button><label>Chapter <input type="number" aria-label="Chapter number" min={1} max={chapters?.length ?? 1} value={chapter + 1} onChange={(event) => { if (event.target.value) goToChapter(Number(event.target.value) - 1); }} /> / {chapters?.length ?? "—"}</label><button type="button" aria-label="Next chapter" disabled={!chapters || chapter >= chapters.length - 1} onClick={() => goToChapter(chapter + 1)}><ChevronRight size={17} /></button><ReaderAppearance value={appearance} onChange={setAppearance} /><ReaderAutoScroll scrollRef={scrollRef} enabled={Boolean(chapters)} contentKey={itemId} /><label>Text size <input type="range" aria-label="Book text size" min="14" max="36" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} /></label><button type="button" onClick={() => { void api(`/api/items/${itemId}/open-document`, { method: "POST" }).catch((reason: unknown) => setError(reason instanceof Error ? reason.message : "Could not open book.")); }}><ExternalLink size={16} /> Open in desktop reader</button></div><div className="ebook-scroll" ref={scrollRef} tabIndex={0} style={{ fontSize }}>{!chapters && !error && <p><LoaderCircle className="spin" size={22} /> Opening book…</p>}{error && <p role="alert"><BookOpen size={24} /> {error}</p>}{content}</div></div>;
 }

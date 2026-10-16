@@ -39,7 +39,7 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 
 ### Build a library that feels yours
 
-- **Sources by media type:** choose Movies, TV series, Anime, Manga, E-books, or Pictures. Scans preserve nested folders and skip unrelated media; existing mixed sources can be reclassified in Sources.
+- **Sources by media type:** choose Movies, TV series, Anime, Manga, E-books, Pictures, or Music / music videos. Scans preserve nested folders and skip unrelated media; existing mixed sources can be reclassified in Sources.
 - **Separate vault profiles:** create and switch vaults from the top bar. Each starts empty and keeps its own library, preferences, caches, and backups. The trash button deletes a profile and its database/cache while preserving source media.
 - **Tags, categories, and favourites:** describe individual items or select across pages for bulk edits.
 - **Cast & artists:** manage names, aliases, credits, and profile images in one shared directory.
@@ -57,10 +57,10 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 
 ### A separate home for music
 
-- **Music library:** add audio folders from Music → Add music folder. Music has its own sources, artists, albums, categories, tags, and custom playlists, separate from the gallery and its metadata.
+- **Music library:** add audio folders from Music → Add music folder. Music sources also appear in the shared Sources view. Music keeps its own artists, albums, categories, tags, and custom playlists. Videos inside music folders are treated as music videos.
 - **Automatic indexing:** read embedded titles, artist and album-artist credits, disc/track order, genres, technical audio properties, and embedded cover images. Genres become categories; codecs, lossless audio, mood, and language become tags. Music attribute names and aliases match during rescans using the same offline English word normalization.
 - **Browse and listen:** search all music with plain text, or search within an artist, album, playlist, or attribute. Advanced filters stay collapsed. Switch between list and card views, rate tracks with stars, sort by rating or audio properties, and reorder custom playlists.
-- **Audio workspace:** Music replaces the main sidebar with its artist, album, and playlist directory and fills the remaining window with tracks and the inspector. Hide/show or resize the main navigation, resize the live frequency spectrum and oscilloscope, and inspect detailed file information and embedded metadata. The compact top bar stays visible while scrolling.
+- **Audio workspace:** Music replaces the main sidebar with its artist, album, and playlist directory and fills the remaining window with tracks and the inspector. Hide/show or resize the main navigation, resize the live frequency spectrum and oscilloscope, and inspect detailed file information and embedded metadata. The top bar stays visible with a compact spectrum and active-playlist button. Collapse, hide, reorder, or move the side panels using Layout.
 - **Background playback:** the top player, seek bar, volume, shuffle, repeat, queue, and media keys keep working while you browse. In the desktop app, enable **Close to system tray** or choose **Keep playing in tray** in the music sidebar. The tray menu provides playback controls, Open Vaultly, and Quit Vaultly.
 
 ### Keep control of your collection
@@ -146,3 +146,5 @@ Enable **Settings → Playback and reading → Remember video playback position*
 Enable **Remember last played series or episode** in the same settings panel to show **Continue watching** and remember the last episode in each series. This is separate from timestamp resuming. The full-size video player’s **Hide panel / Show panel** button preserves its choice for the active profile. Browsing filters, pages and scroll, management layout and filters, source expansion, reader layout, and playlists also stay with the profile and travel with its preferences backup.
 
 Video collections follow dedicated folders rather than filename prefixes; root-level movies stay separate. Rescanning removes obsolete, untouched automatic video collections while preserving manual and annotated collections. Collection cards combine their own attributes with their children’s tags, categories, and people, including source attributes. Set attributes apply to children, and circle cards combine their member collections’ attributes.
+
+Music browsing and its scroll area now occupy a separate layout row below the player bar. Music videos reuse the full video player. The window title bar provides persisted master volume/mute, a vertical stereo VU meter, and supported output-device selection. YouTube has a thumbnail library of saved links with automatic titles/channels, clipboard-based adds with playlist selection, search/channel filters, custom playlists, embedded playback, and backup support. Settings includes editable color themes, live previews, JSON import/export, neutral dark surfaces, paired light/dark palettes that keep the active theme, and accent-only neon glow.

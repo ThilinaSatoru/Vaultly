@@ -42,7 +42,7 @@ export function refactoredFilename(filename: string, casts: Attribute[], tags: A
   let shortened = title;
   while (Buffer.byteLength(shortened) > available) shortened = [...shortened].slice(0, -1).join("");
   const result = `${prefix}${shortened.trim()}${suffix}`;
-  return { filename: /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result) ? `_${result}` : result, title };
+  return { filename: /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result) ? `_${result}` : result, title: shortened.trim() };
 }
 
 const within = (root: string, file: string) => {
@@ -83,7 +83,11 @@ export async function refactorSourceFilenames(sourceId: number, rootPath: string
     if (!item.fileExtension) continue; // Image collections are folders, not filenames.
     try {
       const next = refactoredFilename(item.filename, castsQuery.all(id) as unknown as Attribute[], tagsQuery.all(id) as unknown as Attribute[], attributes);
-      if (next.filename === item.filename) continue;
+      if (next.filename === item.filename) {
+        update.run(next.filename, item.relativePath, next.title, id, sourceId, item.relativePath);
+        item.title = next.title;
+        continue;
+      }
       const oldPath = path.resolve(rootPath, item.relativePath);
       const resolved = await realpath(oldPath);
       const info = await lstat(oldPath);
@@ -109,8 +113,7 @@ export async function refactorSourceFilenames(sourceId: number, rootPath: string
         signal.throwIfAborted();
         const row = rowQuery.get(id, sourceId) as { title: string; relative_path: string } | undefined;
         if (!row || row.relative_path !== item.relativePath) throw new Error("Library item changed during refactoring.");
-        const defaultTitle = path.basename(item.filename, path.extname(item.filename)).replace(/[._]+/g, " ").trim();
-        const title = row.title === defaultTitle ? next.title : row.title;
+        const title = next.title;
         update.run(next.filename, relativePath, title, id, sourceId, item.relativePath);
         synced = true;
         const removed: typeof staged = [];

@@ -6,6 +6,7 @@ import { englishText } from "./english-matching.js";
 import { withSourceScan } from "./process-resources.js";
 
 export const musicExtensions = new Set([".mp3", ".flac", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".wav", ".aiff", ".aif", ".wma", ".ape", ".wv", ".alac"]);
+export const musicVideoExtensions = new Set([".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv", ".mpeg", ".mpg", ".ts", ".mts", ".m2ts", ".vob", ".ogv", ".3gp", ".3g2", ".asf", ".mxf"]);
 interface MusicScan { controller: AbortController; task: Promise<void>; processed: number; errors: number; current: string; name: string }
 const scans = new Map<number, MusicScan>();
 export function getMusicScanActivity() {
@@ -50,7 +51,7 @@ async function* audioFiles(directory: string, signal: AbortSignal): AsyncGenerat
     if (entry.isSymbolicLink()) continue;
     const filename = path.join(directory, entry.name);
     if (entry.isDirectory()) yield* audioFiles(filename, signal);
-    else if (entry.isFile() && musicExtensions.has(path.extname(entry.name).toLowerCase())) yield filename;
+    else if (entry.isFile() && (musicExtensions.has(path.extname(entry.name).toLowerCase()) || musicVideoExtensions.has(path.extname(entry.name).toLowerCase()))) yield filename;
   }
 }
 
@@ -111,7 +112,7 @@ export function scanMusicSource(id: number): Promise<void> {
             database.prepare("INSERT OR IGNORE INTO music_track_artists(track_id, artist_id) VALUES (?, ?)").run(result.id, artistId);
           }
           applyMusicAttributes(result.id, `${relative} ${Object.values(t).join(" ")}`, (t.genre || "").split(/\s*[;,]\s*/),
-            [metadata.codec, /^(flac|alac|ape|wavpack|pcm_)/.test(metadata.codec) ? "Lossless" : "", t.mood || "", t.language || ""]);
+            [metadata.codec, musicVideoExtensions.has(path.extname(filename).toLowerCase()) ? "Music video" : "", /^(flac|alac|ape|wavpack|pcm_)/.test(metadata.codec) ? "Lossless" : "", t.mood || "", t.language || ""]);
           database.exec("COMMIT");
           scan.processed++;
         } catch (error) { database.exec("ROLLBACK"); throw error; }

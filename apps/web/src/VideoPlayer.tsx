@@ -1,3 +1,4 @@
+import { connectMediaOutput } from "./audio-output";
 import { Select } from "./Select";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { trackVideoPosition } from "./video-position";
@@ -7,12 +8,20 @@ import { preferredSubtitle, preferredTrack, subtitleLanguage, trackPreference, t
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
 import { ExternalLink, LoaderCircle, Maximize, Minimize, Pause, Play, Settings2, Volume1, Volume2, VolumeX } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { matchesShortcut, readBooleanPreference, readNumberPreference, writePreference } from "./preferences";
 import { api } from "./media";
 
 interface VideoPlayerProps {
   src: string;
+  mediaRef?: RefObject<HTMLVideoElement | null>;
+  audioOnly?: boolean;
+  playbackOwner?: string;
+  controlledVolume?: number;
+  onVolumeChange?: (volume: number) => void;
+  loopOverride?: boolean;
+  shortcutsEnabled?: boolean;
+  onPlaybackState?: (state: { playing: boolean; position: number; duration: number }) => void;
   itemId?: number;
   autoPlay: boolean;
   compact?: boolean;
@@ -51,8 +60,15 @@ function formatTime(seconds: number) {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, onPlaybackStarted, onError }: VideoPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, onPlaybackStarted, onError, mediaRef, audioOnly = false, controlledVolume, onVolumeChange, loopOverride, shortcutsEnabled = true, onPlaybackState, playbackOwner = "video" }: VideoPlayerProps) {
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = mediaRef ?? localVideoRef;
+  useEffect(() => { if (videoRef.current) return connectMediaOutput(videoRef.current); }, [videoRef]);
+  useEffect(() => {
+    const pause = (event: Event) => { if ((event as CustomEvent).detail !== playbackOwner) videoRef.current?.pause(); };
+    window.addEventListener("vaultly-playback-start", pause);
+    return () => window.removeEventListener("vaultly-playback-start", pause);
+  }, [playbackOwner, videoRef]);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
   const seekPeekTimer = useRef<number | null>(null);
@@ -65,8 +81,13 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
-  const [volume, setVolume] = useState(readStoredVolume);
-  const [muted, setMuted] = useState(readStoredMuted);
+  const [storedVolume, setStoredVolume] = useState(readStoredVolume);
+  const volume = controlledVolume ?? storedVolume;
+  const volumeCallback = useRef(onVolumeChange); volumeCallback.current = onVolumeChange;
+  const setVolume = (value: number) => { setStoredVolume(value); volumeCallback.current?.(value); };
+  const [muted, setMuted] = useState(() => playbackOwner === "music" ? controlledVolume === 0 : readStoredMuted());
+  const lastAudibleVolume = useRef(volume || .8);
+  useEffect(() => { if (volume > 0) lastAudibleVolume.current = volume; if (playbackOwner === "music") setMuted(volume === 0); }, [volume, playbackOwner]);
   const [fullscreen, setFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [seeking, setSeeking] = useState(false);
@@ -129,6 +150,10 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     if (itemId && videoRef.current) return trackVideoPosition(videoRef.current, itemId);
   }, [itemId, src]);
 
+  const playbackCallback = useRef(onPlaybackState); playbackCallback.current = onPlaybackState;
+  useEffect(() => { playbackCallback.current?.({ playing, position: current, duration }); }, [playing, current, duration]);
+  useEffect(() => { setUnsupported(false); setCurrent(0); setDuration(0); setBuffered(0); }, [src]);
+
   const handleUnsupported = () => {
     wantsPlayback.current = false;
     videoRef.current?.pause();
@@ -166,14 +191,13 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     const onProgress = () => {
       if (video.buffered.length > 0) setBuffered(video.buffered.end(video.buffered.length - 1));
     };
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => { setPlaying(true); window.dispatchEvent(new CustomEvent("vaultly-playback-start", { detail: playbackOwner })); };
     const onPause = () => setPlaying(false);
     const onVolume = () => {
       if (externalAudioRef.current) return;
       setVolume(video.volume);
       setMuted(video.muted);
-      vaultStorage.setItem("vaultly.video.volume", String(video.volume));
-      vaultStorage.setItem("vaultly.video.muted", String(video.muted));
+      if (playbackOwner !== "music") { vaultStorage.setItem("vaultly.video.volume", String(video.volume)); vaultStorage.setItem("vaultly.video.muted", String(video.muted)); }
     };
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("loadedmetadata", onLoadedMeta);
@@ -260,16 +284,16 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     const video = videoRef.current;
     if (!video) return;
     const next = Math.min(1, Math.max(0, Math.round((volume + delta) * 100) / 100));
-    setVolume(next); writePreference("vaultly.video.volume", next);
-    if (next > 0) { setMuted(false); writePreference("vaultly.video.muted", false); }
+    setVolume(next); if (playbackOwner !== "music") writePreference("vaultly.video.volume", next);
+    if (next > 0) { setMuted(false); if (playbackOwner !== "music") writePreference("vaultly.video.muted", false); }
     showVolumeFeedback(next);
   };
 
   const toggleMute = () => {
     const video = videoRef.current;
     if (!video) return;
-    setMuted(!muted); writePreference("vaultly.video.muted", !muted);
-    showVolumeFeedback(!muted ? 0 : volume);
+    setMuted(!muted); if (playbackOwner === "music") setVolume(muted ? lastAudibleVolume.current : 0); else writePreference("vaultly.video.muted", !muted);
+    showVolumeFeedback(!muted ? 0 : playbackOwner === "music" ? lastAudibleVolume.current : volume);
   };
 
   const toggleFullscreen = () => {
@@ -301,6 +325,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
 
   // Floating players only consume shortcuts while focused.
   useEffect(() => {
+    if (!shortcutsEnabled) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (event.defaultPrevented || target?.closest(".shortcut-help-popover")) return;
@@ -339,7 +364,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration, playing, compact, volume, muted, audioLoading]);
+  }, [shortcutsEnabled, duration, playing, compact, volume, muted, audioLoading]);
 
   const displayedCurrent = seeking ? (seekPreview ?? current) : current;
   const progressPct = duration > 0 ? Math.min(100, (displayedCurrent / duration) * 100) : 0;
@@ -380,11 +405,11 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
     >
       <video
         ref={videoRef}
-        src={src}
+        src={src || undefined}
         autoPlay={autoPlay && !unsupported}
         preload="auto"
         playsInline
-        loop={loop}
+        loop={loopOverride ?? loop}
         style={{ objectFit: fit as "contain" | "cover" }}
         onCanPlay={() => { if (!unsupported && autoPlay && wantsPlayback.current && !externalAudioRef.current && videoRef.current?.paused) void videoRef.current.play().catch(() => undefined); }}
         onEnded={() => { wantsPlayback.current = false; setWaitingToPlay(false); onEnded?.(); }}
@@ -396,7 +421,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
         onLoadedMetadata={(event) => {
           // Some browsers play the audio track of an unsupported MP4 while
           // silently dropping its video, so no media-error event is emitted.
-          if (event.currentTarget.videoWidth === 0) handleUnsupported();
+          if (!audioOnly && event.currentTarget.videoWidth === 0) handleUnsupported();
         }}
         onError={() => {
           handleUnsupported();
@@ -472,7 +497,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
                 const value = Number(event.target.value);
                 if (videoRef.current) {
                   setVolume(value); setMuted(value === 0);
-                  writePreference("vaultly.video.volume", value); writePreference("vaultly.video.muted", value === 0);
+                  if (playbackOwner !== "music") { writePreference("vaultly.video.volume", value); writePreference("vaultly.video.muted", value === 0); }
                   showVolumeFeedback(value);
                 }
               }}
@@ -493,7 +518,7 @@ export function VideoPlayer({ src, itemId, autoPlay, compact = false, onEnded, o
             <label>Speed<Select aria-label="Playback speed" value={rate} onChange={(event) => { const value = Number(event.target.value); setRate(value); writePreference("vaultly.video.rate", value); }}>{[.25, .5, .75, 1, 1.25, 1.5, 2, 3].map((value) => <option key={value} value={value}>{value}×</option>)}</Select></label>
             <label className="video-subtitle-size">Subtitle size <output>{subtitleSize}%</output><input type="range" aria-label="Subtitle size" min={50} max={200} step={5} value={subtitleSize} onChange={(event) => { const value = Number(event.target.value); setSubtitleSize(value); writePreference("vaultly.video.subtitleSize", value); }} /></label>
             <label>Picture<Select aria-label="Video fit" value={fit} onChange={(event) => { setFit(event.target.value); writePreference("vaultly.video.fit", event.target.value); }}><option value="contain">Fit</option><option value="cover">Fill</option></Select></label>
-            <label>Repeat<input type="checkbox" aria-label="Repeat video" checked={loop} onChange={(event) => { setLoop(event.target.checked); writePreference("vaultly.video.loop", event.target.checked); }} /></label>
+            {loopOverride === undefined && <label>Repeat<input type="checkbox" aria-label="Repeat video" checked={loop} onChange={(event) => { setLoop(event.target.checked); writePreference("vaultly.video.loop", event.target.checked); }} /></label>}
             <label>Seek previews<input type="checkbox" aria-label="Seek previews" checked={previews} onChange={(event) => { setPreviews(event.target.checked); writePreference("vaultly.video.seekPreviews", event.target.checked); }} /></label>
             <button type="button" className="video-hide-button" onClick={hideControls}>Hide controls now</button>
           </div>}

@@ -1,3 +1,4 @@
+import { ClearableInput, ClearableTextarea } from "./ClearableField";
 import { Select } from "./Select";
 import { rankSearchResults } from "./search-relevance";
 import { vaultUrl, vaultFetch } from "./vault-session";
@@ -323,8 +324,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
         <div className="series-hero-body">
           <p className="eyebrow">{setSections.find((section) => section.type === setType(detail))?.title} · {detail.item_count} items</p>
           {editing ? <form className="series-edit" onSubmit={updateDetails}>
-            <input aria-label="Set title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
-            <textarea aria-label="Set description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
+            <ClearableInput aria-label="Set title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
+            <ClearableTextarea aria-label="Set description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
             <Select aria-label="Preferred content type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></Select>
             <div><button className="primary-button" type="submit" disabled={busy}>Save</button><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button></div>
           </form> : <><h1>{detail.title}</h1><p>{detail.description || "A set for related comics, videos, PDFs, and sequels."}</p></>}
@@ -360,7 +361,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
         </div>)}
       </div>
       <div className="series-add"><h2>Add media</h2><p>Search indexed files and add videos, comics, or PDFs to this set.</p>
-        <div className="series-search"><Search size={17} /><input aria-label="Search media to add" value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Search by title or path" /></div>
+        <div className="series-search"><Search size={17} /><ClearableInput aria-label="Search media to add" value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Search by title or path" /></div>
         {candidates && <div className="series-candidates">{candidates.items.filter((item) => !detail.items.some((member) => member.id === item.id)).map((item) =>
           <button key={item.id} type="button" disabled={busy} onClick={() => void updateItems([...detail.items.map((entry) => entry.id), item.id])}><Plus size={16} /><span>{item.title}</span><small>{item.media_type} · {item.source_name}</small></button>)}
           {candidates.total === 0 && <p>No indexed media matches this search.</p>}
@@ -380,7 +381,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     <div className="page-heading"><div><p className="eyebrow">Your library</p><h1>{mediaType ? `${mediaType === "story" ? "Story" : mediaType[0].toUpperCase() + mediaType.slice(1)} series & sets` : view === "categories" ? "Series & sets by category" : view === "favorites" ? "Favorite series & sets" : "Series & sets"}</h1><p>{view === "categories" ? "Browse sets in dedicated category sections." : view === "favorites" ? "Your favorite collections, kept separate from library filters." : `Collections containing ${mediaType ? `${mediaType} items` : "related media"}, kept in viewing order.`}</p></div>
       {view === "browse" && <button className="primary-button" type="button" onClick={() => { setTitle(""); setDescription(""); setPreferredType(groupFilter === "all" ? "mixed" : groupFilter); setError(""); setShowCreate(true); }}><Plus size={18} /> New set</button>}</div>
     {view === "browse" && <div className="series-entity-tabs" role="group" aria-label="Collection level"><button className="active" type="button">Sets</button><button type="button" onClick={() => setEntityView("circles")}>Circles</button></div>}
-    {view === "browse" && <div className="gallery-toolbar gallery-primary-tools"><div className="series-search gallery-text-filter"><Search size={17} /><input aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div><label className="select-wrap"><span>Sort</span><Select aria-label="Sort series and sets" value={listSort} onChange={(event) => setListSort(event.target.value)}><option value="relevance">Best match</option><option value="title">Title A–Z</option><option value="items">Most items</option></Select></label></div>}
+    {view === "browse" && <div className="gallery-toolbar gallery-primary-tools"><div className="series-search gallery-text-filter"><Search size={17} /><ClearableInput aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div><label className="select-wrap"><span>Sort</span><Select aria-label="Sort series and sets" value={listSort} onChange={(event) => setListSort(event.target.value)}><option value="relevance">Best match</option><option value="title">Title A–Z</option><option value="items">Most items</option></Select></label></div>}
     {view === "browse" && <details className="series-advanced-filters"><summary>Advanced filters{selectedCategoryIds.length + selectedTagIds.length + (groupFilter !== "all" ? 1 : 0) > 0 ? ` (${selectedCategoryIds.length + selectedTagIds.length + (groupFilter !== "all" ? 1 : 0)})` : ""}</summary><div className="series-filters">
       <TagCombobox attributeKind="category" label="Filter set categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} placeholder="All categories" />
       <TagCombobox attributeKind="tag" label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>
@@ -397,8 +398,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       : <div className="gallery-empty"><Layers3 size={38} /><h2>{seriesList.length ? "No matching sets" : "No series or sets yet"}</h2><p>{seriesList.length ? "Try another search or tag combination." : "Create a set, then add related media in the order you want."}</p></div>}
     {showCreate && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><section className="dialog" role="dialog" aria-modal="true" aria-label="Create series or set" onMouseDown={(event) => event.stopPropagation()}>
       <button className="icon-button dialog-close" type="button" onClick={() => setShowCreate(false)} aria-label="Close"><X size={19} /></button><div className="dialog-icon"><Layers3 size={24} /></div><h2>New series or set</h2><p className="dialog-intro">Group any mix of videos, comics, and PDFs without moving your files.</p>
-      <form onSubmit={create}><label htmlFor="series-title">Title</label><input id="series-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required />
-        <label htmlFor="series-description">Description</label><textarea id="series-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
+      <form onSubmit={create}><label htmlFor="series-title">Title</label><ClearableInput id="series-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required />
+        <label htmlFor="series-description">Description</label><ClearableTextarea id="series-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
         <label htmlFor="series-type">Content type</label><Select id="series-type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></Select>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>Create set</button></div></form>

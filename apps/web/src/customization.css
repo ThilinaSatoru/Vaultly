@@ -1,0 +1,136 @@
+/* Keep workspace content in its own row below every playback/header control. */
+.app-shell:is(.app-shell--music,.app-shell--youtube) { position: fixed; inset: var(--window-bar-height) 0 0; min-height: 0; overflow: hidden; }
+.app-shell:is(.app-shell--music,.app-shell--youtube) > main { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); overflow: hidden; }
+.app-shell:is(.app-shell--music,.app-shell--youtube) .app-header { position: relative; top: auto; grid-row: 1; min-width: 0; }
+.app-shell--music > main > .music-root { grid-row: 2; overflow: hidden; min-height: 0; }
+.app-shell--music .music-layout { overflow: hidden; }
+.app-shell--music .music-browser { overflow: hidden; }
+.app-shell--youtube > main > .music-root { display: none; }
+.app-shell--youtube > main > .content { grid-row: 2; min-height: 0; overflow: auto; width: 100%; margin: 0; }
+.music-video-player { width: 100%; flex: 0 0 auto; height: clamp(160px,28vh,260px); min-height: 0; background: #000; }
+.music-video-player > .video-player { width: 100%; height: 100%; min-height: 0; }
+.music-video-player > .video-player:fullscreen { height: 100%; }
+
+:root { --neon-shadow: 0 0 0 transparent; --neon-text: none; --danger-soft: color-mix(in srgb,var(--danger) 13%,var(--panel)); }
+:root[data-palette="dark"][data-theme] {
+  --bg: #111111; --sidebar: #181818; --panel: #212121; --panel-2: #303030; --field: #161616;
+  --text: #f1f1f1; --muted: #b0b0b0; --border: #444444; --danger: #ff7b8e;
+  --surface-gradient: linear-gradient(145deg,var(--panel),color-mix(in srgb,var(--panel-2) 12%,var(--panel)));
+  --accent-soft: var(--panel-2);
+  --scrollbar-thumb: #666666; --soft-shadow: 0 10px 28px #00000035;
+}
+.app-header, .sidebar { border-color: var(--border); }
+.sidebar { background: var(--sidebar); }
+.music-inspector, .youtube-playlists { background: var(--surface-gradient); }
+:root .sidebar .nav-active { background: var(--panel-2); box-shadow: none; }
+.music-root .music-table tr:is(.selected,.playing) { background: var(--panel-2); box-shadow: none; }
+:is(.secondary-button,.icon-button,.select-trigger) { color: var(--text); border-color: var(--border); }
+:is(.secondary-button,.icon-button):hover:not(:disabled) { background: var(--panel-2); }
+:is(input,textarea,select):not([type="range"]):not([type="checkbox"]):not([type="color"]) { color: var(--text); background-color: var(--field); border-color: var(--border); }
+:is(input,textarea)::placeholder { color: var(--muted); opacity: .9; }
+:root[data-glow="on"] :is(.nav-active,.music-accent-button,.youtube-tabs .active,.music-root button.active) { text-shadow: var(--neon-text); }
+:root[data-glow="on"] :is(.nav-active,.music-accent-button,.youtube-tabs .active,.music-root button.active,.primary-button) > svg { filter: drop-shadow(var(--neon-text)); }
+:root[data-glow="on"] :is(input,textarea,button,select):focus-visible { outline: 2px solid var(--acid); outline-offset: 2px; }
+:is(button,a):is(.danger,.danger-action,.danger-button,.destructive),
+button:has(.lucide-trash-2), button:has(.lucide-trash),
+button[aria-label^="Delete" i], button[aria-label^="Remove " i] { color: var(--danger) !important; }
+:is(.danger,.danger-action,.danger-button,.destructive):hover:not(:disabled), button:has(.lucide-trash-2):hover:not(:disabled), button[aria-label^="Delete" i]:hover:not(:disabled), button[aria-label^="Remove " i]:hover:not(:disabled) { background: var(--danger-soft) !important; border-color: var(--danger) !important; }
+:is(.form-error,.error-text,.music-error), .lucide-trash-2, .lucide-trash { color: var(--danger); }
+button[class*="danger"] { border-color: var(--danger); }
+
+:root { --window-bar-height: 38px; }
+:root body { padding-top: var(--window-bar-height); background: var(--bg); background-image: none; }
+:root[data-palette="dark"] body { background: var(--bg); background-image: none; }
+.desktop-titlebar { gap: 9px; }
+.desktop-titlebar > span { flex: 1; font-size: .7rem; font-weight: 500; }
+.desktop-titlebar.browser-titlebar { padding-right: 16px; }
+.master-audio-controls { display: flex; align-items: center; flex: 0 0 auto; gap: 7px; height: 38px; margin-left: auto; color: var(--muted); font-size: .65rem; -webkit-app-region: no-drag; user-select: auto; }
+.master-audio-controls > label { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+.master-audio-controls input[type="range"] { width: 86px; height: 24px; margin: 0; accent-color: var(--acid); }
+.master-audio-controls output { width: 29px; color: var(--text); font-variant-numeric: tabular-nums; }
+.master-audio-controls .icon-button { display: inline-grid; place-items: center; width: 25px; min-height: 25px; padding: 4px; border: 0; background: transparent; }
+.stereo-vu { position: relative; width: 20px; height: 34px; margin-inline: 4px; }
+.stereo-vu .audio-vu { display: block; width: 20px; height: 28px; }
+.stereo-vu > span { position: absolute; inset: auto 0 0; font: 6px/1 monospace; letter-spacing: 3px; padding-left: 2px; color: var(--muted); }
+.audio-device-menu { position: relative; }
+.audio-device-menu > summary { display: grid; place-items: center; width: 26px; height: 28px; cursor: pointer; color: var(--muted); border-radius: 5px; list-style: none; }
+.audio-device-menu > summary:hover { color: var(--text); background: var(--panel-2); }
+.audio-device-menu > div { position: absolute; z-index: 80; top: calc(100% + 8px); right: 0; width: min(330px,85vw); display: flex; flex-wrap: wrap; gap: 10px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--soft-shadow); background: var(--panel); }
+.audio-device-menu label { display: grid; gap: 7px; width: 100%; }
+.audio-device-menu select { max-width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.audio-device-menu small { line-height: 1.6; }
+
+.theme-editor { display: grid; gap: 18px; padding: 20px; margin-block: 22px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-gradient); }
+.theme-editor header, .theme-editor h3, .theme-editor footer { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0; }
+.theme-editor h3 { margin-right: auto; }
+.theme-editor form { display: grid; gap: 16px; }
+.theme-editor label { display: grid; gap: 7px; font-size: .8rem; }
+.theme-editor :is(input,select,textarea) { min-width: 0; max-width: 100%; }
+.theme-editor select { padding: 9px; border: 1px solid var(--border); border-radius: 8px; }
+.theme-editor details > label { margin-block: 12px; }
+.theme-editor textarea { min-height: 130px; }
+.theme-color-fields { display: grid; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); gap: 15px; }
+.theme-color-fields label > span { display: flex; gap: 8px; }
+.theme-color-fields input[type="color"] { flex: 0 0 42px; height: 36px; padding: 3px; border: 1px solid var(--border); border-radius: 6px; }
+.theme-color-fields input:not([type="color"]) { width: 100%; padding: 7px; border: 1px solid var(--border); border-radius: 6px; }
+.theme-editor input[type="range"] { accent-color: var(--acid); width: 100%; }
+.theme-contrast { font-size: .75rem; color: var(--muted); }
+.custom-theme-list { display: flex; flex-wrap: wrap; gap: 10px; }
+.custom-theme-list article { display: flex; align-items: center; gap: 4px; padding: 8px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); }
+.custom-theme-list button { display: flex; align-items: center; gap: 8px; background: transparent; color: var(--text); border: 0; padding: 5px; border-radius: 5px; }
+.custom-theme-list button[aria-pressed="true"] { outline: 1px solid var(--acid); }
+.custom-theme-list i { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid; border-radius: 6px; font-style: normal; }
+
+.youtube-library h1, .youtube-library h2 { display: flex; align-items: center; gap: 10px; margin: 0; }
+.youtube-library h1 { font-size: 1.45rem; font-weight: 650; }
+.youtube-library h2 { font-size: 1.05rem; }
+.youtube-library p { color: var(--muted); font-size: .8rem; line-height: 1.6; }
+.youtube-library-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.youtube-library-heading > div:first-child { margin-right: auto; }
+.youtube-tabs { display: flex; gap: 6px; margin: 14px 0 18px; border-bottom: 1px solid var(--border); }
+.youtube-tabs button { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font-size: .8rem; }
+.youtube-tabs button.active { color: var(--acid); border-bottom-color: var(--acid); }
+.youtube-tabs span { font-size: .68rem; color: var(--muted); }
+.youtube-add-link, .youtube-add-playlist { display: flex; align-items: end; gap: 12px; margin-bottom: 18px; padding: 14px; border-radius: 10px; background: var(--panel); }
+.youtube-library label { display: grid; gap: 6px; font-size: .74rem; color: var(--muted); }
+.youtube-add-link label, .youtube-add-playlist label { flex: 1; min-width: 0; }
+.youtube-library input:not([type="checkbox"]) { width: 100%; min-height: 35px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; }
+.youtube-library-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 20px; font-size: .75rem; color: var(--muted); }
+.youtube-library-tools > label { display: flex; align-items: center; gap: 7px; margin-left: auto; }
+.youtube-library-tools > label.youtube-search { flex: 1 1 240px; margin-left: 0; }
+.youtube-search > .clearable-field { width: 100%; }
+.youtube-library-tools .custom-select { min-width: 150px; }
+.youtube-grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fill,minmax(220px,1fr)); }
+.youtube-grid > .media-card { display: flex; margin: 0; }
+.youtube-grid .media-art { display: flex; width: 100%; aspect-ratio: 16/9; align-items: center; justify-content: center; background: var(--panel-2); }
+.youtube-grid .media-card { border-radius: 12px; box-shadow: none; cursor: default; }
+.youtube-grid .media-card h3 { white-space: normal; }
+.youtube-grid .card-title-open { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: left; line-height: 1.5; white-space: normal; }
+.youtube-grid .media-card-body p { margin: 6px 0 0; color: var(--muted); }
+.youtube-grid .media-card-open:hover .youtube-open-overlay { opacity: 1; }
+.youtube-open-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: #0004; color: #fff; opacity: 0; transition: opacity .15s; }
+.youtube-playlist-card .media-art { color: var(--acid); }
+.youtube-notice, .theme-palette-note { color: var(--muted); font-size: .75rem; }
+.youtube-player-backdrop { z-index: 1600; }
+.dialog.youtube-video-dialog { width: min(1100px,94vw); padding: 18px; border-radius: 12px; max-height: calc(100dvh - var(--window-bar-height) - 32px); }
+.youtube-video-dialog .attribute-editor-heading { padding-right: 40px; }
+.youtube-video-dialog h2 { font-size: 1rem; }
+.youtube-embed { width: 100%; min-height: 200px; aspect-ratio: 16/9; max-height: calc(100dvh - var(--window-bar-height) - 160px); background: #000; border-radius: 8px; overflow: hidden; }
+.youtube-embed iframe { display: block; width: 100%; height: 100%; border: 0; }
+.youtube-player > div:last-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; padding-top: 10px; font-size: .75rem; }
+.youtube-player a { color: var(--acid); display: inline-flex; align-items: center; gap: 5px; }
+.youtube-rename-form { display: grid; gap: 15px; }
+.youtube-rename-form label { display: grid; gap: 7px; }
+.youtube-add-dialog { display: grid; gap: 16px; }
+.youtube-add-dialog label { display: grid; gap: 7px; color: var(--muted); font-size: .8rem; }
+.youtube-add-dialog p { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.6; }
+/* Single-action targets use a hand. Media surfaces opened with a double click use the arrow. */
+:where(a[href],button,summary,select,[role="button"],[role="option"],[role="tab"],[role="checkbox"],[role="switch"],input[type="checkbox"],input[type="radio"],input[type="range"],input[type="color"],input[type="file"],input[type="button"],input[type="submit"],input[type="reset"]), .setting-toggle { cursor: pointer; }
+:where(input:is(:not([type]),[type="text"],[type="search"],[type="url"],[type="email"],[type="number"],[type="password"],[type="tel"]),textarea) { cursor: text; }
+.music-table tbody tr, .music-card-art, .video-player video, [data-double-click="true"] { cursor: default; }
+@media (max-width: 700px) {
+  .master-volume-label { display: none; } .master-audio-controls { gap: 3px; } .master-audio-controls input[type="range"] { width: 65px; }
+  .app-shell--music .music-layout { overflow-y: auto; } .app-shell--music .music-browser { overflow: visible; }
+  .youtube-add-link, .youtube-add-playlist { flex-wrap: wrap; } .youtube-add-link label, .youtube-add-playlist label { flex-basis: 100%; }
+  .youtube-grid { grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); } .theme-editor { padding: 14px; }
+}

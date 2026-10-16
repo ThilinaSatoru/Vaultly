@@ -1,3 +1,4 @@
+vi.mock("./ClearableField", () => ({ ClearableInput: "input" }));
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 

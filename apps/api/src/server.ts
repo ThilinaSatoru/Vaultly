@@ -1,3 +1,4 @@
+import { registerYoutubeRoutes } from "./youtube-library.js";
 import { registerAttributeRoutes, sourceAttributesInput, sourceAttributes, invalidSourceAttribute, setSourceAttributes } from "./attribute-routes.js";
 import { sourceMediaTypes } from "./source-media.js";
 import cors from "@fastify/cors";
@@ -54,6 +55,7 @@ app.setErrorHandler((error, _request, reply) => {
 
 await app.register(registerMediaRoutes, { revealPath: options.revealPath, openVideo: options.openVideo });
 await app.register(registerMusicRoutes);
+await app.register(registerYoutubeRoutes);
 await app.register(registerSeriesRoutes);
 await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);

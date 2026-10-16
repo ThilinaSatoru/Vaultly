@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { useId, useState, type FormEvent } from "react";
 import { AttributeEditorDialog } from "./AttributeEditorDialog";
 import { api } from "./media";
@@ -28,7 +29,7 @@ export function RenameAttributeDialog({ kind, attribute, onClose, onSaved }: {
   return <AttributeEditorDialog title={`Rename ${label.toLowerCase()}`} onClose={onClose} busy={saving} focusReady={!saving}>
     <form onSubmit={save}>
       <label htmlFor={inputId}>{label} name</label>
-      <input id={inputId} value={name} onChange={(event) => setName(event.target.value)} maxLength={kind === "people" ? 100 : 80} disabled={saving} required />
+      <ClearableInput id={inputId} value={name} onChange={(event) => setName(event.target.value)} maxLength={kind === "people" ? 100 : 80} disabled={saving} required />
       {error && <p className="form-error" role="alert">{error}</p>}
       <div className="dialog-actions"><button className="secondary-button" type="button" onClick={onClose} disabled={saving}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save name"}</button></div>
     </form>

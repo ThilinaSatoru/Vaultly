@@ -139,7 +139,7 @@ test("scan groups videos by their dedicated folder and extends the ordered colle
   }
 });
 
-test("movie and mixed sources never group root videos by prefixes and retire untouched legacy automatic sets", async () => {
+test("movie and mixed sources group root videos by prefix and retire duplicate legacy sets", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "vaultly-no-video-prefix-"));
   const sources: number[] = [];
   try {
@@ -150,7 +150,7 @@ test("movie and mixed sources never group root videos by prefixes and retire unt
       sources.push(source);
       await scanSource(source, root);
       const items = database.prepare("SELECT id FROM media_items WHERE source_id = ? ORDER BY id").all(source) as Array<{ id: number }>;
-      expect(database.prepare("SELECT si.* FROM series_items si JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?").all(source)).toEqual([]);
+      expect(database.prepare("SELECT si.* FROM series_items si JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?").all(source)).toHaveLength(2);
       const legacy = Number(database.prepare("INSERT INTO series(title, auto_key) VALUES ('Same title', ?)").run(`${source}|video||same title`).lastInsertRowid);
       const manual = Number(database.prepare("INSERT INTO series(title) VALUES ('My manual grouping')").run().lastInsertRowid);
       for (const [position, item] of items.entries()) {
@@ -171,7 +171,7 @@ test("movie and mixed sources never group root videos by prefixes and retire unt
   }
 });
 
-test("scan preserves an item's identity and metadata after an external rename", async () => {
+test("scan synchronizes renamed titles while preserving identity and assignments", async () => {
   const token = randomUUID().slice(0, 10);
   const root = await mkdtemp(path.join(tmpdir(), "vaultly-rename-"));
   let sourceId = 0;
@@ -194,14 +194,14 @@ test("scan preserves an item's identity and metadata after an external rename", 
 
     const after = database.prepare("SELECT id, filename, title, favorite, available FROM media_items WHERE id = ?")
       .get(before.id);
-    expect(after).toEqual({ id: before.id, filename: renamed, title: "My preserved title", favorite: 1, available: 1 });
+    expect(after).toEqual({ id: before.id, filename: renamed, title: `Renamed ${token}`, favorite: 1, available: 1 });
     expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").all(before.id)).toEqual([{ tag_id: tagId }]);
     if (process.platform === "win32") {
       const caseRenamed = renamed.toUpperCase();
       await rename(path.join(root, renamed), path.join(root, caseRenamed));
       await scanSource(sourceId, root);
       expect(database.prepare("SELECT id, filename, title FROM media_items WHERE source_id = ? AND available = 1").all(sourceId))
-        .toEqual([{ id: before.id, filename: caseRenamed, title: "My preserved title" }]);
+        .toEqual([{ id: before.id, filename: caseRenamed, title: `RENAMED ${token.toUpperCase()}` }]);
     }
   } finally {
     if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
@@ -221,16 +221,16 @@ test("batch renames preserve distinct identities when many documents share the s
       await utimes(file, modified, modified);
     }
     sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path) VALUES (?, ?, ?)").run("Batch rename", root, root).lastInsertRowid);
-    await scanSource(sourceId, root);
+    await scanSource(sourceId, root, { generateThumbnails: false });
     const originals = database.prepare("SELECT id, filename FROM media_items WHERE source_id = ?").all(sourceId) as Array<{ id: number; filename: string }>;
     for (const item of originals) {
       database.prepare("UPDATE media_items SET title = ?, favorite = 1 WHERE id = ?").run(`Custom ${item.id}`, item.id);
       await rename(path.join(root, item.filename), path.join(root, item.filename.replace("Original", "Renamed")));
     }
-    await scanSource(sourceId, root);
+    await scanSource(sourceId, root, { generateThumbnails: false });
     for (const item of originals) {
       expect(database.prepare("SELECT filename, title, favorite, available FROM media_items WHERE id = ?").get(item.id))
-        .toEqual({ filename: item.filename.replace("Original", "Renamed"), title: `Custom ${item.id}`, favorite: 1, available: 1 });
+        .toEqual({ filename: item.filename.replace("Original", "Renamed"), title: item.filename.replace("Original", "Renamed").replace(/\.pdf$/, ""), favorite: 1, available: 1 });
     }
     expect(database.prepare("SELECT COUNT(*) AS count FROM media_items WHERE source_id = ?").get(sourceId)).toEqual({ count: 32 });
   } finally {
@@ -238,6 +238,32 @@ test("batch renames preserve distinct identities when many documents share the s
       database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
       database.prepare("DELETE FROM series WHERE auto_key LIKE ?").run(`${sourceId}|%`);
     }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("book rescans reconcile exact automatic memberships and remove obsolete and duplicate sets", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "vaultly-prefix-reconcile-"));
+  let sourceId = 0;
+  try {
+    for (const name of ["Harbor First.pdf", "Harbor Second.pdf", "Harbor Third.pdf"]) await writeFile(path.join(root, name), name);
+    sourceId = Number(database.prepare("INSERT INTO sources(name, root_path, normalized_path, media_type) VALUES ('Prefix books', ?, ?, 'ebooks')").run(root, root).lastInsertRowid);
+    await scanSource(sourceId, root, { generateThumbnails: false });
+    const findSets = () => database.prepare("SELECT id, auto_key FROM series WHERE auto_key LIKE ?").all(`${sourceId}|%`) as Array<{ id: number; auto_key: string }>;
+    const setId = findSets()[0].id;
+    const legacyId = Number(database.prepare("INSERT INTO series(title, auto_key) VALUES ('Harbor', ?)").run(`${sourceId}|story||harbor`).lastInsertRowid);
+    database.prepare("INSERT INTO series_items(series_id, item_id, position) SELECT ?, item_id, position FROM series_items WHERE series_id = ?").run(legacyId, setId);
+    await scanSource(sourceId, root, { generateThumbnails: false });
+    expect(findSets().map((set) => set.id)).toEqual([setId]);
+    await rename(path.join(root, "Harbor Third.pdf"), path.join(root, "Meadow Alone.pdf"));
+    await scanSource(sourceId, root, { generateThumbnails: false });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM series_items WHERE series_id = ?").get(setId)).toEqual({ count: 2 });
+    expect(database.prepare("SELECT si.item_id, COUNT(*) AS count FROM series_items si JOIN series s ON s.id=si.series_id WHERE s.auto_key LIKE ? GROUP BY si.item_id HAVING COUNT(*) > 1").all(`${sourceId}|%`)).toEqual([]);
+    await rm(path.join(root, "Harbor Second.pdf"));
+    await scanSource(sourceId, root, { generateThumbnails: false });
+    expect(findSets()).toEqual([]);
+  } finally {
+    if (sourceId) { database.prepare("DELETE FROM series WHERE auto_key LIKE ?").run(`${sourceId}|%`); database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId); }
     await rm(root, { recursive: true, force: true });
   }
 });

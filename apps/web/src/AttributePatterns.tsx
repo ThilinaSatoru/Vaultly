@@ -1,3 +1,4 @@
+import { ClearableTextarea } from "./ClearableField";
 import { ListFilter, LoaderCircle } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "./media";
@@ -53,7 +54,7 @@ export function AttributePatterns({ kind, attribute, onChanged, editorOnly = fal
         <p className="dialog-intro">Names and patterns with multiple words automatically match in any word order, with the words separated or joined together (for example, “Jane Doe”, “Doe Jane”, “JaneDoe”, or “DoeJane”). Rescan to apply matches to existing media.</p>
         <form onSubmit={save}>
           <label htmlFor={`patterns-${kind}-${attribute.id}`}>Alternative words or phrases (optional)</label>
-          <textarea id={`patterns-${kind}-${attribute.id}`} className="attribute-pattern-input" rows={7} value={text} onChange={(event) => setText(event.target.value)} placeholder={"One synonym per line"} disabled={!loaded || loading || saving} maxLength={10100} />
+          <ClearableTextarea id={`patterns-${kind}-${attribute.id}`} className="attribute-pattern-input" rows={7} value={text} onChange={(event) => setText(event.target.value)} placeholder={"One synonym per line"} disabled={!loaded || loading || saving} maxLength={10100} />
           <p className="attribute-help">Matches ignore case, accents, and punctuation and use complete words. Rescan sources to apply changes to indexed files.{kind === "people" && " Matching people are Cast on videos and Artists on comics and stories."}</p>
           {loading && <p><LoaderCircle className="spin" size={16} /> Loading patterns…</p>}
           {error && <div className="form-error" role="alert"><p>{error}</p>{!loaded && <button className="secondary-button" type="button" onClick={() => { setLoading(true); setError(""); setLoadAttempt((attempt) => attempt + 1); }} disabled={loading}>Retry loading patterns</button>}</div>}

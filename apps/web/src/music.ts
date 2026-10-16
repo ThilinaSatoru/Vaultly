@@ -4,10 +4,15 @@ export interface MusicTrack {
   filename: string; relative_path: string; source_name: string; year: string; track_number: number; disc_number: number;
   duration: number | null; bitrate: number | null; sample_rate: number | null; channels: string; bit_depth: number | null;
   codec: string; size_bytes: number; modified_at_ms: number; rating: number; available: number; has_cover: number;
-  attributes: MusicAttribute[]; metadata?: Record<string, string>;
+  attributes: MusicAttribute[]; metadata?: Record<string, string>; is_video?: boolean;
+}
+export interface MusicSource {
+  id: number; name: string; root_path: string; status: string; last_error: string | null; track_count: number;
+  path_available?: boolean; progress: { current: string; processed: number; errors: number } | null;
+  last_scanned_at?: string | null;
 }
 export interface MusicLibrary {
-  sources: Array<{ id: number; name: string; root_path: string; status: string; last_error: string | null; track_count: number; progress: { current: string; processed: number; errors: number } | null }>;
+  sources: MusicSource[];
   artists: Array<{ id: number; name: string; track_count: number }>;
   albums: Array<{ id: number; title: string; artist: string; year: string; track_count: number; duration: number; cover_track_id: number }>;
   playlists: Array<{ id: number; name: string; track_count: number }>;

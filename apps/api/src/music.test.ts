@@ -1,3 +1,5 @@
+import Fastify from "fastify";
+import { registerMusicRoutes } from "./music-routes.js";
 import { afterAll, expect, test, vi } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -42,6 +44,30 @@ test("reads container tags, audio quality and attached artwork without replacing
       tags: { title: "A quiet holiday", album: "Night music", album_artist: "Various Artists", artist: "One Artist" },
       duration: 204.5, bitrate: 950, sample_rate: 96000, bit_depth: 24, codec: "flac", channels: "stereo", hasCover: true, hasAudio: true,
     });
+});
+
+test("music sources index and stream videos as music videos and expose the common Sources summary", async () => {
+  const root = path.join(isolated.directory, "music-video-source");
+  await mkdir(root);
+  const filename = path.join(root, "Stage performance.mp4");
+  await runCommand(ffmpegInstaller.path, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:d=1",
+    "-f", "lavfi", "-i", "sine=frequency=440:duration=1", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-y", filename], { windowsHide: true });
+  const app = Fastify(); await registerMusicRoutes(app);
+  let sourceId = 0;
+  try {
+    sourceId = (await app.inject({ method: "POST", url: "/api/music/sources", payload: { rootPath: root } })).json().id;
+    await scanMusicSource(sourceId);
+    const track = (await app.inject(`/api/music/tracks?source=${sourceId}`)).json().items[0];
+    expect(track).toMatchObject({ is_video: true, filename: "Stage performance.mp4" });
+    expect(track.attributes.map((attribute: { name: string }) => attribute.name)).toContain("Music video");
+    expect((await app.inject(`/api/music/tracks?ids=${track.id}`)).json().items.map((item: { id: number }) => item.id)).toEqual([track.id]);
+    expect((await app.inject("/api/music/sources")).json()).toContainEqual(expect.objectContaining({ id: sourceId, media_type: "music", path_available: true, track_count: 1 }));
+    const stream = await app.inject({ url: `/api/music/tracks/${track.id}/audio`, headers: { range: "bytes=0-31" } });
+    expect(stream.statusCode).toBe(206); expect(stream.headers["content-type"]).toBe("video/mp4"); expect(stream.rawPayload.length).toBe(32);
+  } finally {
+    if (sourceId) await app.inject({ method: "DELETE", url: `/api/music/sources/${sourceId}` });
+    await app.close();
+  }
 });
 
 test("isolates real music scans, artwork, scopes, ratings, playlists, range playback, rescans and backups", async () => {

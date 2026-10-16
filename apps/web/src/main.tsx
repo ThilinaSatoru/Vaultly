@@ -4,6 +4,7 @@ import { App } from "./App";
 import "./styles.css";
 import "./polish.css";
 import "./shell.css";
+import "./customization.css";
 import { setActiveProfile, type VaultProfiles } from "./vault-session";
 import { applyTheme } from "./theme";
 import { DesktopTitleBar } from "./DesktopTitleBar";
@@ -17,7 +18,7 @@ async function start() {
     const profiles = await response.json() as VaultProfiles;
     setActiveProfile(profiles.profiles.find((profile) => profile.id === profiles.activeId)!);
     applyTheme();
-    root.render(<StrictMode><DesktopTitleBar /><App profiles={profiles} /></StrictMode>);
+    root.render(<StrictMode><DesktopTitleBar audioControls /><App profiles={profiles} /></StrictMode>);
   } catch (error) {
     root.render(<><DesktopTitleBar /><div className="empty-state"><h1>Could not open your vault</h1><p role="alert">{error instanceof Error ? error.message : "Please try again."}</p><button className="primary-button" onClick={() => void start()}>Try again</button></div></>);
   }

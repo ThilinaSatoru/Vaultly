@@ -58,7 +58,7 @@ test("opt-in scan keeps IDs, credits, favorites, collections, sidecar covers and
   await scanSource(sourceId, root, { refactorFilenames: true });
   expect(await readdir(root)).toEqual([original]); // Disabled by default.
   const item = database.prepare("SELECT * FROM media_items WHERE source_id = ?").get(sourceId) as { id: number };
-  database.prepare("UPDATE media_items SET favorite = 1 WHERE id = ?").run(item.id);
+  database.prepare("UPDATE media_items SET favorite = 1, title = 'Old custom title' WHERE id = ?").run(item.id);
   const series = Number(database.prepare("INSERT INTO series(title) VALUES ('Saved collection')").run().lastInsertRowid);
   database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, 0)").run(series, item.id);
   database.prepare("UPDATE sources SET filename_refactoring = 1 WHERE id = ?").run(sourceId);
@@ -81,7 +81,9 @@ test("opt-in scan keeps IDs, credits, favorites, collections, sidecar covers and
   expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").get(item.id)).toMatchObject({ tag_id: tagId });
   expect(database.prepare("SELECT series_id FROM series_items WHERE item_id = ?").get(item.id)).toMatchObject({ series_id: series });
   expect(database.prepare("SELECT cover_path FROM media_items WHERE id = ?").get(item.id)).toMatchObject({ cover_path: cover });
+  database.prepare("UPDATE media_items SET title = 'Stale title' WHERE id = ?").run(item.id);
   await scanSource(sourceId, root, { refactorFilenames: true });
+  expect(database.prepare("SELECT title FROM media_items WHERE id = ?").get(item.id)).toEqual({ title: "Evening" });
   await scanSource(sourceId, root);
   expect((await readdir(root)).sort()).toEqual(expectedFiles);
   expect(database.prepare("SELECT cover_path FROM media_items WHERE id = ?").get(item.id)).toMatchObject({ cover_path: cover });

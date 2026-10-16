@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
@@ -55,7 +56,7 @@ export function CategoriesView({ categories, onChanged, allowBrowse = true }: Ca
       <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>Categories</h1><p>Create categories, then assign them to media from an item’s viewer.</p></div></div>
       <form className="category-form" onSubmit={add}>
         <label htmlFor="new-category">New category</label>
-        <div><input id="new-category" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Favorites" maxLength={80} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div>
+        <div><ClearableInput id="new-category" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Favorites" maxLength={80} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div>
       </form>
       {error && <p className="page-error" role="alert">{error}</p>}
       {tools}
