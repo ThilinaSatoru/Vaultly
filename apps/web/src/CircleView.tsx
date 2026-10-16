@@ -1,4 +1,5 @@
 import { useContext } from "react";
+import { Select } from "./Select";
 import { rankSearchResults } from "./search-relevance";
 import { NavigationContext, useNavigationField } from "./navigation";
 import { ArrowDown, ArrowLeft, ArrowUp, Layers3, LoaderCircle, Orbit, Pencil, Plus, Search, Trash2, X } from "lucide-react";
@@ -32,6 +33,7 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
   const [selectedId, setSelectedId] = useNavigationField<number | null>("CircleView.selectedId", null, "Circle");
   const [detail, setDetail] = useState<CircleDetail | null>(null);
   const [search, setSearch] = useNavigationField("CircleView.search", "");
+  const [sort, setSort] = useNavigationField("CircleView.sort", "relevance");
   const [memberSearch, setMemberSearch] = useNavigationField("CircleView.memberSearch", "");
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -106,6 +108,8 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
     (circle.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()) || circle.description.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
     && (!mediaType || (circle.item_count === 0 ? circle.preferred_type === mediaType
       : mediaType === "video" ? circle.video_count > 0 : mediaType === "comic" ? circle.comic_count > 0 : circle.story_count > 0))), search, (circle) => [circle.title, circle.description]);
+  if (sort === "title") visible.sort((a,b) => a.title.localeCompare(b.title));
+  if (sort === "items") visible.sort((a,b) => b.item_count - a.item_count || a.title.localeCompare(b.title));
   const renderCards = (entries: CircleSummary[]) => <div className="circle-grid">{entries.map((circle) => <article className="circle-card" key={circle.id}><button className="circle-card-open" type="button" aria-label={`Open circle ${circle.title}`} onClick={() => setSelectedId(circle.id)}><Orbit size={28} /></button><div><h2><button className="card-title-open" type="button" onClick={() => setSelectedId(circle.id)}>{circle.title}</button></h2><p>{circle.description || "A story circle"}</p><small>{circle.set_count} {circle.set_count === 1 ? "set" : "sets"} · {circle.item_count} items</small><CollectionAttributes attributes={circle.card_attributes} mediaType={mediaType ?? (circleType(circle) === "mixed" ? undefined : circleType(circle) as MediaType)} /></div></article>)}</div>;
 
   if (selectedId !== null) return <section className="circle-view">
@@ -128,7 +132,7 @@ export function CircleView({ series, createRequested, mediaType, onOpenSeries }:
   </section>;
 
   return <section className="circle-view">
-    <div className="series-search circle-search"><Search size={17} /><input aria-label="Search circles" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search circles" /></div>
+    <div className="gallery-toolbar gallery-primary-tools"><div className="series-search gallery-text-filter"><Search size={17} /><input aria-label="Search circles" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search circles" /></div><label className="select-wrap"><span>Sort</span><Select aria-label="Sort circles" value={sort} onChange={(event) => setSort(event.target.value)}><option value="relevance">Best match</option><option value="title">Title A–Z</option><option value="items">Most items</option></Select></label></div>
     {error && <p className="page-error" role="alert">{error}</p>}
     {loading ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading circles…</div> : visible.length ? (mediaType || search.trim() ? renderCards(visible) : <>{circleSections.map((section) => { const entries = visible.filter((circle) => circleType(circle) === section.type); return entries.length ? <section className="series-type-section" key={section.type}><h2>{section.title} <span>{entries.length}</span></h2>{renderCards(entries)}</section> : null; })}</>) : <div className="gallery-empty"><Orbit size={38} /><h2>{circles.length ? "No matching circles" : "No circles yet"}</h2><p>Create a circle to arrange several sets as episodes of one story.</p></div>}
     {showCreate && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><section className="dialog" role="dialog" aria-modal="true" aria-label="Create circle" onMouseDown={(event) => event.stopPropagation()}><button className="icon-button dialog-close" type="button" onClick={() => setShowCreate(false)} aria-label="Close"><X size={19} /></button><div className="dialog-icon"><Orbit size={24} /></div><h2>New circle</h2><p className="dialog-intro">Group ordered sets or comic episodes into one complete story.</p><form onSubmit={create}><label htmlFor="circle-title">Title</label><input id="circle-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required /><label htmlFor="circle-description">Description</label><textarea id="circle-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />{error && <p className="form-error" role="alert">{error}</p>}<div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>Create circle</button></div></form></section></div>}

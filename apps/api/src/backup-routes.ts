@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { getConversionActivity } from "./source-conversion.js";
 import { z } from "zod";
 import { database } from "./database.js";
+import { musicBackupColumns } from "./music-schema.js";
 import { getActiveVaultProfile } from "./vault-profiles.js";
 import { getBackgroundActivity } from "./background-activity.js";
 import { gzip, gunzip } from "node:zlib";
@@ -17,13 +18,15 @@ const tableOrder = [
   "item_categories", "item_tags", "item_people", "series_items", "series_tags",
   "series_categories", "series_people", "circle_series",
   "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories",
+  ...Object.keys(musicBackupColumns) as Array<keyof typeof musicBackupColumns>,
 ] as const;
 
-const optionalTables = new Set<string>(["series_people", "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories"]);
+const optionalTables = new Set<string>(["series_people", "tag_patterns", "category_patterns", "person_patterns", "source_tags", "source_categories", ...Object.keys(musicBackupColumns)]);
 
 const deleteOrder = [...tableOrder].reverse();
 
 const columns: Record<(typeof tableOrder)[number], string[]> = {
+  ...Object.fromEntries(Object.entries(musicBackupColumns).map(([table, cols]) => [table, [...cols]])) as Record<keyof typeof musicBackupColumns, string[]>,
   sources: ["id", "media_type", "name", "root_path", "normalized_path", "status", "connected", "enabled", "filename_refactoring", "last_error", "last_scanned_at", "created_at", "updated_at"],
   media_items: ["id", "source_id", "media_type", "title", "filename", "file_extension", "relative_path", "size_bytes", "modified_at_ms", "file_count", "favorite", "duration_seconds", "video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature", "indexed", "available", "created_at", "updated_at"],
   categories: ["id", "name", "created_at"],
@@ -57,7 +60,7 @@ const backupInput = z.object({
 });
 
 function exportRow(table: string, row: BackupRow): BackupRow {
-  if (!["series", "media_items"].includes(table) || !(row.cover_data instanceof Uint8Array)) return row;
+  if (!["series", "media_items", "music_tracks"].includes(table) || !(row.cover_data instanceof Uint8Array)) return row;
   return { ...row, cover_data: Buffer.from(row.cover_data).toString("base64") };
 }
 
@@ -68,7 +71,7 @@ function importValue(table: string, column: string, value: unknown): unknown {
   if (table === "people" && value === undefined && !["id", "name", "created_at"].includes(column)) return null;
   if (table === "sources" && column === "media_type" && value === undefined) return "mixed";
   if (table === "media_items" && ["video_width", "video_height", "video_metadata_signature", "cover_data", "cover_path", "cover_width", "cover_height", "cover_signature"].includes(column) && value === undefined) return null;
-  if (["series", "media_items"].includes(table) && column === "cover_data" && typeof value === "string") return Buffer.from(value, "base64");
+  if (["series", "media_items", "music_tracks"].includes(table) && column === "cover_data" && typeof value === "string") return Buffer.from(value, "base64");
   return value;
 }
 
@@ -141,6 +144,8 @@ export async function registerBackupRoutes(app: FastifyInstance) {
       // Treat restored paths as unverified until the source health check runs on the new host.
       database.exec("UPDATE sources SET connected = 0");
       database.exec("UPDATE media_items SET available = 0");
+      database.exec("UPDATE music_tracks SET available = 0");
+      database.exec("UPDATE music_sources SET status = 'idle'");
       database.prepare("DELETE FROM maintenance_versions WHERE name = 'strict-people'").run();
       database.exec("COMMIT");
     } catch (error) {

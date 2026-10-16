@@ -137,3 +137,25 @@ test("media card menus open deletion confirmation and refresh after deletion", a
   expect(onDeleted).toHaveBeenCalledWith([7]);
   expect(props.onChanged).toHaveBeenCalledOnce();
 });
+
+test("text and sorting stay primary while advanced attribute filters retain their selections when collapsed", async () => {
+  vi.mocked(api).mockImplementation(async (url) => url.startsWith("/api/items?") ? { items: [], total: 0, pageSize: 48 } : []);
+  const onSearchChange = vi.fn();
+  let node = render({ onSearchChange });
+  const textFilter = find(node, (element) => element.props["aria-label"] === "Filter media text")!;
+  textFilter.props.onChange({ target: { value: "night" } });
+  expect(onSearchChange).toHaveBeenCalledWith("night");
+  expect(find(node, (element) => element.props["aria-label"] === "Sort media")).toBeDefined();
+  expect(find(node, (element) => element.type === TagCombobox)).toBeUndefined();
+  expect(find(node, (element) => element.props["aria-label"] === "File name contains")).toBeUndefined();
+  const toggle = () => find(node, (element) => element.type === "button" && element.props["aria-controls"] === "media-advanced-filters")!;
+  expect(toggle().props["aria-expanded"]).toBe(false);
+  toggle().props.onClick(); node = render({ onSearchChange });
+  find(node, (element) => element.type === TagCombobox && element.props.attributeKind === "category")!.props.onChange([27]);
+  node = render({ onSearchChange });
+  toggle().props.onClick(); node = render({ onSearchChange });
+  expect(find(node, (element) => element.type === TagCombobox)).toBeUndefined();
+  expect(hooks.fields["gallery.story.browse.selectedCategoryIds"]).toEqual([27]);
+  toggle().props.onClick(); node = render({ onSearchChange });
+  expect(find(node, (element) => element.type === TagCombobox && element.props.attributeKind === "category")!.props.selectedIds).toEqual([27]);
+});

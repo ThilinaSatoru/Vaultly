@@ -31,6 +31,7 @@ vi.mock("./navigation", async (original) => ({
 import { App } from "./App";
 import { MediaViewer } from "./MediaViewer";
 import { ManagementDrawer } from "./ManagementDrawer";
+import { MusicWorkspace } from "./MusicWorkspace";
 function viewers(node: ReactNode): ReactElement<any>[] {
   if (isValidElement<any>(node)) return node.type === MediaViewer ? [node] : viewers(node.props.children);
   return Array.isArray(node) ? node.flatMap(viewers) : [];
@@ -42,6 +43,35 @@ function render() {
   return viewers((child.type as (props: any) => ReactNode)(child.props));
 }
 beforeEach(() => { state.states = []; state.fields = {}; nav.entry.fields = state.fields; });
+
+test("the music directory replaces the main navigation and hiding it keeps the workspace mounted", () => {
+  const find = (node: ReactNode, predicate: (element: ReactElement<any>) => boolean): ReactElement<any> | undefined => {
+    if (isValidElement<any>(node)) return predicate(node) ? node : find(node.props.children, predicate);
+    if (Array.isArray(node)) for (const child of node) { const result = find(child,predicate); if (result) return result; }
+  };
+  const shell = () => {
+    state.cursor = 0;
+    const child = App({ profiles: { activeId: "default", profiles: [{ id: "default", name: "Default" }] } }).props.children as ReactElement<any>;
+    return (child.type as (props: any) => ReactNode)(child.props);
+  };
+  nav.reset({ section: "music" });
+  let node = shell();
+  expect(find(node, (e) => e.props["aria-label"] === "Main navigation")!.props.hidden).toBe(true);
+  const host = find(node, (e) => e.props.className === "music-navigation-host music-root")!;
+  expect(host.props.hidden).toBe(false);
+  const sidebarHost = {} as HTMLDivElement;
+  host.props.ref(sidebarHost); node = shell();
+  expect(find(node, (e) => e.type === MusicWorkspace)!.props).toMatchObject({ visible: true, sidebarHost });
+  find(node, (e) => e.props.className === "sidebar-toggle")!.props.onClick(); node = shell();
+  expect(find(node, (e) => e.props.id === "app-navigation")!.props.hidden).toBe(true);
+  expect(find(node, (e) => e.type === MusicWorkspace)!.props.visible).toBe(true);
+  expect(find(node, (e) => e.props.className === "sidebar-toggle")!.props["aria-label"]).toBe("Show navigation panel");
+  nav.reset({ section: "video" }); node = shell();
+  expect(find(node, (e) => e.props["aria-label"] === "Main navigation")!.props.hidden).toBe(false);
+  expect(find(node, (e) => e.type === MusicWorkspace)!.props.visible).toBe(false);
+  find(node, (e) => e.props["aria-label"] === "Search library")!.props.onChange({ target: { value: "night" } });
+  expect(state.fields).toMatchObject({ section: "video", search: "night" });
+});
 test("opening people management defaults to the current library and updates on reopening", () => {
   const findDrawer = (node: ReactNode): ReactElement<any> | undefined => {
     if (isValidElement<any>(node)) return node.type === ManagementDrawer ? node : findDrawer(node.props.children);

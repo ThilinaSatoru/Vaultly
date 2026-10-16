@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, Tray, nativeImage } from "electron";
 import { fork } from "node:child_process";
 import { terminateProcess } from "../../api/src/background-processes.js";
 import type { DesktopRequest, DesktopResponse } from "./server-ipc.js";
@@ -16,6 +16,35 @@ let serverAddress: string | null = null;
 let shuttingDown = false;
 let shutdownComplete = false;
 let rendererTasksRunning = false;
+let musicTray: Tray | null = null;
+let musicState = { enabled: false, playing: false, title: "" };
+function showMainWindow() {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+function updateMusicTray() {
+  if (!musicState.enabled) { musicTray?.destroy(); musicTray = null; return; }
+  if (!musicTray) {
+    const icon = nativeImage.createFromPath(path.join(currentDirectory, process.platform === "win32" ? "icon.ico" : "icon.png"));
+    musicTray = new Tray(process.platform === "win32" ? icon : icon.resize({ width: 22, height: 22 }));
+    musicTray.on("double-click", showMainWindow);
+    musicTray.on("click", showMainWindow);
+  }
+  const send = (command: string) => mainWindow?.webContents.send("music:command", command);
+  musicTray.setToolTip((musicState.title ? `Vaultly · ${musicState.title}` : "Vaultly · Music library").slice(0, 127));
+  musicTray.setContextMenu(Menu.buildFromTemplate([
+    { label: musicState.title.slice(0, 90) || "Vaultly music", enabled: false },
+    { type: "separator" },
+    { label: "Open Vaultly", click: showMainWindow },
+    { label: musicState.playing ? "Pause" : "Play", click: () => send("toggle") },
+    { label: "Previous track", enabled: Boolean(musicState.title), click: () => send("previous") },
+    { label: "Next track", enabled: Boolean(musicState.title), click: () => send("next") },
+    { type: "separator" },
+    { label: "Quit Vaultly", click: () => app.quit() },
+  ]));
+}
 const exitGuard = createExitGuard(async () => {
   if (rendererTasksRunning) return true;
   if (!serverAddress) return false;
@@ -45,6 +74,16 @@ function readPreferences() {
 function trustedPreferencesSender(event: Electron.IpcMainEvent) {
   return event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame;
 }
+ipcMain.on("window:music-state", (event, state) => {
+  if (!trustedPreferencesSender(event) || !state || typeof state.enabled !== "boolean" || typeof state.playing !== "boolean" || typeof state.title !== "string" || state.title.length > 500) return;
+  musicState = { enabled: state.enabled, playing: state.playing, title: state.title };
+  try { updateMusicTray(); } catch (error) { recordCrash(`Music tray: ${String(error)}`); musicTray?.destroy(); musicTray = null; }
+});
+ipcMain.on("window:minimize-to-tray", (event) => {
+  if (!trustedPreferencesSender(event)) return;
+  musicState.enabled = true;
+  try { updateMusicTray(); if (musicTray) mainWindow?.hide(); } catch (error) { recordCrash(String(error)); }
+});
 ipcMain.on("window:task-activity", (event, running) => {
   if (trustedPreferencesSender(event) && typeof running === "boolean") rendererTasksRunning = running;
 });
@@ -97,7 +136,7 @@ async function createWindow() {
     icon: path.join(currentDirectory, process.platform === "win32" ? "icon.ico" : "icon.png"),
     show: false,
     autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(currentDirectory, "preload.cjs") },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false, preload: path.join(currentDirectory, "preload.cjs") },
   });
   mainWindow.setMenu(null);
 
@@ -105,6 +144,7 @@ async function createWindow() {
   mainWindow.webContents.on("render-process-gone", (_event, details) => recordCrash(`Renderer: ${JSON.stringify(details)}`));
   mainWindow.on("close", (event) => {
     if (shuttingDown || exitGuard.approved) return;
+    if (musicState.enabled && musicTray) { event.preventDefault(); mainWindow?.hide(); return; }
     event.preventDefault();
     void exitGuard.request(() => app.quit()).catch((error) => recordCrash(String(error)));
   });
@@ -175,10 +215,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    showMainWindow();
   });
   app.whenReady().then(createWindow).catch((error) => {
     const details = error instanceof Error ? error.stack ?? error.message : String(error);
@@ -199,6 +236,7 @@ app.on("ready", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+  else showMainWindow();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

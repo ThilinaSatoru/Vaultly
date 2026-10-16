@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./styles.css";
 import "./polish.css";
+import "./shell.css";
 import { setActiveProfile, type VaultProfiles } from "./vault-session";
 import { applyTheme } from "./theme";
 import { DesktopTitleBar } from "./DesktopTitleBar";

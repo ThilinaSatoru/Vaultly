@@ -18,6 +18,11 @@ export function runCommand(command: string, args: string[], options: ExecFileOpt
   if (task.child) trackProcess(task.child);
   return task;
 }
+export function runBinaryCommand(command: string, args: string[], options: ExecFileOptions = {}) {
+  const task = execute(command, args, { ...options, encoding: "buffer", signal: backgroundSignal(options.signal) });
+  if (task.child) trackProcess(task.child);
+  return task;
+}
 export async function terminateProcess(child: ChildProcess) {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   if (process.platform === "win32") {

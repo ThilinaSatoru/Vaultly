@@ -12,6 +12,15 @@ window.addEventListener("pointerdown", (event) => {
 contextBridge.exposeInMainWorld("vaultlyWindow", {
   platform: process.platform,
   taskActivity: (running: boolean) => ipcRenderer.send("window:task-activity", running),
+  musicState: (state: { enabled: boolean; playing: boolean; title: string }) => ipcRenderer.send("window:music-state", state),
+  minimizeToTray: () => ipcRenderer.send("window:minimize-to-tray"),
+  onMusicCommand: (handler: (command: string) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, command: unknown) => {
+      if (command === "toggle" || command === "next" || command === "previous") handler(command);
+    };
+    ipcRenderer.on("music:command", listener);
+    return () => { ipcRenderer.removeListener("music:command", listener); };
+  },
   appearance: (appearance: { color: string; symbolColor: string; title: string }) => ipcRenderer.send("window:appearance", appearance),
 });
 

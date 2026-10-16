@@ -1,4 +1,6 @@
 import { Select } from "./Select";
+import { MusicWorkspace } from "./MusicWorkspace";
+import { SidebarResizeHandle, useCompactHeader } from "./AppChrome";
 import { defaultPeopleCreditFilter, type PeopleCreditFilter } from "./people-filter";
 import { VaultProfiles } from "./VaultProfiles";
 import type { VaultProfiles as ProfileList } from "./vault-session";
@@ -49,6 +51,9 @@ import {
   ListVideo,
   LoaderCircle,
   MoreHorizontal,
+  Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Orbit,
   Plus,
   RefreshCw,
@@ -61,6 +66,7 @@ import {
 import {
   type FormEvent,
   type ReactNode,
+  type CSSProperties,
   useContext,
   useCallback,
   useEffect,
@@ -114,6 +120,7 @@ interface LibrarySource {
 
 type Section =
   | "home"
+  | "music"
   | "all"
   | MediaType
   | "categories"
@@ -932,9 +939,14 @@ export function App({ profiles }: { profiles: ProfileList }) {
 function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const navigation = useContext(NavigationContext)!;
   const [section] = useNavigationField<Section>("section", "home");
+  const [sidebarHidden, setSidebarHidden] = useUiState("vaultly.ui.sidebarHidden", false);
+  const [sidebarWidth, setSidebarWidth] = useUiState("vaultly.ui.sidebarWidth", 252);
+  const [musicSidebarHost, setMusicSidebarHost] = useState<HTMLDivElement | null>(null);
+  const [musicPlayerHost, setMusicPlayerHost] = useState<HTMLDivElement | null>(null);
+  const compactHeader = useCompactHeader();
   useEffect(() => {
     const titles: Record<Section, string> = {
-      home: "A world within your vault", all: "The discovery lounge", video: "The screening room",
+      home: "A world within your vault", music: "Music library", all: "The discovery lounge", video: "The screening room",
       comic: "The panel studio", story: "The reading nook", categories: "The collection compass",
       tags: "Threads of discovery", people: "The creative constellation", sources: "Roots of your library",
       settings: "Make it yours", help: "Your field guide",
@@ -1257,6 +1269,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     .reduce((total, source) => total + source.item_count, 0);
   const sectionNames: Record<Section, string> = {
     home: "Home",
+    music: "Music library",
     all: "All media",
     comic: "Comics & pictures",
     video: "Videos",
@@ -1572,16 +1585,19 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       }}>
       <PersonDirectoryContext.Provider value={people}>
       <AttributeBrowseProvider>
-        <div className="app-shell">
+        <div className={`app-shell${section === "music" ? " app-shell--music" : ""}${sidebarHidden ? " app-shell--sidebar-hidden" : ""}`} style={{ "--app-sidebar-width": `${Math.max(200, Math.min(400, sidebarWidth))}px` } as CSSProperties}>
           {initializing && <div className="app-startup-overlay" role="status" aria-live="polite"><LoaderCircle className="spin" size={32} /><strong>Loading your library…</strong><span>Reading sources and metadata</span></div>}
-          <aside className="sidebar">
+          <aside className="sidebar" id="app-navigation" aria-label={section === "music" ? "Music navigation" : "Library navigation"} hidden={sidebarHidden}>
             <div className="brand">
               <div className="brand-mark">
                 <Library size={21} />
               </div>
               <span>Vaultly</span>
+              <button className="sidebar-hide-button" type="button" aria-label="Hide navigation panel" title="Hide navigation panel" onClick={() => setSidebarHidden(true)}><PanelLeftClose size={17} /></button>
             </div>
-            <nav aria-label="Main navigation">
+            {section === "music" && <button className="music-back-to-library secondary-button" type="button" onClick={() => selectSection("home")}><ArrowLeft size={15} /> Media libraries</button>}
+            <div className="music-navigation-host music-root" ref={setMusicSidebarHost} hidden={section !== "music"} />
+            <nav aria-label="Main navigation" hidden={section === "music"}>
               <p>Library</p>
               <button
                 className={section === "home" ? "nav-active" : "nav-link"}
@@ -1613,6 +1629,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 onBrowse={() => selectSection("story")}
                 onView={selectLibraryView}
               />
+              <button className={section === "music" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("music")}><Music2 size={19} /> Music</button>
               <p>Workspace</p>
               <button
                 className={
@@ -1646,18 +1663,24 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               </button>
             </nav>
             <BackgroundStatus onOpen={openManagement} />
+            {!sidebarHidden && <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} />}
           </aside>
 
           <main>
+            <div className={`app-header${compactHeader ? " is-compact" : ""}`}>
             <header className="topbar">
+              <button className="sidebar-toggle" type="button" aria-label={sidebarHidden ? "Show navigation panel" : "Hide navigation panel"} title={sidebarHidden ? "Show navigation panel" : "Hide navigation panel"} aria-controls="app-navigation" aria-expanded={!sidebarHidden} onClick={() => setSidebarHidden((value) => !value)}>{sidebarHidden ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button>
+              <Select className="library-mode-select" aria-label="Library mode" value={section} onChange={(event) => selectSection(event.target.value as Section)}>{(["home", "all", "video", "comic", "story", "music", "help"] as const).map((mode) => <option key={mode} value={mode}>{sectionNames[mode]}</option>)}</Select>
               <div className="search-box">
                 <Search size={19} />
                 <input
-                  aria-label="Search library"
-                  placeholder="Search your library"
+                  aria-label={section === "music" ? "Search music library" : "Search library"}
+                  placeholder={section === "music" ? "Search tracks, artists, albums, tags…" : "Search your library"}
                   value={search}
                   onChange={(event) => {
                     const nextSearch = event.target.value;
+                    if (section === "music") { setSearch(nextSearch); return; }
+                    if (["all", "video", "comic", "story"].includes(section) && libraryView !== "series" && libraryView !== "circles") { setSearch(nextSearch); return; }
                     if (
                       nextSearch &&
                       (section !== "all" || libraryView !== "browse")
@@ -1705,8 +1728,11 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 </div>
               </div>
             </header>
+            <div className="music-player-host music-root" ref={setMusicPlayerHost} />
+            </div>
 
-            <div className="content">
+            <MusicWorkspace visible={section === "music"} search={section === "music" ? search : ""} sidebarHost={musicSidebarHost} playerHost={musicPlayerHost} />
+            <div className="content" hidden={section === "music"}>
               <nav className="navigation-trail" aria-label="Navigation history">
                 <button
                   className="secondary-button"
@@ -1727,7 +1753,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 ))}
                 <strong aria-current="page">{navigation.entry.label}</strong>
               </nav>
-              {section === "home" ? (
+              {section === "music" ? null : section === "home" ? (
                 <HomeView
                   sources={sources}
                   categories={categories}
@@ -1776,6 +1802,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                   view={libraryView}
                   type={section === "all" ? undefined : section}
                   search={search}
+                  onSearchChange={setSearch}
                   categories={categories}
                   tags={tags}
                   people={people}

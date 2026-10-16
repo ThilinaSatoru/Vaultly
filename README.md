@@ -6,7 +6,7 @@
 
 ### Your media. Your folders. One beautiful library.
 
-A local-first desktop library for **movies, TV, anime, manga, e-books, and pictures**.
+A local-first desktop library for **movies, TV, anime, manga, e-books, pictures, and music**.
 Turn scattered folders into a searchable collection, with readers, playback, and tools to make it your own.
 
 ![Platforms](https://img.shields.io/badge/Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-101218?style=for-the-badge)
@@ -35,7 +35,7 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 
 - **Offline English search** understands word forms, common synonyms, and British/American spellings. `child holiday` can find *Children on vacations*.
 - **Choose your search style:** English forms & synonyms, literal phrases, or typo-tolerant matching.
-- **Narrow your gallery** by collection type, source, format, tags, categories, collection membership, size, or modified date. Choose **Sort → Folders** to browse source folders and subfolders, including within a category.
+- **Text and sorting first:** use the gallery text field and Sort selector for everyday browsing. Expand **Advanced filters** for collection type, source, format, tags, categories, membership, size, or modified date. Choose **Sort → Folders** to browse source folders and subfolders, including within a category.
 
 ### Build a library that feels yours
 
@@ -54,6 +54,14 @@ Vaultly indexes your collection where it lives. Your library database and thumbn
 - **Comic reader:** browse image folders and CBZ/ZIP pages in natural order. Picture sources index each image separately.
 - **Cached previews:** video and PDF thumbnails help you recognize items at a glance.
 - **Management dock:** open tags, categories, people, sources, and settings in a tabbed drawer that keeps drafts while you browse.
+
+### A separate home for music
+
+- **Music library:** add audio folders from Music → Add music folder. Music has its own sources, artists, albums, categories, tags, and custom playlists, separate from the gallery and its metadata.
+- **Automatic indexing:** read embedded titles, artist and album-artist credits, disc/track order, genres, technical audio properties, and embedded cover images. Genres become categories; codecs, lossless audio, mood, and language become tags. Music attribute names and aliases match during rescans using the same offline English word normalization.
+- **Browse and listen:** search all music with plain text, or search within an artist, album, playlist, or attribute. Advanced filters stay collapsed. Switch between list and card views, rate tracks with stars, sort by rating or audio properties, and reorder custom playlists.
+- **Audio workspace:** Music replaces the main sidebar with its artist, album, and playlist directory and fills the remaining window with tracks and the inspector. Hide/show or resize the main navigation, resize the live frequency spectrum and oscilloscope, and inspect detailed file information and embedded metadata. The compact top bar stays visible while scrolling.
+- **Background playback:** the top player, seek bar, volume, shuffle, repeat, queue, and media keys keep working while you browse. In the desktop app, enable **Close to system tray** or choose **Keep playing in tray** in the music sidebar. The tray menu provides playback controls, Open Vaultly, and Quit Vaultly.
 
 ### Keep control of your collection
 
@@ -97,6 +105,7 @@ Each published release includes `SHA256SUMS.txt` to verify downloads. Installers
 | CBZ / ZIP comics | Archive indexing | Built-in page and continuous readers |
 | CBR / CB7 / CBT comics | Archive indexing | Open in the associated desktop reader |
 | Pictures, including BMP, TIFF, HEIC/HEIF | Individual image indexing in Picture sources | Browser-supported images display in-app; other formats use a desktop app |
+| MP3, FLAC, M4A/AAC, Ogg/Opus, WAV, AIFF, WMA, APE, WavPack, ALAC | Separate music indexing, embedded artwork, artists, albums, playlists, and ratings | Native audio playback; unsupported formats use a locally cached compatible MP3 copy without changing originals |
 
 The built-in ZIP readers accept archives up to 256 MB, with bounded chapter/page sizes. Encrypted, damaged, or unsupported archives can be opened in a desktop reader. EPUB reading preserves text, chapter order, and common raster illustrations; publisher-specific styling is simplified.
 
