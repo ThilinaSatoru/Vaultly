@@ -215,8 +215,8 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
   app.patch("/api/series/:id", async (request, reply) => {
     const { id } = idInput.parse(request.params);
     const { title, description, preferredType } = detailsInput.parse(request.body);
-    const changed = database.prepare("UPDATE series SET title = ?, description = ?, preferred_type = COALESCE(?, preferred_type), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-      .run(title, description, preferredType ?? null, id).changes;
+    const changed = database.prepare("UPDATE series SET auto_key = CASE WHEN title <> ? THEN NULL ELSE auto_key END, title = ?, description = ?, preferred_type = COALESCE(?, preferred_type), updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(title, title, description, preferredType ?? null, id).changes;
     if (!changed) return reply.code(404).send({ message: "Series or set not found." });
     return getSeries(id);
   });
@@ -319,6 +319,7 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       database.prepare("DELETE FROM series_items WHERE series_id = ?").run(id);
       const insert = database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?)");
       unique.forEach((itemId, position) => insert.run(id, itemId, position));
+      database.prepare("UPDATE series SET auto_key = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(id);
       database.exec("COMMIT");
     } catch (error) {
       database.exec("ROLLBACK");

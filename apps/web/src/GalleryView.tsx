@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { Select } from "./Select";
 import { mediaCardOrientation, useArtworkOrientation } from "./artwork";
 import { vaultUrl } from "./vault-session";
@@ -10,6 +11,7 @@ import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { BulkActionDialog } from "./BulkActionDialog";
 import { DeleteMediaDialog } from "./DeleteMediaDialog";
 import { api, formatCount, formatDuration, formatSize, formatVideoQuality, type Category, type CircleSummary, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
+import { useLastPlayed } from "./last-played";
 import type { LibraryView } from "./App";
 import { galleryVideoContext, type GalleryVideoContext } from "./video-playlist";
 import { ActionMenu } from "./ActionMenu";
@@ -19,6 +21,7 @@ interface GalleryViewProps {
   view: LibraryView;
   type?: MediaType;
   search: string;
+  onSearchChange?: (search: string) => void;
   categories: Category[];
   tags: Tag[];
   people: Person[];
@@ -214,6 +217,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
 }
 
 function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; onOpen: () => void; mediaType?: MediaType }) {
+  const lastPlayed = useLastPlayed(series.id);
   const attributes = series.card_attributes ?? series;
   const contentTypes = (["video", "comic", "story"] as const).filter((type) => series[`${type}_count`] > 0);
   const badgeType = mediaType ?? (contentTypes.length === 1 ? contentTypes[0] : contentTypes.length === 0 && series.preferred_type !== "mixed" ? series.preferred_type : undefined);
@@ -225,10 +229,11 @@ function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; 
       <div className={`media-art collection-art media-art-${orientation}${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={vaultUrl(cover)} alt="" loading="lazy" onLoad={onLoad} />}<span className="media-type-badge">Collection</span></div>
     </button>
     <div className="media-card-body"><h3 title={series.title}><button className="card-title-open" type="button" onClick={onOpen}>{series.title}</button></h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{attributes.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{attributes.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(attributes.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
+    {lastPlayed && <button className="collection-last-played" type="button" onClick={onOpen} title={lastPlayed.title}>Last played: {lastPlayed.title}</button>}
   </article>;
 }
 
-export function GalleryView({ view, type, search, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, onDeleted, sources, onOpen, onQueueVideo, queuedVideoIds, onOpenSeries, onAddSource, refreshKey }: GalleryViewProps) {
+export function GalleryView({ view, type, search, onSearchChange, categories, tags, people, onTagCreated, onCategoryCreated, onPersonCreated, onChanged, onDeleted, sources, onOpen, onQueueVideo, queuedVideoIds, onOpenSeries, onAddSource, refreshKey }: GalleryViewProps) {
   const navigation = useContext(NavigationContext)!;
   function useGalleryField<T>(key: string, fallback: T, destination?: string): [T, Dispatch<SetStateAction<T>>] {
     return useNavigationField("gallery." + (type ?? "all") + "." + view + "." + key, fallback, destination);
@@ -457,6 +462,7 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
     return item ? <MediaCard key={`item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id, galleryVideoContext(result, item.id))} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} onDelete={() => setDeletingItem(item)} /> : null;
   });
   const paginationControls = result ? <div className="pagination">
+    <button className="secondary-button" type="button" onClick={() => { setPage(0); window.scrollTo({ top: 0, behavior: "smooth" }); }}>First page</button>
     <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
     <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>
     <button className="secondary-button" type="button" onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * result.pageSize >= result.total}>Next</button>
@@ -476,12 +482,11 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
         {categoryOverview.uncategorized_count > 0 && <button className="category-selection-card" type="button" onClick={() => setBrowseCategory("uncategorized")}><span className="category-selection-icon"><FolderPlus size={23} /></span><strong>Uncategorized</strong><small>{formatCount(categoryOverview.uncategorized_count)} items</small></button>}
       </div>}
 
-      {view === "browse" && <div className="gallery-toolbar">
-        <TagCombobox attributeKind="category" label="Categories (match all)" tags={categories} options={filterAttributes?.categories ?? []} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized || !filterAttributes} placeholder="All categories" />
-        <TagCombobox attributeKind="tag" label="Tags (match all)" tags={tags} options={filterAttributes?.tags ?? []} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged || !filterAttributes} placeholder="All tags" />
+      {!(view === "categories" && browseCategory === null) && <div className="gallery-toolbar gallery-primary-tools">
+        <label className="gallery-filter-field gallery-text-filter"><span>Text filter</span><ClearableInput aria-label="Filter media text" value={search} onChange={(event) => onSearchChange ? onSearchChange(event.target.value) : navigation.update({ search: event.target.value })} placeholder="Filter titles, filenames, tags and artists…" /></label>
         <label className="select-wrap">
           <span>Sort</span>
-          <Select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
+          <Select aria-label="Sort media" value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}>
             <option value="auto">Automatic</option>
             <option value="folders">Folders</option>
             <option value="relevance">Best match</option>
@@ -493,30 +498,30 @@ export function GalleryView({ view, type, search, categories, tags, people, onTa
             <option value="smallest">Smallest first</option>
           </Select>
         </label>
-        <button className={`gallery-more-button${advancedOpen ? " is-open" : ""}`} type="button" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal size={16} /> More filters{extraFilterCount > 0 ? ` (${extraFilterCount})` : ""}</button>
+        <button className={`gallery-more-button${advancedOpen ? " is-open" : ""}`} type="button" aria-expanded={advancedOpen} aria-controls="media-advanced-filters" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal size={16} /> Advanced filters{extraFilterCount + selectedCategoryIds.length + selectedTagIds.length > 0 ? ` (${extraFilterCount + selectedCategoryIds.length + selectedTagIds.length})` : ""}</button>
         {hasFilters && <button className="gallery-clear-button" type="button" onClick={clearFilters}><X size={15} /> Clear filters</button>}
       </div>}
 
-      {view === "browse" && advancedOpen && <div className="gallery-advanced" aria-label="More filters">
+      {!(view === "categories" && browseCategory === null) && advancedOpen && <div className="gallery-advanced" id="media-advanced-filters" aria-label="Advanced filters">
+        <TagCombobox attributeKind="category" label="Categories (match all)" tags={categories} options={filterAttributes?.categories ?? []} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} disabled={uncategorized || !filterAttributes} placeholder="All categories" />
+        <TagCombobox attributeKind="tag" label="Tags (match all)" tags={tags} options={filterAttributes?.tags ?? []} selectedIds={selectedTagIds} onChange={setSelectedTagIds} disabled={untagged || !filterAttributes} placeholder="All tags" />
         <label className="gallery-filter-field"><span>Search mode</span><Select aria-label="Search mode" value={searchMode} onChange={(event) => { setSearchMode(event.target.value as typeof searchMode); setDebouncedSearch(search); setPage(0); }}><option value="english">English forms & synonyms</option><option value="literal">Literal / phrases</option><option value="fuzzy">Typo tolerant</option></Select></label>
-        <label className="gallery-filter-field"><span>File name</span><input value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Search filenames" aria-label="File name contains" /></label>
+        <label className="gallery-filter-field"><span>File name</span><ClearableInput value={filename} onChange={(event) => setFilename(event.target.value)} placeholder="Search filenames" aria-label="File name contains" /></label>
         {!type && <label className="gallery-filter-field"><span>Media type</span><Select value={selectedType} onChange={(event) => { setSelectedType(event.target.value as MediaType | ""); setExtension(""); }}><option value="">All types</option><option value="comic">Comics</option><option value="video">Videos</option><option value="story">PDF stories</option></Select></label>}
         <label className="gallery-filter-field"><span>Collection type</span><Select value={sourceType} onChange={(event) => { setSourceType(event.target.value); setSourceId(""); setFolderPath(""); }}><option value="">All collection types</option><option value="movies">Movies</option><option value="tv">TV series</option><option value="anime">Anime</option><option value="manga">Manga</option><option value="ebooks">E-books</option><option value="pictures">Pictures</option></Select></label>
         <label className="gallery-filter-field"><span>Source folder</span><Select value={sourceId} onChange={(event) => { setSourceId(event.target.value); setFolderPath(""); }}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</Select></label>
         <label className="gallery-filter-field"><span>File format</span><Select value={extension} onChange={(event) => setExtension(event.target.value)}><option value="">All formats</option>{formats.map((format) => <option key={format.extension || "folder"} value={format.extension || "folder"}>{format.extension ? `.${format.extension.toUpperCase()}` : "Image folder"} ({format.item_count})</option>)}</Select></label>
         <label className="gallery-filter-field"><span>Series / set</span><Select value={seriesFilter} onChange={(event) => setSeriesFilter(event.target.value)}><option value="">All items</option><option value="grouped">In any set</option><option value="ungrouped">Not in a set</option>{seriesOptions.filter(hasMedia).map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</Select></label>
         <label className="gallery-filter-field"><span>Circle</span><Select value={circleFilter} onChange={(event) => setCircleFilter(event.target.value)}><option value="">All circles</option>{circleOptions.filter(hasMedia).map((entry) => <option key={entry.id} value={entry.id}>{entry.title}</option>)}</Select></label>
-        <label className="gallery-filter-field"><span>Path contains</span><input value={pathText} onChange={(event) => setPathText(event.target.value)} placeholder="Folder or relative path" /></label>
-        <label className="gallery-filter-field"><span>Minimum size (MB)</span><input type="number" min="0" step="0.1" value={minMb} onChange={(event) => setMinMb(event.target.value)} placeholder="No minimum" /></label>
-        <label className="gallery-filter-field"><span>Maximum size (MB)</span><input type="number" min="0" step="0.1" value={maxMb} onChange={(event) => setMaxMb(event.target.value)} placeholder="No maximum" /></label>
-        <label className="gallery-filter-field"><span>Modified from</span><input type="date" value={modifiedFrom} max={modifiedTo || undefined} onChange={(event) => setModifiedFrom(event.target.value)} /></label>
-        <label className="gallery-filter-field"><span>Modified through</span><input type="date" value={modifiedTo} min={modifiedFrom || undefined} onChange={(event) => setModifiedTo(event.target.value)} /></label>
+        <label className="gallery-filter-field"><span>Path contains</span><ClearableInput value={pathText} onChange={(event) => setPathText(event.target.value)} placeholder="Folder or relative path" /></label>
+        <label className="gallery-filter-field"><span>Minimum size (MB)</span><ClearableInput type="number" min="0" step="0.1" value={minMb} onChange={(event) => setMinMb(event.target.value)} placeholder="No minimum" /></label>
+        <label className="gallery-filter-field"><span>Maximum size (MB)</span><ClearableInput type="number" min="0" step="0.1" value={maxMb} onChange={(event) => setMaxMb(event.target.value)} placeholder="No maximum" /></label>
+        <label className="gallery-filter-field"><span>Modified from</span><ClearableInput type="date" value={modifiedFrom} max={modifiedTo || undefined} onChange={(event) => setModifiedFrom(event.target.value)} /></label>
+        <label className="gallery-filter-field"><span>Modified through</span><ClearableInput type="date" value={modifiedTo} min={modifiedFrom || undefined} onChange={(event) => setModifiedTo(event.target.value)} /></label>
         <TagCombobox attributeKind={effectiveType === "video" ? "cast" : "artist"} label={`${effectiveType === "video" ? "Cast" : effectiveType ? "Artists" : "Cast & artists"} (match all)`} tags={people} options={filterAttributes?.people ?? []} disabled={!filterAttributes} selectedIds={[...new Set([...selectedCastIds, ...selectedArtistIds])]} onChange={(ids) => { if (effectiveType && effectiveType !== "video") { setSelectedArtistIds(ids); setSelectedCastIds([]); } else { setSelectedCastIds(ids); setSelectedArtistIds([]); } }} placeholder={effectiveType === "video" ? "Any cast" : effectiveType ? "Any artist" : "Any person"} />
         <label className="gallery-filter-check"><input type="checkbox" checked={uncategorized} onChange={(event) => { setUncategorized(event.target.checked); if (event.target.checked) setSelectedCategoryIds([]); }} /> Uncategorized only</label>
         <label className="gallery-filter-check"><input type="checkbox" checked={untagged} onChange={(event) => { setUntagged(event.target.checked); if (event.target.checked) setSelectedTagIds([]); }} /> Untagged only</label>
       </div>}
-
-      {!(view === "categories" && browseCategory === null) && <div className="source-media-filters" role="group" aria-label="Browse by collection type">{[{ value: "", label: "All types", type: undefined }, { value: "movies", label: "Movies", type: "video" }, { value: "tv", label: "TV series", type: "video" }, { value: "anime", label: "Anime", type: "video" }, { value: "manga", label: "Manga", type: "comic" }, { value: "ebooks", label: "E-books", type: "story" }, { value: "pictures", label: "Pictures", type: "comic" }].filter((option) => !type || !option.type || option.type === type).map((option) => <button type="button" key={option.value} aria-pressed={sourceType === option.value} onClick={() => { setSourceType(option.value); setSourceId(""); setFolderPath(""); }}>{option.label}</button>)}</div>}
       {!(view === "categories" && browseCategory === null) && <div className="gallery-selection-bar">
         <button className="secondary-button" type="button" onClick={selectPage} disabled={!result?.items.length}>Select page</button>
         {selectedItemIds.length > 0 && <><span>{selectedItemIds.length} selected{selectedItemIds.length >= 500 ? " · limit reached" : ""}</span><button className="primary-button" type="button" onClick={() => setBulkOpen(true)}>Bulk actions</button><button className="gallery-clear-button" type="button" onClick={() => setSelectedItemIds([])}>Clear selection</button></>}

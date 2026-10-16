@@ -1,17 +1,18 @@
+import { ClearableInput } from "./ClearableField";
 import { Select } from "./Select";
 import { rankSearchResults } from "./search-relevance";
 import { Fragment, type ReactNode, useMemo } from "react";
 import { useUiState } from "./ui-state";
 import { Folder, HardDrive, Search } from "lucide-react";
 
-const sourceLabels: Record<string, string> = { movies: "Movies", tv: "TV series", anime: "Anime", manga: "Manga", ebooks: "E-books", pictures: "Pictures" };
+const sourceLabels: Record<string, string> = { movies: "Movies", tv: "TV series", anime: "Anime", manga: "Manga", ebooks: "E-books", pictures: "Pictures", music: "Music" };
 interface SourceSummary {
   media_type?: string;
   id: number; name: string; root_path: string; comic_count: number; video_count: number; story_count: number;
   item_count: number; status: string; path_available: boolean;
-  enabled?: number;
+  enabled?: number; music_count?: number;
 }
-type MediaFilter = "all" | "comic" | "video" | "story" | "mixed";
+type MediaFilter = "all" | "comic" | "video" | "story" | "mixed" | "music";
 export function sourceMediaGroup(source: SourceSummary) {
   if (source.media_type && sourceLabels[source.media_type]) return sourceLabels[source.media_type];
   const types = [source.comic_count, source.video_count, source.story_count].filter((count) => count > 0).length;
@@ -21,7 +22,7 @@ export function matchesSource(source: SourceSummary, media: MediaFilter, status:
   const text = query.trim().toLocaleLowerCase();
   const matchesText = !text || `${source.name} ${source.root_path}`.toLocaleLowerCase().includes(text);
   const matchesStatus = status === "all" || (status === "disabled" ? source.enabled === 0 : source.enabled !== 0 && (status === "unavailable" ? !source.path_available : source.path_available && source.status === status));
-  const matchesMedia = media === "all" || (media === "mixed" ? sourceMediaGroup(source) === "Mixed media" : source[`${media}_count`] > 0);
+  const matchesMedia = media === "all" || (media === "mixed" ? sourceMediaGroup(source) === "Mixed media" : (source[`${media}_count`] ?? 0) > 0);
   return matchesText && matchesStatus && matchesMedia;
 }
 
@@ -72,13 +73,13 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
       {node.children.length > 0 && <ul>{node.children.map((child) => renderBranch(child, depth + 1))}</ul>}
     </details>
   </li>;
-  const filters: Array<{ value: MediaFilter; label: string }> = [{ value: "all", label: "All" }, { value: "comic", label: "Comics" }, { value: "video", label: "Videos" }, { value: "story", label: "Stories" }, { value: "mixed", label: "Mixed" }];
+  const filters: Array<{ value: MediaFilter; label: string }> = [{ value: "all", label: "All" }, { value: "comic", label: "Comics" }, { value: "video", label: "Videos" }, { value: "story", label: "Stories" }, { value: "music", label: "Music" }, { value: "mixed", label: "Mixed" }];
   const toggle = (id: number) => setExpanded((current) => {
     return current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
   });
   return <section className="sources-browser" aria-label="Browse sources">
     <div className="source-filter-tools">
-      <label className="source-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find folder or path…" aria-label="Search sources" /></label>
+      <label className="source-search"><Search size={16} /><ClearableInput value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find folder or path…" aria-label="Search sources" /></label>
       <Select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filter sources by status">
         <option value="all">All statuses</option><option value="ready">Ready</option><option value="scanning">Scanning</option><option value="disabled">Disabled</option><option value="unavailable">Unavailable</option><option value="error">Errors</option><option value="idle">Not scanned</option>
       </Select>

@@ -1,3 +1,4 @@
+import { connectMediaOutput } from "./audio-output";
 import { useEffect, useRef, type RefObject } from "react";
 
 // Alternate audio stays tied to the original video's clock, so changing tracks
@@ -7,6 +8,7 @@ export function VideoAudioTrack({ src, videoRef, wantsPlayback, volume, muted, r
   onError: () => void; onLoading: (loading: boolean) => void;
 }) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  useEffect(() => { if (audioRef.current) return connectMediaOutput(audioRef.current); }, []);
   useEffect(() => {
     const audio = audioRef.current, video = videoRef.current;
     if (!audio || !video) return;

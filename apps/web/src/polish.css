@@ -233,12 +233,12 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .reader-appearance { display: inline-flex; align-items: center; gap: 8px; font-size: .72rem; }
 .reader-appearance > span { color: var(--muted); white-space: nowrap; }
 .page-tone-dim .comic-page, .page-tone-dim .pdf-canvas, .page-tone-dim .pdf-continuous-page canvas { filter: brightness(.78); }
-.page-tone-night .comic-page, .page-tone-night .pdf-canvas, .page-tone-night .pdf-continuous-page canvas { filter: invert(.9) hue-rotate(180deg); }
+.page-tone-night .comic-page, .page-tone-night .pdf-canvas, .page-tone-night .pdf-continuous-page canvas { filter: none; }
 .page-tone-original .ebook-scroll { color: #292b24; background: #f0ede4; }
 .page-tone-dim .ebook-scroll { color: #d7d6c8; background: #25292e; }
 .page-tone-night .ebook-scroll { color: #c1c7bf; background: #0a0e0b; }
 .page-tone-dim .ebook-chapter img { filter: brightness(.78); }
-.page-tone-night .ebook-chapter img { filter: invert(.9) hue-rotate(180deg); }
+.page-tone-night .ebook-chapter img { filter: none; }
 
 /* Custom select controls retain native form behavior without native popups. */
 .custom-select { display: inline-flex; position: relative; min-width: 0; max-width: 100%; vertical-align: middle; }
@@ -536,3 +536,20 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .viewer.viewer-sidebar-hidden .viewer-details { display: none; }
 .circle-card-open { flex-shrink: 0; padding: 0; border: 0; color: var(--acid); background: transparent; }
 .circle-card .media-card-tags { margin-top: 12px; }
+
+/* Night ink changes the reading surface while retaining original artwork. */
+.page-tone-night .comic-page-scroll, .page-tone-night .pdf-scroll { background: #0a0e0b; }
+.pdf-reader:fullscreen, .ebook-reader:fullscreen { width: 100vw; height: 100dvh; display: flex; flex-direction: column; background: var(--bg); }
+.pdf-reader:fullscreen .pdf-scroll, .ebook-reader:fullscreen .ebook-scroll { flex: 1; height: auto; min-height: 0; }
+.comic-page-control { display: inline-flex; align-items: center; gap: 5px; }
+.comic-page-control input, .ebook-toolbar input[type=number] { width: 62px; min-width: 0; padding: 4px; color: inherit; background: var(--field); border: 1px solid var(--border); border-radius: 5px; }
+
+.clearable-field { position: relative; display: inline-flex; align-items: stretch; flex: 1 1 auto; width: 100%; min-width: 0; max-width: 100%; vertical-align: middle; }
+.clearable-field > :is(input, textarea) { width: 100%; min-width: 0; }
+.clearable-field.has-value > :is(input, textarea) { padding-right: 30px !important; }
+.clearable-field > .clear-field-button { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; min-height: 0; padding: 0; margin: 0; color: var(--muted); border: 0; border-radius: 4px; background: transparent; z-index: 1; cursor: pointer; }
+.clearable-field > .clear-field-button:hover { color: var(--text); background: var(--accent-soft); }
+.clearable-field > .clear-field-button:focus-visible { outline: 2px solid var(--acid); outline-offset: -2px; }
+.clearable-field--multiline > .clear-field-button { top: 6px; transform: none; }
+.clearable-field input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; }
+.path-control > .clearable-field, .music-path-input > .clearable-field { flex: 1; }

@@ -1,4 +1,11 @@
+import { YoutubeLibrary, type YoutubePlayback } from "./YoutubeLibrary";
+import { YoutubePlayer } from "./YoutubePlayer";
+import { MusicSourceCard } from "./MusicSourceCard";
+import type { MusicSource } from "./music";
+import { ClearableInput } from "./ClearableField";
 import { Select } from "./Select";
+import { MusicWorkspace } from "./MusicWorkspace";
+import { SidebarResizeHandle, useCompactHeader } from "./AppChrome";
 import { defaultPeopleCreditFilter, type PeopleCreditFilter } from "./people-filter";
 import { VaultProfiles } from "./VaultProfiles";
 import type { VaultProfiles as ProfileList } from "./vault-session";
@@ -49,6 +56,9 @@ import {
   ListVideo,
   LoaderCircle,
   MoreHorizontal,
+  Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Orbit,
   Plus,
   RefreshCw,
@@ -61,6 +71,7 @@ import {
 import {
   type FormEvent,
   type ReactNode,
+  type CSSProperties,
   useContext,
   useCallback,
   useEffect,
@@ -74,7 +85,6 @@ import { MediaViewer } from "./MediaViewer";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
 import { useUiState } from "./ui-state";
-import { useLastPlayed } from "./last-played";
 import { HelpView } from "./HelpView";
 import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
 import {
@@ -85,7 +95,6 @@ import {
   type MediaType,
   type Person,
   type SeriesViewerContext,
-  type SeriesDetail,
   type Tag,
 } from "./media";
 
@@ -114,6 +123,8 @@ interface LibrarySource {
 
 type Section =
   | "home"
+  | "music"
+  | "youtube"
   | "all"
   | MediaType
   | "categories"
@@ -202,13 +213,14 @@ const formatScanDate = (value: string | null) => {
 function AddSourceDialog({
   onClose,
   onAdded,
+  initialMediaType = "",
   ...attributeOptions
-}: SourceAttributeOptions & { onClose: () => void; onAdded: () => void }) {
+}: SourceAttributeOptions & { onClose: () => void; onAdded: () => void; initialMediaType?: string }) {
   const [rootPath, setRootPath] = useState("");
   const [tagIds, setTagIds] = useState<number[]>([]);
   const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [name, setName] = useState("");
-  const [mediaType, setMediaType] = useState("");
+  const [mediaType, setMediaType] = useState(initialMediaType);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -242,7 +254,7 @@ function AddSourceDialog({
     setSaving(true);
     setError("");
     try {
-      await api("/api/sources", {
+      await api(mediaType === "music" ? "/api/music/sources" : "/api/sources", {
         method: "POST",
         body: JSON.stringify({
           rootPath: rootPath.trim(),
@@ -294,10 +306,11 @@ function AddSourceDialog({
           <option value="manga">Manga / comics</option>
           <option value="ebooks">E-books / documents</option>
           <option value="pictures">Pictures</option>
+          <option value="music">Music / music videos</option>
         </Select>
         <label htmlFor="source-path">Folder path</label>
         <div className="path-control">
-          <input
+          <ClearableInput
             id="source-path"
             value={rootPath}
             onChange={(event) => setRootPath(event.target.value)}
@@ -321,30 +334,28 @@ function AddSourceDialog({
         <label htmlFor="source-name">
           Display name <span>Optional</span>
         </label>
-        <input
+        <ClearableInput
           id="source-name"
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="Uses the folder name by default"
         />
 
-        <SourceAttributeFields
+        {mediaType !== "music" && <SourceAttributeFields
           {...attributeOptions}
           tagIds={tagIds}
           categoryIds={categoryIds}
           onTagsChange={setTagIds}
           onCategoriesChange={setCategoryIds}
           disabled={saving}
-        />
+        />}
 
         <div className="mixed-note">
           <Grid2X2 size={18} />
           <div>
-            <strong>Scan only the selected media</strong>
+            <strong>{mediaType === "music" ? "Scan audio and music videos" : "Scan only the selected media"}</strong>
             <span>
-              Movie and series scans skip cover images, subtitles, and unrelated
-              documents. Seasons, chapters, and custom subfolders stay
-              browsable.
+              {mediaType === "music" ? "Audio files and videos in this folder appear in Music, with embedded titles, artists, albums, and artwork." : "Movie and series scans skip cover images, subtitles, and unrelated documents. Seasons, chapters, and custom subfolders stay browsable."}
             </span>
           </div>
         </div>
@@ -932,9 +943,14 @@ export function App({ profiles }: { profiles: ProfileList }) {
 function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const navigation = useContext(NavigationContext)!;
   const [section] = useNavigationField<Section>("section", "home");
+  const [sidebarHidden, setSidebarHidden] = useUiState("vaultly.ui.sidebarHidden", false);
+  const [sidebarWidth, setSidebarWidth] = useUiState("vaultly.ui.sidebarWidth", 252);
+  const [musicSidebarHost, setMusicSidebarHost] = useState<HTMLDivElement | null>(null);
+  const [musicPlayerHost, setMusicPlayerHost] = useState<HTMLDivElement | null>(null);
+  const compactHeader = useCompactHeader();
   useEffect(() => {
     const titles: Record<Section, string> = {
-      home: "A world within your vault", all: "The discovery lounge", video: "The screening room",
+      home: "A world within your vault", music: "Music library", youtube: "YouTube library", all: "The discovery lounge", video: "The screening room",
       comic: "The panel studio", story: "The reading nook", categories: "The collection compass",
       tags: "Threads of discovery", people: "The creative constellation", sources: "Roots of your library",
       settings: "Make it yours", help: "Your field guide",
@@ -947,6 +963,13 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   );
   const [search, setSearch] = useNavigationField("search", "");
   const [sources, setSources] = useState<LibrarySource[]>([]);
+  const [musicSources, setMusicSources] = useState<MusicSource[]>([]);
+  const [newSourceType, setNewSourceType] = useState("");
+  const combinedSources: Array<LibrarySource & { music_count?: number }> = [...sources, ...musicSources.map((source) => ({
+    id: -source.id, name: source.name, root_path: source.root_path, media_type: "music", status: source.status as SourceStatus,
+    last_error: source.last_error, last_scanned_at: null, scan_progress: null, item_count: source.track_count, music_count: source.track_count,
+    comic_count: 0, video_count: 0, story_count: 0, path_available: source.path_available !== false, path_error: null,
+  }))];
   const [categories, setCategories] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
@@ -991,7 +1014,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     null,
   );
   const [temporaryPlaylist, setTemporaryPlaylist] = useUiState<MediaItem[]>("vaultly.ui.playlist", []);
-  const lastPlayed = useLastPlayed();
+  const youtubePageKey = `${navigation.entry.id}:${section}`;
+  const [youtubeSession, setYoutubeSession] = useState<{ playback: YoutubePlayback; floating: boolean; pageKey: string } | null>(null);
   const [floatingSession, setFloatingSession] = useState<{
     id: number;
     series: SeriesViewerContext | null;
@@ -1039,7 +1063,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const loadSources = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
     try {
-      setSources(await api<LibrarySource[]>("/api/sources"));
+      const [media, music] = await Promise.all([api<LibrarySource[]>("/api/sources"), api<MusicSource[]>("/api/music/sources")]);
+      setSources(media); setMusicSources(music);
       setError("");
     } catch (requestError) {
       setError(
@@ -1159,8 +1184,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   }, [section, openManagement]);
 
   const isScanning = useMemo(
-    () => sources.some((source) => source.status === "scanning"),
-    [sources],
+    () => sources.some((source) => source.status === "scanning") || musicSources.some((source) => source.status === "scanning"),
+    [sources, musicSources],
   );
   const scanningSourceKey = useMemo(
     () =>
@@ -1214,6 +1239,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         polling = true;
         try {
           if (isScanning) {
+            setMusicSources(await api<MusicSource[]>("/api/music/sources"));
             const updates = await api<
               Array<
                 Pick<
@@ -1257,6 +1283,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     .reduce((total, source) => total + source.item_count, 0);
   const sectionNames: Record<Section, string> = {
     home: "Home",
+    music: "Music library",
+    youtube: "YouTube library",
     all: "All media",
     comic: "Comics & pictures",
     video: "Videos",
@@ -1362,7 +1390,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     setRescanningAll(true);
     setError("");
     try {
-      await api("/api/sources/scan", {
+      if (!rescanMediaType || rescanMediaType === "music") await Promise.all(musicSources.map((source) => api(`/api/music/sources/${source.id}/scan`, { method: "POST" })));
+      if (rescanMediaType !== "music") await api("/api/sources/scan", {
         method: "POST",
         body: JSON.stringify({ englishAttributes, refactorFilenames: refactorAllFilenames && refactoringSources.length > 0, confirmFilenameChanges: confirmed, ...(rescanMediaType && { mediaType: rescanMediaType }) }),
       });
@@ -1382,6 +1411,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     setRescanningAll(true);
     setError("");
     try {
+      await Promise.all(musicSources.filter((source) => source.status === "scanning").map((source) => api(`/api/music/sources/${source.id}/cancel`, { method: "POST" })));
       await api("/api/sources/scan/cancel", { method: "POST" });
       await loadSources(true);
       refreshMedia();
@@ -1448,6 +1478,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               <option value="manga">Manga / comics only</option>
               <option value="ebooks">E-books / documents only</option>
               <option value="pictures">Pictures only</option>
+              <option value="music">Music / music videos only</option>
               <option value="mixed">Legacy mixed media only</option>
             </Select>
             <Select aria-label="Scan options" value={refactorAllFilenames ? "refactor" : "scan"} onChange={(event) => setRefactorAllFilenames(event.target.value === "refactor")} disabled={rescanningAll}>
@@ -1458,7 +1489,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               className="secondary-button"
               type="button"
               onClick={() => void rescanAll()}
-              disabled={rescanningAll || sources.length === 0}>
+              disabled={rescanningAll || combinedSources.length === 0}>
               {rescanningAll ? (
                 <LoaderCircle className="spin" size={18} />
               ) : (
@@ -1470,7 +1501,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
           <button
             className="primary-button"
             type="button"
-            onClick={() => setShowAddSource(true)}>
+            onClick={() => { setNewSourceType(""); setShowAddSource(true); }}>
             <Plus size={18} /> Add source
           </button>
         </div>
@@ -1479,11 +1510,11 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       <section className="summary-strip" aria-label="Source summary">
         <div>
           <span>Folders</span>
-          <strong>{formatCount(sources.length)}</strong>
+          <strong>{formatCount(combinedSources.length)}</strong>
         </div>
         <div>
           <span>Indexed items</span>
-          <strong>{formatCount(totalItems)}</strong>
+          <strong>{formatCount(totalItems + musicSources.reduce((sum, source) => sum + source.track_count, 0))}</strong>
         </div>
         <div>
           <span>Storage</span>
@@ -1503,15 +1534,17 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
         </div>
       )}
 
-      {loading && sources.length === 0 ? (
+      {loading && combinedSources.length === 0 ? (
         <div className="loading-state">
           <LoaderCircle className="spin" size={28} />
           <span>Loading sources…</span>
         </div>
-      ) : sources.length > 0 ? (
+      ) : combinedSources.length > 0 ? (
         <SourcesBrowser
-          sources={sources}
-          renderSource={(source, expanded, toggle) => (
+          sources={combinedSources}
+          renderSource={(source, expanded, toggle) => source.media_type === "music" ? (
+            <MusicSourceCard source={musicSources.find((entry) => entry.id === -source.id)!} expanded={expanded} onToggle={toggle} onChanged={() => void loadSources(true)} />
+          ) : (
             <SourceCard
               key={source.id}
               source={source}
@@ -1553,6 +1586,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       {confirmAllRefactoring && <FilenameRefactoringDialog sourceNames={refactoringSources.map((source) => source.name)} onClose={() => setConfirmAllRefactoring(false)} onConfirm={() => void rescanAll(true, true)} />}
       {showAddSource && (
         <AddSourceDialog
+          initialMediaType={newSourceType}
           {...attributeOptions}
           onClose={() => setShowAddSource(false)}
           onAdded={() => {
@@ -1572,16 +1606,19 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       }}>
       <PersonDirectoryContext.Provider value={people}>
       <AttributeBrowseProvider>
-        <div className="app-shell">
+        <div className={`app-shell${section === "music" ? " app-shell--music" : section === "youtube" ? " app-shell--youtube" : ""}${sidebarHidden ? " app-shell--sidebar-hidden" : ""}`} style={{ "--app-sidebar-width": `${Math.max(200, Math.min(400, sidebarWidth))}px` } as CSSProperties}>
           {initializing && <div className="app-startup-overlay" role="status" aria-live="polite"><LoaderCircle className="spin" size={32} /><strong>Loading your library…</strong><span>Reading sources and metadata</span></div>}
-          <aside className="sidebar">
+          <aside className="sidebar" id="app-navigation" aria-label={section === "music" ? "Music navigation" : "Library navigation"} hidden={sidebarHidden}>
             <div className="brand">
               <div className="brand-mark">
                 <Library size={21} />
               </div>
               <span>Vaultly</span>
+              <button className="sidebar-hide-button" type="button" aria-label="Hide navigation panel" title="Hide navigation panel" onClick={() => setSidebarHidden(true)}><PanelLeftClose size={17} /></button>
             </div>
-            <nav aria-label="Main navigation">
+            {section === "music" && <button className="music-back-to-library secondary-button" type="button" onClick={() => selectSection("home")}><ArrowLeft size={15} /> Media libraries</button>}
+            <div className="music-navigation-host music-root" ref={setMusicSidebarHost} hidden={section !== "music"} />
+            <nav aria-label="Main navigation" hidden={section === "music"}>
               <p>Library</p>
               <button
                 className={section === "home" ? "nav-active" : "nav-link"}
@@ -1613,6 +1650,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 onBrowse={() => selectSection("story")}
                 onView={selectLibraryView}
               />
+              <button className={section === "music" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("music")}><Music2 size={19} /> Music</button>
+              <button className={section === "youtube" ? "nav-active" : "nav-link"} type="button" onClick={() => selectSection("youtube")}><ListVideo size={19} /> YouTube</button>
               <p>Workspace</p>
               <button
                 className={
@@ -1646,18 +1685,24 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
               </button>
             </nav>
             <BackgroundStatus onOpen={openManagement} />
+            {!sidebarHidden && <SidebarResizeHandle width={sidebarWidth} onResize={setSidebarWidth} />}
           </aside>
 
           <main>
+            <div className={`app-header${compactHeader ? " is-compact" : ""}`}>
             <header className="topbar">
+              <button className="sidebar-toggle" type="button" aria-label={sidebarHidden ? "Show navigation panel" : "Hide navigation panel"} title={sidebarHidden ? "Show navigation panel" : "Hide navigation panel"} aria-controls="app-navigation" aria-expanded={!sidebarHidden} onClick={() => setSidebarHidden((value) => !value)}>{sidebarHidden ? <PanelLeftOpen size={19} /> : <PanelLeftClose size={19} />}</button>
+              <Select className="library-mode-select" aria-label="Library mode" value={section} onChange={(event) => selectSection(event.target.value as Section)}>{(["home", "all", "video", "comic", "story", "music", "youtube", "help"] as const).map((mode) => <option key={mode} value={mode}>{sectionNames[mode]}</option>)}</Select>
               <div className="search-box">
                 <Search size={19} />
-                <input
-                  aria-label="Search library"
-                  placeholder="Search your library"
+                <ClearableInput
+                  aria-label={section === "music" ? "Search music library" : section === "youtube" ? "Search YouTube library" : "Search library"}
+                  placeholder={section === "music" ? "Search tracks, artists, albums, tags…" : "Search your library"}
                   value={search}
                   onChange={(event) => {
                     const nextSearch = event.target.value;
+                    if (section === "music" || section === "youtube") { setSearch(nextSearch); return; }
+                    if (["all", "video", "comic", "story"].includes(section) && libraryView !== "series" && libraryView !== "circles") { setSearch(nextSearch); return; }
                     if (
                       nextSearch &&
                       (section !== "all" || libraryView !== "browse")
@@ -1676,19 +1721,6 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 />
               </div>
               <div className="topbar-actions">
-                {lastPlayed && <button className="playlist-launch" type="button" title={[lastPlayed.seriesTitle, lastPlayed.title].filter(Boolean).join(" · ")} onClick={() => {
-                  void (async () => {
-                    try {
-                      await api(`/api/items/${lastPlayed.itemId}`);
-                      let context: SeriesViewerContext | null = null;
-                      if (lastPlayed.seriesId !== undefined) {
-                        const series = await api<SeriesDetail>(`/api/series/${lastPlayed.seriesId}`).catch(() => null);
-                        if (series?.items.some((item) => item.id === lastPlayed.itemId)) context = { seriesId: series.id, seriesTitle: series.title, items: series.items.map(({ id, title }) => ({ id, title })) };
-                      }
-                      openItem(lastPlayed.itemId, context);
-                    } catch (reason) { setError(reason instanceof Error ? reason.message : "The last played video is unavailable."); }
-                  })();
-                }}><Clapperboard size={17} /> Continue watching</button>}
                 <ThemeToggle />
                 <VaultProfiles initial={profiles} />
                 {temporaryPlaylist.length > 0 && (
@@ -1705,8 +1737,12 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 </div>
               </div>
             </header>
+            <div className="music-player-host music-root" ref={setMusicPlayerHost} />
 
-            <div className="content">
+            </div>
+
+            <MusicWorkspace sourceRevision={musicSources.map((source) => `${source.id}:${source.status}:${source.track_count}:${source.last_scanned_at}`).join("|")} onOpenSources={() => openManagement("sources")} onAddSource={() => { setNewSourceType("music"); openManagement("sources"); setShowAddSource(true); }} visible={section === "music"} search={section === "music" ? search : ""} sidebarHost={musicSidebarHost} playerHost={musicPlayerHost} />
+            <div className="content" hidden={section === "music"}>
               <nav className="navigation-trail" aria-label="Navigation history">
                 <button
                   className="secondary-button"
@@ -1727,7 +1763,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 ))}
                 <strong aria-current="page">{navigation.entry.label}</strong>
               </nav>
-              {section === "home" ? (
+              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} onPlay={(playback) => setYoutubeSession({ playback, floating: false, pageKey: youtubePageKey })} /> : section === "home" ? (
                 <HomeView
                   sources={sources}
                   categories={categories}
@@ -1776,6 +1812,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                   view={libraryView}
                   type={section === "all" ? undefined : section}
                   search={search}
+                  onSearchChange={setSearch}
                   categories={categories}
                   tags={tags}
                   people={people}
@@ -1804,6 +1841,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
             </div>
           </main>
 
+          {youtubeSession && <YoutubePlayer playback={youtubeSession.playback}
+            floating={youtubeSession.floating || youtubeSession.pageKey !== youtubePageKey}
+            onToggleFloating={() => setYoutubeSession({ ...youtubeSession, floating: !(youtubeSession.floating || youtubeSession.pageKey !== youtubePageKey), pageKey: youtubePageKey })}
+            onClose={() => setYoutubeSession(null)} />}
           {activeViewerId !== null && (
             <MediaViewer
               {...viewerCommonProps}

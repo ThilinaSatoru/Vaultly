@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
 import { RenameAttributeDialog } from "./RenameAttributeDialog";
@@ -63,7 +64,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true, creditFilter
 
   return <section className="categories-view people-view">
     <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>Cast & artists</h1><p>One shared list of people: Cast for videos, Artists for comics and stories. Search names and patterns, or customize matching below.</p></div></div>
-    <form className="category-form" onSubmit={add}><label htmlFor="new-person">New person</label><div><input id="new-person" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" maxLength={100} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div></form>
+    <form className="category-form" onSubmit={add}><label htmlFor="new-person">New person</label><div><ClearableInput id="new-person" value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" maxLength={100} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div></form>
     {error && <p className="page-error" role="alert">{error}</p>}
     <AttributeBulkUpload kind="people" onChanged={onChanged} />
     <div className="people-cleanup"><button className="secondary-button" type="button" disabled={working} onClick={() => void cleanup()}><Trash2 size={16} /> Remove unused people</button><p>Remove records with no media or set assignments. Credits on offline sources are preserved.</p>{cleanupMessage && <p role="status">{cleanupMessage}</p>}</div>

@@ -1,4 +1,6 @@
+import { initializeYoutubeSchema } from "./youtube-schema.js";
 import { DatabaseSync } from "node:sqlite";
+import { initializeMusicSchema } from "./music-schema.js";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { initializeSearchIndex } from "./search-index.js";
@@ -337,6 +339,8 @@ database.exec(`
   BEGIN UPDATE media_items SET available = 0 WHERE id = NEW.id; END;
 `);
 initializeSearchIndex(database);
+initializeMusicSchema(database);
+initializeYoutubeSchema(database);
 
 database.exec("PRAGMA optimize");
 

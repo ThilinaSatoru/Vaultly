@@ -224,6 +224,53 @@ export function inferCollectionPattern(filename: string): { title: string; order
   return Number.isFinite(order) ? { title, order } : null;
 }
 
+/** Assign each file to at most one set, keeping source and media boundaries. */
+export function automaticCollectionGroups(sourceId: number, rootPath: string, sourceType: SourceMediaType,
+  indexedItems: Array<{ id: number; item: Pick<ScannedItem, "filename" | "relativePath" | "mediaType"> }>) {
+  type Group = { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> };
+  const groups = new Map<string, Group>();
+  const pending: Array<{ id: number; item: typeof indexedItems[number]["item"]; words: string[]; order: number }> = [];
+  for (const { id, item } of indexedItems) {
+    const folderType = item.mediaType === "video" && sourceType === "mixed" ? "movies" : sourceType;
+    const folder = folderCollection(item.relativePath, item.filename, folderType, path.basename(rootPath));
+    const pattern = inferCollectionPattern(item.filename);
+    if (folder) {
+      const key = `${sourceId}|${item.mediaType}|${folder.key}|${folder.title.toLocaleLowerCase()}`;
+      const group = groups.get(key) ?? { title: folder.title, mediaType: item.mediaType, entries: [] };
+      group.entries.push({ id, order: folder.order, path: item.relativePath });
+      groups.set(key, group);
+    }
+    const stem = pattern?.title ?? path.basename(item.filename, path.extname(item.filename));
+    const words = stem.normalize("NFC").replace(/[._-]+/g, " ").match(/[\p{L}\p{M}\p{N}]+/gu) ?? [];
+    if (words.length) pending.push({ id, item, words, order: pattern?.order ?? 0 });
+  }
+  const assigned = new Set<number>();
+  for (const [key, group] of groups) {
+    if (group.entries.length < 2) groups.delete(key);
+    else group.entries.forEach(({ id }) => assigned.add(id));
+  }
+  // Prefer two shared words, then accept a single shared word for remaining files.
+  for (const length of [2, 1]) {
+    const buckets = new Map<string, typeof pending>();
+    for (const entry of pending) {
+      if (assigned.has(entry.id) || entry.words.length < length) continue;
+      const prefix = entry.words.slice(0, length).join(" ").toLocaleLowerCase();
+      if (!/\p{L}/u.test(prefix)) continue;
+      const key = `${sourceId}|${entry.item.mediaType}|prefix|${prefix}`;
+      const bucket = buckets.get(key) ?? [];
+      bucket.push(entry); buckets.set(key, bucket);
+    }
+    for (const [key, bucket] of buckets) {
+      if (bucket.length < 2) continue;
+      groups.set(key, { title: bucket[0].words.slice(0, length).join(" "), mediaType: bucket[0].item.mediaType,
+        entries: bucket.map(({ id, item, order }) => ({ id, path: item.relativePath, order })) });
+      bucket.forEach(({ id }) => assigned.add(id));
+    }
+  }
+  for (const [key, group] of groups) if (group.entries.length < 2) groups.delete(key);
+  return groups;
+}
+
 export async function collectItems(rootPath: string, signal?: AbortSignal, progress?: ScanProgress, sourceType: SourceMediaType = "mixed"): Promise<ScannedItem[]> {
   signal?.throwIfAborted();
   const items: ScannedItem[] = [];
@@ -487,7 +534,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
             const match = strict?.size === 1 ? strict.values().next().value
               : !strict?.size && loose?.size === 1 && looseIncomingCounts.get(looseIdentity(item)) === 1 ? loose.values().next().value : undefined;
             if (match) {
-              const nextTitle = match.title === titleFromFilename(match.filename) ? item.title : match.title;
+              const nextTitle = item.title;
               reconcileMoved.run(nextTitle, item.filename, item.fileExtension, item.relativePath, item.sizeBytes,
                 item.modifiedAtMs, item.fileCount, item.sizeBytes, item.modifiedAtMs, match.id);
               reconciledIds.add(match.id);
@@ -505,7 +552,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
           } else if (previous.relativePath !== item.relativePath) {
             // A Windows case-only rename resolves to the same path key, but
             // SQLite's path uniqueness is case-sensitive. Update the same row.
-            const nextTitle = previous.title === titleFromFilename(previous.filename) ? item.title : previous.title;
+            const nextTitle = item.title;
             reconcileMoved.run(nextTitle, item.filename, item.fileExtension, item.relativePath, item.sizeBytes,
               item.modifiedAtMs, item.fileCount, item.sizeBytes, item.modifiedAtMs, previous.id);
             row = { id: previous.id };
@@ -556,50 +603,46 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         progress.currentPath = "";
         await yieldBetweenBatches();
 
-        const collectionGroups = new Map<string, { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> }>();
-        for (const indexed of indexedItems) {
-          const sourceType = previousSource?.media_type ?? "mixed";
-          const folderType = indexed.item.mediaType === "video" && (sourceType === "mixed" || sourceType === "movies") ? "movies" : sourceType;
-          const folder = folderCollection(indexed.item.relativePath, indexed.item.filename, folderType, path.basename(rootPath));
-          const pattern = folder ?? (indexed.item.mediaType === "video" ? null : inferCollectionPattern(indexed.item.filename));
-          if (!pattern) continue;
-          // Image-folder comics must be sibling folders. Video/PDF sequels may span season or volume folders.
-          const parent = indexed.item.mediaType === "comic" ? path.dirname(indexed.item.relativePath).replace(/\\/g, "/").toLocaleLowerCase() : "";
-          const key = `${sourceId}|${indexed.item.mediaType}|${folder?.key ?? parent}|${pattern.title.toLocaleLowerCase()}`;
-          const group = collectionGroups.get(key) ?? { title: pattern.title, mediaType: indexed.item.mediaType, entries: [] };
-          group.entries.push({ id: indexed.id, order: pattern.order, path: indexed.item.relativePath });
-          collectionGroups.set(key, group);
-        }
+        const collectionGroups = automaticCollectionGroups(sourceId, rootPath, previousSource?.media_type ?? "mixed", indexedItems);
         const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
         const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
         const addSeriesItem = database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?) ON CONFLICT(series_id, item_id) DO UPDATE SET position = excluded.position");
-        // Retire obsolete filename-based video sets on rescan. Collections the
-        // user has annotated, covered or placed in a circle remain intact.
-        const automaticVideoSets = database.prepare(`SELECT s.id, s.title, s.auto_key FROM series s
-          WHERE s.auto_key LIKE ? AND s.description = '' AND s.cover_data IS NULL AND s.favorite = 0
-            AND NOT EXISTS (SELECT 1 FROM series_tags st WHERE st.series_id = s.id)
-            AND NOT EXISTS (SELECT 1 FROM series_categories sc WHERE sc.series_id = s.id)
-            AND NOT EXISTS (SELECT 1 FROM series_people sp WHERE sp.series_id = s.id)
-            AND NOT EXISTS (SELECT 1 FROM circle_series cs WHERE cs.series_id = s.id)`)
-          .all(`${sourceId}|video|%`) as Array<{ id: number; title: string; auto_key: string }>;
-        for (const series of automaticVideoSets) {
-          if (!collectionGroups.has(series.auto_key) && series.auto_key.endsWith(`|${series.title.toLocaleLowerCase()}`)) database.prepare("DELETE FROM series WHERE id = ?").run(series.id);
+        const automaticSets = database.prepare(`SELECT s.id, s.title, s.auto_key,
+          (s.description <> '' OR s.cover_data IS NOT NULL OR s.favorite <> 0
+            OR EXISTS (SELECT 1 FROM series_tags st WHERE st.series_id = s.id)
+            OR EXISTS (SELECT 1 FROM series_categories sc WHERE sc.series_id = s.id)
+            OR EXISTS (SELECT 1 FROM series_people sp WHERE sp.series_id = s.id)
+            OR EXISTS (SELECT 1 FROM circle_series cs WHERE cs.series_id = s.id)) AS customized
+          FROM series s WHERE s.auto_key LIKE ?`).all(`${sourceId}|%`) as Array<{ id: number; title: string; auto_key: string; customized: number }>;
+        // Preserve customized collections as manual sets when their pattern disappears.
+        for (const set of automaticSets) {
+          if (collectionGroups.has(set.auto_key)) continue;
+          if (set.customized || !set.auto_key.endsWith(`|${set.title.toLocaleLowerCase()}`)) database.prepare("UPDATE series SET auto_key = NULL WHERE id = ?").run(set.id);
+          else database.prepare("DELETE FROM series WHERE id = ?").run(set.id);
         }
         const groupedItemIds = new Set((database.prepare(`SELECT si.item_id FROM series_items si
-          JOIN media_items m ON m.id = si.item_id WHERE m.source_id = ?`).all(sourceId) as Array<{ item_id: number }>).map((row) => row.item_id));
+          JOIN media_items m ON m.id = si.item_id JOIN series s ON s.id = si.series_id
+          WHERE m.source_id = ? AND (s.auto_key IS NULL OR s.auto_key NOT LIKE ?)`).all(sourceId, `${sourceId}|%`) as Array<{ item_id: number }>).map((row) => row.item_id));
         progress.collectionsTotal = collectionGroups.size;
         for (const [autoKey, group] of collectionGroups) {
           if (progress.collectionsProcessed % 128 === 0 || performance.now() - lastYield >= 25) await yieldBetweenBatches();
           progress.currentPath = group.title;
           let series = findAutoSeries.get(autoKey) as { id: number } | undefined;
-          if (!series && group.entries.length < 2) { progress.collectionsProcessed++; continue; }
+          group.entries = group.entries.filter((entry) => !groupedItemIds.has(entry.id));
+          if (group.entries.length < 2) {
+            if (series) {
+              const saved = automaticSets.find((set) => set.id === series!.id);
+              if (saved?.customized) database.prepare("UPDATE series SET auto_key = NULL WHERE id = ?").run(series.id);
+              else database.prepare("DELETE FROM series WHERE id = ?").run(series.id);
+            }
+            progress.collectionsProcessed++; continue;
+          }
           if (!series) {
-            const alreadyGrouped = group.entries.some((entry) => groupedItemIds.has(entry.id));
-            if (alreadyGrouped) { progress.collectionsProcessed++; continue; }
             createAutoSeries.run(group.title, group.mediaType, autoKey);
             series = findAutoSeries.get(autoKey) as { id: number } | undefined;
           }
           if (!series) { progress.collectionsProcessed++; continue; }
+          database.prepare("DELETE FROM series_items WHERE series_id = ?").run(series.id);
           group.entries.sort((a, b) => a.order - b.order || a.path.localeCompare(b.path, undefined, { numeric: true }));
           for (let position = 0; position < group.entries.length; position++) {
             const entry = group.entries[position];

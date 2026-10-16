@@ -1,6 +1,7 @@
 import { Library, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { readPaletteMode, savePaletteMode } from "./theme";
+import { MasterAudio } from "./MasterAudio";
 
 interface WindowBridge {
   platform: string;
@@ -12,15 +13,15 @@ function hexColor(color: string): string {
   return parts.length === 3 ? `#${parts.map((part) => Number(part).toString(16).padStart(2, "0")).join("")}` : "#111315";
 }
 
-export function DesktopTitleBar() {
+export function DesktopTitleBar({ audioControls = false }: { audioControls?: boolean }) {
   const bridge = (window as Window & { vaultlyWindow?: WindowBridge }).vaultlyWindow;
   const [title, setTitle] = useState(document.title || "Vaultly · A world within your vault");
   useEffect(() => {
-    if (!bridge) return;
-    document.documentElement.dataset.desktop = bridge.platform;
+    if (bridge) document.documentElement.dataset.desktop = bridge.platform;
     const update = () => {
       const title = document.title || "Vaultly · A world within your vault";
       setTitle(title);
+      if (!bridge) return;
       const styles = getComputedStyle(document.documentElement);
       // Resolve theme variables to concrete colors for native window controls.
       const probe = document.createElement("span");
@@ -37,8 +38,7 @@ export function DesktopTitleBar() {
     update();
     return () => { observer.disconnect(); delete document.documentElement.dataset.desktop; };
   }, [bridge]);
-  if (!bridge) return null;
-  return <div className="desktop-titlebar"><Library size={16} aria-hidden="true" /><span>{title}</span><small>Your private media universe</small></div>;
+  return <div className={`desktop-titlebar${bridge ? "" : " browser-titlebar"}`}><Library size={16} aria-hidden="true" /><span>{title}</span>{audioControls && <MasterAudio />}</div>;
 }
 
 export function ThemeToggle() {

@@ -2,7 +2,7 @@ import { afterEach, expect, test } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { collectItems, inferCollectionPattern } from "./scanner.js";
+import { automaticCollectionGroups, collectItems, inferCollectionPattern } from "./scanner.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -96,4 +96,26 @@ test("recognizes conservative sequel filename patterns", () => {
   expect(inferCollectionPattern("Northern Lights IV.cbz")).toEqual({ title: "Northern Lights", order: 4 });
   expect(inferCollectionPattern("Northern Lights 2024.mkv")).toBeNull();
   expect(inferCollectionPattern("Single Movie.mkv")).toBeNull();
+});
+
+test("shared one/two-word prefixes cover introductions, trailing credits and Unicode without duplicate memberships", () => {
+  const names = ["Kaamini 2 Chapter 1 (RishJanzz).pdf", "Kaamini 2 Chapter 10 (RishJanzz).pdf", "Kaamini 2 Introduction RishJanzz.pdf",
+    "Kamakumariya Dini 01.pdf", "Kamakumariya Dini Part 2.4.pdf", "Nelum Episode 1 (Rish Janzz).pdf", "Nelum Episode 2 (RishJanzz).pdf",
+    "කාමිණි 1 RishJanzz.pdf", "කාමිණි 2 RishJanzz.pdf", "Standalone.pdf"];
+  const entries = names.map((filename, id) => ({ id, item: { filename, relativePath: filename, mediaType: "story" as const } }));
+  const groups = automaticCollectionGroups(7, "/books", "ebooks", entries);
+  expect([...groups.values()].map((group) => [group.title, group.entries.length])).toEqual([
+    ["Kaamini 2", 3], ["Kamakumariya Dini", 2], ["Nelum", 2], ["කාමිණි", 2],
+  ]);
+  const ids = [...groups.values()].flatMap((group) => group.entries.map((entry) => entry.id));
+  expect(new Set(ids).size).toBe(ids.length);
+  const mixed = automaticCollectionGroups(8, "/mixed", "mixed", [
+    { id: 1, item: { filename: "Same intro.pdf", relativePath: "Same intro.pdf", mediaType: "story" } },
+    { id: 2, item: { filename: "Same sequel.mp4", relativePath: "Same sequel.mp4", mediaType: "video" } },
+  ]);
+  expect(mixed.size).toBe(0);
+  expect([...automaticCollectionGroups(9, "/movies", "movies", [
+    { id: 1, item: { filename: "Harbor Beginning.mp4", relativePath: "First/Harbor Beginning.mp4", mediaType: "video" } },
+    { id: 2, item: { filename: "Harbor Return.mp4", relativePath: "Second/Harbor Return.mp4", mediaType: "video" } },
+  ]).values()].map((group) => group.entries.length)).toEqual([2]);
 });

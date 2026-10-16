@@ -15,8 +15,9 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-test("remembering playback is opt-in and keeps a separate last episode for each series", () => {
+test("remembering playback can be disabled and keeps a separate last episode for each series", () => {
   const first = { itemId: 11, title: "Episode 1", seriesId: 1, seriesTitle: "First series" };
+  vaultStorage.setItem("vaultly.video.rememberLastPlayed", "false");
   rememberLastPlayed(first);
   expect(readLastPlayed()).toBeNull();
   vaultStorage.setItem("vaultly.video.rememberLastPlayed", "true");
@@ -32,6 +33,20 @@ test("remembering playback is opt-in and keeps a separate last episode for each 
   expect(readLastPlayed()).toBeNull();
   vaultStorage.setItem("vaultly.video.rememberLastPlayed", "true");
   expect(readLastPlayed()).toEqual(second);
+});
+
+test("playback updates all containing collections by default without replacing unrelated histories", () => {
+  rememberLastPlayed({ itemId: 3, title: "Other video", seriesId: 9, seriesTitle: "Other" });
+  const shared = { itemId: 8, title: "Shared video" };
+  rememberLastPlayed(shared, [{ id: 1, name: "First" }, { id: 2, name: "Second" }]);
+  expect(readLastPlayed(1)).toEqual({ ...shared, seriesId: 1, seriesTitle: "First" });
+  expect(readLastPlayed(2)).toEqual({ ...shared, seriesId: 2, seriesTitle: "Second" });
+  expect(readLastPlayed(9)?.itemId).toBe(3);
+  rememberLastPlayed({ itemId: 12, title: "Next video", seriesId: 1, seriesTitle: "First" });
+  expect(readLastPlayed(1)?.itemId).toBe(12);
+  expect(readLastPlayed(2)?.itemId).toBe(8);
+  vaultStorage.setItem("vaultly.video.lastPlayed.1", JSON.stringify({ ...shared, seriesId: 2 }));
+  expect(readLastPlayed(1)).toBeNull();
 });
 
 test("last played and UI state survive backup restore and stay isolated across profiles", () => {

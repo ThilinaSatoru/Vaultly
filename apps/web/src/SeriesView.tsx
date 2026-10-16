@@ -1,3 +1,4 @@
+import { ClearableInput, ClearableTextarea } from "./ClearableField";
 import { Select } from "./Select";
 import { rankSearchResults } from "./search-relevance";
 import { vaultUrl, vaultFetch } from "./vault-session";
@@ -78,6 +79,7 @@ function setType(entry: SeriesSummary): SetType {
 }
 
 function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: SeriesSummary; version: number; onOpen: () => void; onFavorite: () => void; mediaType?: MediaType }) {
+  const lastPlayed = useLastPlayed(entry.id);
   const attributes = entry.card_attributes ?? entry;
   const badgeType = mediaType ?? (setType(entry) === "mixed" ? undefined : setType(entry) as MediaType);
   return <article className="series-card-wrap">
@@ -85,6 +87,7 @@ function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: 
       <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} mediaType={mediaType} /></button>
       <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{attributes.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{attributes.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(attributes.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div></div>
     </div>
+    {lastPlayed && <button className="collection-last-played" type="button" onClick={onOpen} title={lastPlayed.title}>Last played: {lastPlayed.title}</button>}
     <button className={`series-card-favorite${entry.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={entry.favorite ? `Remove ${entry.title} from favorites` : `Add ${entry.title} to favorites`}><Heart size={17} fill={entry.favorite ? "currentColor" : "none"} /></button>
   </article>;
 }
@@ -96,6 +99,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
   const [detail, setDetail] = useState<SeriesDetail | null>(null);
   const lastPlayed = useLastPlayed(selectedId ?? undefined);
   const [search, setSearch] = useNavigationField("SeriesView.search", "");
+  const [listSort, setListSort] = useNavigationField("SeriesView.sort", "relevance");
   const [selectedTagIds, setSelectedTagIds] = useNavigationField<number[]>("SeriesView.selectedTagIds", []);
   const [selectedCategoryIds, setSelectedCategoryIds] = useNavigationField<number[]>("SeriesView.selectedCategoryIds", []);
   const [groupFilter, setGroupFilter] = useNavigationField<"all" | SetType>("SeriesView.groupFilter", "all");
@@ -301,6 +305,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     && selectedCategoryIds.every((id) => ((entry.card_attributes ?? entry).categories ?? []).some((category) => category.id === id))
     && (groupFilter === "all" || setType(entry) === groupFilter)
     && (!mediaType || (mediaType === "video" ? entry.video_count : mediaType === "comic" ? entry.comic_count : entry.story_count) > 0))), view === "browse" ? search : "", (entry) => [entry.title, entry.description]);
+  if (listSort === "title") visible.sort((a,b) => a.title.localeCompare(b.title));
+  if (listSort === "items") visible.sort((a,b) => b.item_count - a.item_count || a.title.localeCompare(b.title));
   const categorySections = [
     ...categories.map((category) => ({
       id: `category-${category.id}`,
@@ -320,8 +326,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
         <div className="series-hero-body">
           <p className="eyebrow">{setSections.find((section) => section.type === setType(detail))?.title} · {detail.item_count} items</p>
           {editing ? <form className="series-edit" onSubmit={updateDetails}>
-            <input aria-label="Set title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
-            <textarea aria-label="Set description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
+            <ClearableInput aria-label="Set title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} required />
+            <ClearableTextarea aria-label="Set description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Description" />
             <Select aria-label="Preferred content type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></Select>
             <div><button className="primary-button" type="submit" disabled={busy}>Save</button><button className="secondary-button" type="button" onClick={() => setEditing(false)}>Cancel</button></div>
           </form> : <><h1>{detail.title}</h1><p>{detail.description || "A set for related comics, videos, PDFs, and sequels."}</p></>}
@@ -345,10 +351,10 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       <div className="series-content-heading"><div><h2>In this set</h2><p>Use the arrows to put sequels in reading or viewing order.</p></div></div>
       <div className="series-members">
         {detail.items.length === 0 && <p className="series-empty-members">No media added yet. Search your library below to add the first item.</p>}
-        {detail.items.map((item, index) => <div className="series-member" key={item.id}>
+        {detail.items.map((item, index) => <div className={`series-member${lastPlayed?.itemId === item.id ? " is-last-played" : ""}`} aria-current={lastPlayed?.itemId === item.id ? "true" : undefined} key={item.id}>
           <span className="series-member-number">{index + 1}</span>
           <div className="series-member-art">{item.media_type === "video" ? <Clapperboard size={20} /> : item.media_type === "story" ? <BookOpen size={20} /> : <Image size={20} />}<PreviewImage src={itemArtwork(item.id, item.media_type, item.relative_path)} retry={item.media_type === "story"} /></div>
-          <button className="series-member-title" type="button" onClick={() => onOpenItem(item.id, { seriesId: detail.id, seriesTitle: detail.title, items: detail.items.map((entry) => ({ id: entry.id, title: entry.title })) })}><strong>{item.title}</strong><span>{item.media_type} · {item.source_name}</span></button>
+          <button className="series-member-title" type="button" onClick={() => onOpenItem(item.id, { seriesId: detail.id, seriesTitle: detail.title, items: detail.items.map((entry) => ({ id: entry.id, title: entry.title })) })}><strong>{item.title}</strong><span>{item.media_type} · {item.source_name}</span>{lastPlayed?.itemId === item.id && <span className="last-played-label">Last played</span>}</button>
           <div className="series-member-controls">
             <button type="button" title="Move earlier" aria-label={`Move ${item.title} earlier`} disabled={busy || index === 0} onClick={() => { const ids = detail.items.map((entry) => entry.id); [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]]; void updateItems(ids); }}><ArrowUp size={16} /></button>
             <button type="button" title="Move later" aria-label={`Move ${item.title} later`} disabled={busy || index === detail.items.length - 1} onClick={() => { const ids = detail.items.map((entry) => entry.id); [ids[index + 1], ids[index]] = [ids[index], ids[index + 1]]; void updateItems(ids); }}><ArrowDown size={16} /></button>
@@ -357,7 +363,7 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
         </div>)}
       </div>
       <div className="series-add"><h2>Add media</h2><p>Search indexed files and add videos, comics, or PDFs to this set.</p>
-        <div className="series-search"><Search size={17} /><input aria-label="Search media to add" value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Search by title or path" /></div>
+        <div className="series-search"><Search size={17} /><ClearableInput aria-label="Search media to add" value={itemSearch} onChange={(event) => setItemSearch(event.target.value)} placeholder="Search by title or path" /></div>
         {candidates && <div className="series-candidates">{candidates.items.filter((item) => !detail.items.some((member) => member.id === item.id)).map((item) =>
           <button key={item.id} type="button" disabled={busy} onClick={() => void updateItems([...detail.items.map((entry) => entry.id), item.id])}><Plus size={16} /><span>{item.title}</span><small>{item.media_type} · {item.source_name}</small></button>)}
           {candidates.total === 0 && <p>No indexed media matches this search.</p>}
@@ -377,11 +383,12 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
     <div className="page-heading"><div><p className="eyebrow">Your library</p><h1>{mediaType ? `${mediaType === "story" ? "Story" : mediaType[0].toUpperCase() + mediaType.slice(1)} series & sets` : view === "categories" ? "Series & sets by category" : view === "favorites" ? "Favorite series & sets" : "Series & sets"}</h1><p>{view === "categories" ? "Browse sets in dedicated category sections." : view === "favorites" ? "Your favorite collections, kept separate from library filters." : `Collections containing ${mediaType ? `${mediaType} items` : "related media"}, kept in viewing order.`}</p></div>
       {view === "browse" && <button className="primary-button" type="button" onClick={() => { setTitle(""); setDescription(""); setPreferredType(groupFilter === "all" ? "mixed" : groupFilter); setError(""); setShowCreate(true); }}><Plus size={18} /> New set</button>}</div>
     {view === "browse" && <div className="series-entity-tabs" role="group" aria-label="Collection level"><button className="active" type="button">Sets</button><button type="button" onClick={() => setEntityView("circles")}>Circles</button></div>}
-    {view === "browse" && <div className="series-filters"><div className="series-search"><Search size={17} /><input aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div>
+    {view === "browse" && <div className="gallery-toolbar gallery-primary-tools"><div className="series-search gallery-text-filter"><Search size={17} /><ClearableInput aria-label="Search series and sets" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search series and sets" /></div><label className="select-wrap"><span>Sort</span><Select aria-label="Sort series and sets" value={listSort} onChange={(event) => setListSort(event.target.value)}><option value="relevance">Best match</option><option value="title">Title A–Z</option><option value="items">Most items</option></Select></label></div>}
+    {view === "browse" && <details className="series-advanced-filters"><summary>Advanced filters{selectedCategoryIds.length + selectedTagIds.length + (groupFilter !== "all" ? 1 : 0) > 0 ? ` (${selectedCategoryIds.length + selectedTagIds.length + (groupFilter !== "all" ? 1 : 0)})` : ""}</summary><div className="series-filters">
       <TagCombobox attributeKind="category" label="Filter set categories (match all)" tags={categories} selectedIds={selectedCategoryIds} onChange={setSelectedCategoryIds} placeholder="All categories" />
-      <TagCombobox attributeKind="tag" label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>}
-    {view === "browse" && !mediaType && <div className="series-type-tabs" role="group" aria-label="Set content type">{(["all", "video", "comic", "story", "mixed"] as const).map((value) =>
-      <button key={value} type="button" className={groupFilter === value ? "active" : ""} onClick={() => setGroupFilter(value)}>{value === "all" ? "All" : value === "story" ? "Stories" : value === "comic" ? "Comics" : value === "video" ? "Videos" : "Mixed"}</button>)}</div>}
+      <TagCombobox attributeKind="tag" label="Filter set tags (match all)" tags={tags} selectedIds={selectedTagIds} onChange={setSelectedTagIds} placeholder="All tags" /></div>
+    {!mediaType && <div className="series-type-tabs" role="group" aria-label="Set content type">{(["all", "video", "comic", "story", "mixed"] as const).map((value) =>
+      <button key={value} type="button" className={groupFilter === value ? "active" : ""} onClick={() => setGroupFilter(value)}>{value === "all" ? "All" : value === "story" ? "Stories" : value === "comic" ? "Comics" : value === "video" ? "Videos" : "Mixed"}</button>)}</div>}</details>}
     {error && <p className="page-error" role="alert">{error}</p>}
     {loading ? <div className="loading-state"><LoaderCircle className="spin" size={25} /> Loading sets…</div> : visible.length ? (view === "categories" ? categorySections.map((section) =>
       <section className="category-card-section" key={section.id}><div className="category-card-heading"><h2>{section.categoryId === null ? section.title : <AttributeBadge kind="category" id={section.categoryId} name={section.title} mediaType={mediaType} />}</h2><span>{section.entries.length}</span></div><div className="series-grid">{section.entries.map((entry) =>
@@ -393,8 +400,8 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       : <div className="gallery-empty"><Layers3 size={38} /><h2>{seriesList.length ? "No matching sets" : "No series or sets yet"}</h2><p>{seriesList.length ? "Try another search or tag combination." : "Create a set, then add related media in the order you want."}</p></div>}
     {showCreate && <div className="dialog-backdrop" role="presentation" onMouseDown={() => setShowCreate(false)}><section className="dialog" role="dialog" aria-modal="true" aria-label="Create series or set" onMouseDown={(event) => event.stopPropagation()}>
       <button className="icon-button dialog-close" type="button" onClick={() => setShowCreate(false)} aria-label="Close"><X size={19} /></button><div className="dialog-icon"><Layers3 size={24} /></div><h2>New series or set</h2><p className="dialog-intro">Group any mix of videos, comics, and PDFs without moving your files.</p>
-      <form onSubmit={create}><label htmlFor="series-title">Title</label><input id="series-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required />
-        <label htmlFor="series-description">Description</label><textarea id="series-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
+      <form onSubmit={create}><label htmlFor="series-title">Title</label><ClearableInput id="series-title" value={title} maxLength={200} onChange={(event) => setTitle(event.target.value)} autoFocus required />
+        <label htmlFor="series-description">Description</label><ClearableTextarea id="series-description" value={description} maxLength={3000} onChange={(event) => setDescription(event.target.value)} placeholder="Optional" />
         <label htmlFor="series-type">Content type</label><Select id="series-type" value={preferredType} onChange={(event) => setPreferredType(event.target.value as SetType)}><option value="video">Videos</option><option value="comic">Comics</option><option value="story">Stories</option><option value="mixed">Mixed media</option></Select>
         {error && <p className="form-error" role="alert">{error}</p>}
         <div className="dialog-actions"><button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>Cancel</button><button className="primary-button" type="submit" disabled={busy}>Create set</button></div></form>

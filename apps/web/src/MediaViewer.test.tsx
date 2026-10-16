@@ -12,6 +12,7 @@ vi.mock("react", async (original) => ({
   useRef: (initial: unknown) => ({ current: initial }), useContext: () => null,
   useEffect: (effect: () => void, deps: unknown[]) => { if (deps?.[0] === "vaultly.video.sidebarVisible") hooks.jobs.push(effect); },
   useLayoutEffect: vi.fn(),
+  useCallback: (callback: unknown) => callback,
 }));
 import { MediaViewer } from "./MediaViewer";
 import { VideoPlayer } from "./VideoPlayer";

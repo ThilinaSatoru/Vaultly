@@ -57,6 +57,22 @@ test("unsupported video and audio-only decoding show a launch action without con
   expect(find(render(), (node) => node.type === "video").props.autoPlay).toBe(false);
 });
 
+test("music audio-only playback avoids the video fallback and mute restores the music volume without changing video preferences", () => {
+  Object.assign(window, { setTimeout: vi.fn(() => 1), clearTimeout: vi.fn() });
+  const changed = vi.fn(), error = vi.fn();
+  const music = (volume: number) => { hooks.cursor = 0; hooks.refCursor = 0; return VideoPlayer({ src: "/api/music/tracks/1/audio", autoPlay: false, playbackOwner: "music", audioOnly: true, controlledVolume: volume, onVolumeChange: changed, onError: error }); };
+  let view = music(.8);
+  find(view, (node) => node.type === "video").props.onLoadedMetadata({ currentTarget: { videoWidth: 0 } });
+  expect(error).not.toHaveBeenCalled();
+  find(view, (node) => node.props["aria-label"] === "Mute").props.onClick();
+  expect(changed).toHaveBeenLastCalledWith(0);
+  view = music(0);
+  find(view, (node) => node.props["aria-label"] === "Unmute").props.onClick();
+  expect(changed).toHaveBeenLastCalledWith(.8);
+  expect(find(music(.8), (node) => node.props.className === "video-volume-feedback").props.children).toContain(80);
+  expect(writePreference).not.toHaveBeenCalled();
+});
+
 test("explicit player actions open the original item and report launch errors", async () => {
   vi.mocked(api).mockResolvedValueOnce(undefined);
   const view = render();

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+vi.mock("./audio-output", () => ({ connectMediaOutput: () => () => {} }));
 const hooks = vi.hoisted(() => ({ effects: [] as Array<() => void | (() => void)>, audio: null as unknown }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),

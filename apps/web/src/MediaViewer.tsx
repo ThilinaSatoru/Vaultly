@@ -1,9 +1,10 @@
+import { useReaderPages } from "./useReaderPages";
 import { Select } from "./Select";
 import { MediaCoverEditor } from "./VideoCoverEditor";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
-import { BookOpen, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
-import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { BookOpen, ChevronsLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
+import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { AttributeManagerContext } from "./attribute-manager";
 import { TagCombobox } from "./TagCombobox";
 import { RenameMediaDialog } from "./RenameMediaDialog";
@@ -79,6 +80,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [showRename, setShowRename] = useState(false);
   const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [seriesIds, setSeriesIds] = useState<number[]>([]);
+  const playedItem = useRef<Parameters<typeof rememberLastPlayed>[0] | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => vaultStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
   const [similarVideos, setSimilarVideos] = useState<SimilarVideo[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
@@ -94,7 +96,8 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const openPreviousItem = () => { if (previousItem) onNavigateItem(previousItem.id); };
   const openNextItem = () => { if (nextItem) onNavigateItem(nextItem.id); };
   const continuousReading = readBooleanPreference("vaultly.reader.continuous", true);
-  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic" && item.file_extension !== "pdf", `${itemId}:${page}`);
+  const goToComicPage = useReaderPages(comicScrollRef, "[data-comic-page]", comicContinuous, page, pages.length, setPage, `${itemId}:${fit}:${comicZoom}:${comicFullscreen}`);
+  useContinuousReaderScroll(comicScrollRef, item?.media_type === "comic" && item.file_extension !== "pdf", `${itemId}:${comicContinuous ? "continuous" : page}`);
 
   useEffect(() => {
     if (!floating || !viewerRef.current) return;
@@ -144,6 +147,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     setError("");
     setSeriesOptions([]);
     setSeriesIds([]);
+    playedItem.current = null;
     setSimilarVideos([]);
     setSimilarLoading(false);
     api<MediaDetail>(`/api/items/${itemId}`)
@@ -174,6 +178,8 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
       if (!active) return;
       setSeriesOptions(allSeries.map((entry) => ({ id: entry.id, name: entry.title })));
       setSeriesIds(memberships.map((entry) => entry.id));
+      // Playback can begin before the memberships request finishes.
+      if (playedItem.current?.itemId === itemId) rememberLastPlayed(playedItem.current, memberships);
     }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load series and sets."); });
     return () => { active = false; };
   }, [itemId, galleryContext]);
@@ -205,20 +211,14 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   };
 
   const previousComicPage = () => {
-    if (page > 0) setPage(page - 1);
+    if (page > 0) goToComicPage(page - 1);
     else if (continuousReading) openPreviousItem();
   };
 
   const nextComicPage = () => {
-    if (page < pages.length - 1) setPage(page + 1);
+    if (page < pages.length - 1) goToComicPage(page + 1);
     else if (continuousReading) openNextItem();
   };
-
-  useLayoutEffect(() => {
-    const container = comicScrollRef.current;
-    const destination = comicContinuous ? container?.querySelector<HTMLElement>(`[data-comic-page="${page}"]`) : null;
-    container?.scrollTo({ top: destination && container ? destination.offsetTop - container.offsetTop : 0, left: 0, behavior: "instant" });
-  }, [itemId, page, comicContinuous]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -266,6 +266,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
         if (matchesShortcut(event, "comic.zoomIn") && !activatingControl) { event.preventDefault(); changeComicZoom(25); }
         if (matchesShortcut(event, "comic.zoomOut") && !activatingControl) { event.preventDefault(); changeComicZoom(-25); }
         if (matchesShortcut(event, "comic.fitWidth") && !activatingControl) { event.preventDefault(); changeComicFit("width"); }
+        if (event.key === "Home" && !event.altKey && !event.shiftKey) { event.preventDefault(); goToComicPage(0); }
         if (matchesShortcut(event, "comic.fullscreen") && !activatingControl) { event.preventDefault(); toggleComicFullscreen(); }
         if (matchesShortcut(event, "comic.resetFit")) {
           event.preventDefault();
@@ -387,8 +388,9 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {item?.media_type === "video" && (
             <div className="video-stage">
               <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={readBooleanPreference("vaultly.video.autoplay", true)} onPlaybackStarted={() => {
-                const series = seriesContext ?? seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) => ({ seriesId: entry.id, seriesTitle: entry.name }))[0];
-                rememberLastPlayed({ itemId: item.id, title: item.title, ...(series ? { seriesId: series.seriesId, seriesTitle: series.seriesTitle } : {}) });
+                const series = seriesContext;
+                playedItem.current = { itemId: item.id, title: item.title, ...(series ? { seriesId: series.seriesId, seriesTitle: series.seriesTitle } : {}) };
+                rememberLastPlayed(playedItem.current, seriesOptions.filter((entry) => seriesIds.includes(entry.id)));
               }} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
@@ -403,9 +405,10 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                 <div className="comic-toolbar">
                   <ReaderAppearance value={appearance} onChange={setAppearance} />
                   <label><input type="checkbox" checked={comicContinuous} onChange={(event) => { setComicContinuous(event.target.checked); changeComicFit("width"); }} /> Continuous view</label>
-                  <ReaderAutoScroll scrollRef={comicScrollRef} enabled={comicContinuous || fit !== "screen"} contentKey={`${itemId}:${comicContinuous}:${page}`} />
+                  <ReaderAutoScroll scrollRef={comicScrollRef} enabled={comicContinuous || fit !== "screen"} contentKey={`${itemId}:${comicContinuous}:${comicContinuous ? "continuous" : page}`} />
                   <button type="button" onClick={previousComicPage} disabled={page === 0 && (!continuousReading || !previousItem)}><ChevronLeft size={18} /> Previous</button>
-                  <span>Page {page + 1} / {pages.length}</span>
+                  <button type="button" aria-label="First page / scroll to top" title="First page / scroll to top" onClick={() => goToComicPage(0)}><ChevronsLeft size={18} /></button>
+                  <label className="comic-page-control">Page <input aria-label="Comic page number" type="number" min={1} max={pages.length} value={page + 1} onChange={(event) => { if (event.target.value) goToComicPage(Number(event.target.value) - 1); }} /> / {pages.length}</label>
                   <button type="button" onClick={nextComicPage} disabled={page === pages.length - 1 && (!continuousReading || !nextItem)}>Next <ChevronRight size={18} /></button>
                   <label><ZoomIn size={17} /><Select aria-label="Comic page fit" value={fit} onChange={(event) => { changeComicFit(event.target.value as typeof fit); window.requestAnimationFrame(() => viewerRef.current?.focus({ preventScroll: true })); }}><option value="screen">Fit screen</option><option value="width">Fit width</option><option value="custom">{comicZoom}%</option></Select></label>
                   <button type="button" onClick={() => changeComicZoom(-25)} aria-label="Zoom out"><Minus size={17} /></button>

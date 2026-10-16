@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { AttributePatternButton, AttributePatterns } from "./AttributePatterns";
 import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { AttributePatternSummary, useAttributeList } from "./AttributeManagerTools";
@@ -49,7 +50,7 @@ export function TagsView({ tags, onChanged, allowBrowse = true }: { tags: Tag[];
       <div className="page-heading"><div><p className="eyebrow">Organize</p><h1>Tags</h1><p>Create tags here or directly from an item, then select several to filter your library.</p></div></div>
       <form className="category-form" onSubmit={add}>
         <label htmlFor="new-tag">New tag</label>
-        <div><input id="new-tag" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Favorites" maxLength={80} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div>
+        <div><ClearableInput id="new-tag" value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Favorites" maxLength={80} /><button className="primary-button" type="submit" disabled={working || !name.trim()}><Plus size={18} /> Add</button></div>
       </form>
       {error && <p className="page-error" role="alert">{error}</p>}
       {tools}

@@ -1,3 +1,4 @@
+import { registerYoutubeRoutes } from "./youtube-library.js";
 import { registerAttributeRoutes, sourceAttributesInput, sourceAttributes, invalidSourceAttribute, setSourceAttributes } from "./attribute-routes.js";
 import { sourceMediaTypes } from "./source-media.js";
 import cors from "@fastify/cors";
@@ -12,6 +13,8 @@ import { removeLegacyPlaybackCache } from "./playback-cache.js";
 import { pickDirectory } from "./folder-picker.js";
 import { cancelAllSourceScans, cancelSourceScan, getScanProgress, scanSource } from "./scanner.js";
 import { registerMediaRoutes } from "./media-routes.js";
+import { registerMusicRoutes } from "./music-routes.js";
+import { cancelAllMusicScans } from "./music-scanner.js";
 import { registerSeriesRoutes } from "./series-routes.js";
 import { registerPeopleRoutes } from "./people-routes.js";
 import { registerBulkRoutes } from "./bulk-routes.js";
@@ -51,6 +54,8 @@ app.setErrorHandler((error, _request, reply) => {
 });
 
 await app.register(registerMediaRoutes, { revealPath: options.revealPath, openVideo: options.openVideo });
+await app.register(registerMusicRoutes);
+await app.register(registerYoutubeRoutes);
 await app.register(registerSeriesRoutes);
 await app.register(registerPeopleRoutes);
 await app.register(registerBulkRoutes);
@@ -99,6 +104,7 @@ app.addHook("onClose", async () => {
     cancelPeopleRepair();
     await waitForPeopleRepair();
     await cancelAllSourceScans();
+    await cancelAllMusicScans();
     const sources = database.prepare("SELECT id FROM sources").all() as Array<{ id: number }>;
     await Promise.all(sources.map(({ id }) => cancelSourceConversion(id)));
   } finally { await stopBackgroundProcesses(); }

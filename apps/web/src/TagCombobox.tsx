@@ -1,3 +1,4 @@
+import { ClearableInput } from "./ClearableField";
 import { Check, ChevronDown, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -113,7 +114,7 @@ export function TagCombobox({ label, tags, options, selectedIds, onChange, onCre
           </span>
         ))}
         <Search size={15} className="tag-combobox-search-icon" />
-        <input
+        <ClearableInput
           ref={inputRef}
           role="combobox"
           aria-label={label}
