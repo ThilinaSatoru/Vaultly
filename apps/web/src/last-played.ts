@@ -12,17 +12,21 @@ const key = (seriesId?: number) => `vaultly.video.lastPlayed${seriesId === undef
 
 export function readLastPlayed(seriesId?: number): LastPlayed | null {
   try {
-    if (!readBooleanPreference("vaultly.video.rememberLastPlayed", false)) return null;
+    if (!readBooleanPreference("vaultly.video.rememberLastPlayed", true)) return null;
     const value = JSON.parse(vaultStorage.getItem(key(seriesId)) ?? "null");
     return value && Number.isSafeInteger(value.itemId) && value.itemId > 0 && typeof value.title === "string"
       && (value.seriesId === undefined || (Number.isSafeInteger(value.seriesId) && value.seriesId > 0))
-      && (value.seriesTitle === undefined || typeof value.seriesTitle === "string") ? value : null;
+      && (value.seriesTitle === undefined || typeof value.seriesTitle === "string")
+      && (seriesId === undefined || value.seriesId === seriesId) ? value : null;
   } catch { return null; }
 }
 
-export function rememberLastPlayed(value: LastPlayed) {
-  if (!readBooleanPreference("vaultly.video.rememberLastPlayed", false)) return;
+export function rememberLastPlayed(value: LastPlayed, collections: Array<{ id: number; name: string }> = []) {
+  if (!readBooleanPreference("vaultly.video.rememberLastPlayed", true)) return;
   vaultStorage.setItem(key(), JSON.stringify(value));
+  for (const collection of collections) {
+    vaultStorage.setItem(key(collection.id), JSON.stringify({ itemId: value.itemId, title: value.title, seriesId: collection.id, seriesTitle: collection.name }));
+  }
   if (value.seriesId !== undefined) vaultStorage.setItem(key(value.seriesId), JSON.stringify(value));
   window.dispatchEvent(new Event("vaultly-preferences-changed"));
 }

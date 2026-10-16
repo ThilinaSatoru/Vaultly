@@ -32,6 +32,8 @@ import { App } from "./App";
 import { MediaViewer } from "./MediaViewer";
 import { ManagementDrawer } from "./ManagementDrawer";
 import { MusicWorkspace } from "./MusicWorkspace";
+import { YoutubeLibrary } from "./YoutubeLibrary";
+import { YoutubePlayer } from "./YoutubePlayer";
 function viewers(node: ReactNode): ReactElement<any>[] {
   if (isValidElement<any>(node)) return node.type === MediaViewer ? [node] : viewers(node.props.children);
   return Array.isArray(node) ? node.flatMap(viewers) : [];
@@ -138,4 +140,32 @@ test("floating a second normal viewer clears its navigation selection", () => {
   render()[1].props.onToggleFloating();
   render()[0].props.onNavigateItem(21);
   expect(render().map((viewer) => [viewer.props.itemId, viewer.props.floating])).toEqual([[21, true]]);
+});
+
+test("YouTube playback survives library navigation and full/floating changes until explicitly closed", () => {
+  const find = (node: ReactNode, type: unknown): ReactElement<any> | undefined => {
+    if (isValidElement<any>(node)) return node.type === type ? node : find(node.props.children, type);
+    if (Array.isArray(node)) for (const child of node) { const result = find(child, type); if (result) return result; }
+  };
+  const shell = () => {
+    state.cursor = 0;
+    const child = App({ profiles: { activeId: "default", profiles: [{ id: "default", name: "Default" }] } }).props.children as ReactElement<any>;
+    return (child.type as (props: any) => ReactNode)(child.props);
+  };
+  const playback = { key: 1, name: "Playlist", videos: ["abcdefghijk", "lmnopqrstuv"] };
+  nav.reset({ section: "youtube" });
+  find(shell(), YoutubeLibrary)!.props.onPlay(playback);
+  expect(find(shell(), YoutubePlayer)!.props).toMatchObject({ playback, floating: false });
+  find(shell(), YoutubePlayer)!.props.onToggleFloating();
+  expect(find(shell(), YoutubePlayer)!.props.floating).toBe(true);
+  nav.reset({ section: "video" });
+  expect(find(shell(), YoutubeLibrary)).toBeUndefined();
+  expect(find(shell(), YoutubePlayer)!.props.playback).toBe(playback);
+  find(shell(), YoutubePlayer)!.props.onToggleFloating();
+  expect(find(shell(), YoutubePlayer)!.props.floating).toBe(false);
+  nav.reset({ section: "story" });
+  expect(find(shell(), YoutubePlayer)!.props.floating).toBe(true);
+  expect(find(shell(), YoutubePlayer)!.props.playback).toBe(playback);
+  find(shell(), YoutubePlayer)!.props.onClose();
+  expect(find(shell(), YoutubePlayer)).toBeUndefined();
 });

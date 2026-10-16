@@ -79,6 +79,7 @@ function setType(entry: SeriesSummary): SetType {
 }
 
 function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: SeriesSummary; version: number; onOpen: () => void; onFavorite: () => void; mediaType?: MediaType }) {
+  const lastPlayed = useLastPlayed(entry.id);
   const attributes = entry.card_attributes ?? entry;
   const badgeType = mediaType ?? (setType(entry) === "mixed" ? undefined : setType(entry) as MediaType);
   return <article className="series-card-wrap">
@@ -86,6 +87,7 @@ function SeriesCard({ entry, version, onOpen, onFavorite, mediaType }: { entry: 
       <button className="card-art-open" type="button" onClick={onOpen} aria-label={`Open collection ${entry.title}`}><Cover series={entry} version={version} mediaType={mediaType} /></button>
       <div className="series-card-body"><h2><button className="card-title-open" type="button" onClick={onOpen}>{entry.title}</button></h2><p>{setSections.find((value) => value.type === setType(entry))?.title} · {entry.item_count} {entry.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{attributes.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{attributes.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(attributes.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div></div>
     </div>
+    {lastPlayed && <button className="collection-last-played" type="button" onClick={onOpen} title={lastPlayed.title}>Last played: {lastPlayed.title}</button>}
     <button className={`series-card-favorite${entry.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={entry.favorite ? `Remove ${entry.title} from favorites` : `Add ${entry.title} to favorites`}><Heart size={17} fill={entry.favorite ? "currentColor" : "none"} /></button>
   </article>;
 }
@@ -349,10 +351,10 @@ export function SeriesView({ view, mediaType, initialSeriesId = null, initialEnt
       <div className="series-content-heading"><div><h2>In this set</h2><p>Use the arrows to put sequels in reading or viewing order.</p></div></div>
       <div className="series-members">
         {detail.items.length === 0 && <p className="series-empty-members">No media added yet. Search your library below to add the first item.</p>}
-        {detail.items.map((item, index) => <div className="series-member" key={item.id}>
+        {detail.items.map((item, index) => <div className={`series-member${lastPlayed?.itemId === item.id ? " is-last-played" : ""}`} aria-current={lastPlayed?.itemId === item.id ? "true" : undefined} key={item.id}>
           <span className="series-member-number">{index + 1}</span>
           <div className="series-member-art">{item.media_type === "video" ? <Clapperboard size={20} /> : item.media_type === "story" ? <BookOpen size={20} /> : <Image size={20} />}<PreviewImage src={itemArtwork(item.id, item.media_type, item.relative_path)} retry={item.media_type === "story"} /></div>
-          <button className="series-member-title" type="button" onClick={() => onOpenItem(item.id, { seriesId: detail.id, seriesTitle: detail.title, items: detail.items.map((entry) => ({ id: entry.id, title: entry.title })) })}><strong>{item.title}</strong><span>{item.media_type} · {item.source_name}</span></button>
+          <button className="series-member-title" type="button" onClick={() => onOpenItem(item.id, { seriesId: detail.id, seriesTitle: detail.title, items: detail.items.map((entry) => ({ id: entry.id, title: entry.title })) })}><strong>{item.title}</strong><span>{item.media_type} · {item.source_name}</span>{lastPlayed?.itemId === item.id && <span className="last-played-label">Last played</span>}</button>
           <div className="series-member-controls">
             <button type="button" title="Move earlier" aria-label={`Move ${item.title} earlier`} disabled={busy || index === 0} onClick={() => { const ids = detail.items.map((entry) => entry.id); [ids[index - 1], ids[index]] = [ids[index], ids[index - 1]]; void updateItems(ids); }}><ArrowUp size={16} /></button>
             <button type="button" title="Move later" aria-label={`Move ${item.title} later`} disabled={busy || index === detail.items.length - 1} onClick={() => { const ids = detail.items.map((entry) => entry.id); [ids[index + 1], ids[index]] = [ids[index], ids[index + 1]]; void updateItems(ids); }}><ArrowDown size={16} /></button>

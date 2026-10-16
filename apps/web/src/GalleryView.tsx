@@ -11,6 +11,7 @@ import { AttributeBadge, AttributeMediaContext } from "./AttributeBadge";
 import { BulkActionDialog } from "./BulkActionDialog";
 import { DeleteMediaDialog } from "./DeleteMediaDialog";
 import { api, formatCount, formatDuration, formatSize, formatVideoQuality, type Category, type CircleSummary, type ItemPage, type MediaItem, type MediaType, type Person, type SeriesSummary, type Tag } from "./media";
+import { useLastPlayed } from "./last-played";
 import type { LibraryView } from "./App";
 import { galleryVideoContext, type GalleryVideoContext } from "./video-playlist";
 import { ActionMenu } from "./ActionMenu";
@@ -216,6 +217,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
 }
 
 function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; onOpen: () => void; mediaType?: MediaType }) {
+  const lastPlayed = useLastPlayed(series.id);
   const attributes = series.card_attributes ?? series;
   const contentTypes = (["video", "comic", "story"] as const).filter((type) => series[`${type}_count`] > 0);
   const badgeType = mediaType ?? (contentTypes.length === 1 ? contentTypes[0] : contentTypes.length === 0 && series.preferred_type !== "mixed" ? series.preferred_type : undefined);
@@ -227,6 +229,7 @@ function CollectionCard({ series, onOpen, mediaType }: { series: SeriesSummary; 
       <div className={`media-art collection-art media-art-${orientation}${badgeType === "video" ? " collection-art-video" : ""}`}><Layers3 size={44} />{cover && <img src={vaultUrl(cover)} alt="" loading="lazy" onLoad={onLoad} />}<span className="media-type-badge">Collection</span></div>
     </button>
     <div className="media-card-body"><h3 title={series.title}><button className="card-title-open" type="button" onClick={onOpen}>{series.title}</button></h3><p>{series.item_count} {series.item_count === 1 ? "item" : "items"}</p><div className="media-card-tags">{attributes.tags.map((tag) => <AttributeBadge kind="tag" key={`tag-${tag.id}`} {...tag} mediaType={badgeType} />)}{attributes.categories.map((category) => <AttributeBadge kind="category" key={`category-${category.id}`} {...category} mediaType={badgeType} />)}{(attributes.people ?? []).map((person) => <AttributeBadge kind={badgeType === "video" ? "cast" : "artist"} key={`person-${person.id}`} {...person} mediaType={badgeType} />)}</div><div className="media-card-meta"><span>{series.video_count} videos</span><span>{series.comic_count + series.story_count} reading</span></div></div>
+    {lastPlayed && <button className="collection-last-played" type="button" onClick={onOpen} title={lastPlayed.title}>Last played: {lastPlayed.title}</button>}
   </article>;
 }
 

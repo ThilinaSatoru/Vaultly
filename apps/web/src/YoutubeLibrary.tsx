@@ -31,8 +31,8 @@ function loadYoutube() {
   });
   return apiPromise;
 }
-interface Playback { key: number; name: string; remoteId?: string; videos?: string[]; index?: number }
-export function YoutubeEmbed({ playback }: { playback: Playback }) {
+export interface YoutubePlayback { key: number; name: string; remoteId?: string; videos?: string[]; index?: number }
+export function YoutubeEmbed({ playback }: { playback: YoutubePlayback }) {
   const host = useRef<HTMLDivElement>(null), player = useRef<EmbedPlayer | null>(null);
   const [error, setError] = useState("");
   const [link, setLink] = useState(playback.remoteId ? `https://www.youtube.com/playlist?list=${playback.remoteId}` : `https://www.youtube.com/watch?v=${playback.videos?.[playback.index ?? 0]}`);
@@ -70,14 +70,14 @@ export function YoutubeEmbed({ playback }: { playback: Playback }) {
   return <section className="youtube-player"><div className="youtube-embed" ref={host} />{error && <p role="alert" className="form-error">{error}</p>}<div><strong>{playback.name}</strong><a href={link} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open on YouTube</a></div></section>;
 }
 
-export function YoutubeLibrary({ search, onSearchChange }: { search: string; onSearchChange: (value: string) => void }) {
+export function YoutubeLibrary({ search, onSearchChange, onPlay }: { search: string; onSearchChange: (value: string) => void; onPlay: (playback: YoutubePlayback) => void }) {
   const [addDialog, setAddDialog] = useState(false), [addPlaylist, setAddPlaylist] = useState(""), [newPlaylist, setNewPlaylist] = useState("");
   const [channels, setChannels] = useState<Array<{ name: string; video_count: number }>>([]), [channel, setChannel] = useState("");
   const [playlists, setPlaylists] = useState<Playlist[]>([]), [selected, setSelected] = useState<number | null>(null);
   const [view, setView] = useState<"videos" | "playlists">("videos"), [page, setPage] = useState(1), [sort, setSort] = useState("added");
   const [videos, setVideos] = useState<VideoPage>({ items: [], total: 0, page: 1, pageSize: 60 });
   const [checked, setChecked] = useState<number[]>([]), [playlistTarget, setPlaylistTarget] = useState("");
-  const [playback, setPlayback] = useState<Playback | null>(null), [videoUrl, setVideoUrl] = useState(""), [name, setName] = useState("");
+  const [videoUrl, setVideoUrl] = useState(""), [name, setName] = useState("");
   const [rename, setRename] = useState<{ kind: "video" | "playlist"; id: number; title: string } | null>(null);
   const [busy, setBusy] = useState(false), [loading, setLoading] = useState(false), [error, setError] = useState(""), [notice, setNotice] = useState(""), [revision, setRevision] = useState(0);
   const current = playlists.find((playlist) => playlist.id === selected);
@@ -105,12 +105,12 @@ export function YoutubeLibrary({ search, onSearchChange }: { search: string; onS
   };
   const send = (path: string, method: string, body?: unknown) => api(path, { method, ...(body ? { body: JSON.stringify(body) } : {}) });
   const openVideo = (video: Video) => {
-    setPlayback({ key: Date.now(), name: video.title, videos: [video.video_id] });
+    onPlay({ key: Date.now(), name: video.title, videos: [video.video_id] });
   };
   const playPlaylist = async () => {
     if (!current) return;
-    if (current.remote_id) { setPlayback({ key: Date.now(), name: current.name, remoteId: current.remote_id }); return; }
-    try { const queue = await api<Video[]>(`/api/youtube/queue?${new URLSearchParams({ playlist: String(current.id), sort: "playlist" })}`); if (queue.length) setPlayback({ key: Date.now(), name: current.name, videos: queue.map((video) => video.video_id) }); }
+    if (current.remote_id) { onPlay({ key: Date.now(), name: current.name, remoteId: current.remote_id }); return; }
+    try { const queue = await api<Video[]>(`/api/youtube/queue?${new URLSearchParams({ playlist: String(current.id), sort: "playlist" })}`); if (queue.length) onPlay({ key: Date.now(), name: current.name, videos: queue.map((video) => video.video_id) }); }
     catch (reason) { report(reason); }
   };
   const move = (video: Video, direction: number) => {
@@ -181,7 +181,6 @@ export function YoutubeLibrary({ search, onSearchChange }: { search: string; onS
       </>}
     </>}
     {addDialog && <AttributeEditorDialog title="Add YouTube video" busy={busy} onClose={() => setAddDialog(false)}><form className="youtube-add-dialog" onSubmit={(event) => { event.preventDefault(); addVideo(); }}><label>YouTube video link<ClearableInput required type="url" maxLength={2000} value={videoUrl} placeholder="Paste a YouTube video link" onChange={(event) => setVideoUrl(event.target.value)} /></label><label>Save to playlist<Select required aria-label="Save YouTube video to playlist" value={addPlaylist} onChange={(event) => setAddPlaylist(event.target.value)}><option value="" disabled>Choose a playlist…</option><option value="__library">Library only</option>{playlists.filter((playlist) => !playlist.remote_id).map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}<option value="__new">Create a new playlist…</option></Select></label>{addPlaylist === "__new" && <label>New playlist name<ClearableInput value={newPlaylist} required maxLength={200} onChange={(event) => setNewPlaylist(event.target.value)} /></label>}<p>The title and channel are read from YouTube when you add the video.</p>{notice && <p role="status">{notice}</p>}{error && <p role="alert" className="form-error">{error}</p>}<button className="primary-button" disabled={busy || !videoUrl.trim() || !addPlaylist || addPlaylist === "__new" && !newPlaylist.trim()}>{busy ? <LoaderCircle size={15} className="spin" /> : <Plus size={15} />}{busy ? "Reading YouTube…" : "Add video"}</button></form></AttributeEditorDialog>}
-    {playback && <AttributeEditorDialog title={playback.name} className="youtube-video-dialog" backdropClassName="youtube-player-backdrop" focusSelector=".dialog-close" onClose={() => setPlayback(null)}><YoutubeEmbed key={playback.key} playback={playback} /></AttributeEditorDialog>}
     {rename && <AttributeEditorDialog title={rename.kind === "playlist" ? "Rename playlist" : "Rename video"} busy={busy} onClose={() => setRename(null)}><form className="youtube-rename-form" onSubmit={(event) => { event.preventDefault(); void mutate(() => send(`/api/youtube/${rename.kind === "playlist" ? "playlists" : "videos"}/${rename.id}`, "PATCH", { [rename.kind === "playlist" ? "name" : "title"]: rename.title })).then((saved) => { if (saved) setRename(null); }); }}><label>Name<ClearableInput required maxLength={200} value={rename.title} onChange={(event) => setRename({ ...rename, title: event.target.value })} /></label><button className="primary-button" disabled={busy || !rename.title.trim()}>Save name</button></form></AttributeEditorDialog>}
   </section>;
 }

@@ -1,4 +1,5 @@
-import { YoutubeLibrary } from "./YoutubeLibrary";
+import { YoutubeLibrary, type YoutubePlayback } from "./YoutubeLibrary";
+import { YoutubePlayer } from "./YoutubePlayer";
 import { MusicSourceCard } from "./MusicSourceCard";
 import type { MusicSource } from "./music";
 import { ClearableInput } from "./ClearableField";
@@ -84,7 +85,6 @@ import { MediaViewer } from "./MediaViewer";
 import { SeriesView } from "./SeriesView";
 import { SettingsView } from "./SettingsView";
 import { useUiState } from "./ui-state";
-import { useLastPlayed } from "./last-played";
 import { HelpView } from "./HelpView";
 import { ScanProgress, type SourceScanProgress } from "./ScanProgress";
 import {
@@ -95,7 +95,6 @@ import {
   type MediaType,
   type Person,
   type SeriesViewerContext,
-  type SeriesDetail,
   type Tag,
 } from "./media";
 
@@ -1015,7 +1014,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     null,
   );
   const [temporaryPlaylist, setTemporaryPlaylist] = useUiState<MediaItem[]>("vaultly.ui.playlist", []);
-  const lastPlayed = useLastPlayed();
+  const youtubePageKey = `${navigation.entry.id}:${section}`;
+  const [youtubeSession, setYoutubeSession] = useState<{ playback: YoutubePlayback; floating: boolean; pageKey: string } | null>(null);
   const [floatingSession, setFloatingSession] = useState<{
     id: number;
     series: SeriesViewerContext | null;
@@ -1721,19 +1721,6 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 />
               </div>
               <div className="topbar-actions">
-                {lastPlayed && <button className="playlist-launch" type="button" title={[lastPlayed.seriesTitle, lastPlayed.title].filter(Boolean).join(" · ")} onClick={() => {
-                  void (async () => {
-                    try {
-                      await api(`/api/items/${lastPlayed.itemId}`);
-                      let context: SeriesViewerContext | null = null;
-                      if (lastPlayed.seriesId !== undefined) {
-                        const series = await api<SeriesDetail>(`/api/series/${lastPlayed.seriesId}`).catch(() => null);
-                        if (series?.items.some((item) => item.id === lastPlayed.itemId)) context = { seriesId: series.id, seriesTitle: series.title, items: series.items.map(({ id, title }) => ({ id, title })) };
-                      }
-                      openItem(lastPlayed.itemId, context);
-                    } catch (reason) { setError(reason instanceof Error ? reason.message : "The last played video is unavailable."); }
-                  })();
-                }}><Clapperboard size={17} /> Continue watching</button>}
                 <ThemeToggle />
                 <VaultProfiles initial={profiles} />
                 {temporaryPlaylist.length > 0 && (
@@ -1776,7 +1763,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 ))}
                 <strong aria-current="page">{navigation.entry.label}</strong>
               </nav>
-              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} /> : section === "home" ? (
+              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} onPlay={(playback) => setYoutubeSession({ playback, floating: false, pageKey: youtubePageKey })} /> : section === "home" ? (
                 <HomeView
                   sources={sources}
                   categories={categories}
@@ -1854,6 +1841,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
             </div>
           </main>
 
+          {youtubeSession && <YoutubePlayer playback={youtubeSession.playback}
+            floating={youtubeSession.floating || youtubeSession.pageKey !== youtubePageKey}
+            onToggleFloating={() => setYoutubeSession({ ...youtubeSession, floating: !(youtubeSession.floating || youtubeSession.pageKey !== youtubePageKey), pageKey: youtubePageKey })}
+            onClose={() => setYoutubeSession(null)} />}
           {activeViewerId !== null && (
             <MediaViewer
               {...viewerCommonProps}

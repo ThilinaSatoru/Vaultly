@@ -80,6 +80,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [showRename, setShowRename] = useState(false);
   const [seriesOptions, setSeriesOptions] = useState<Array<{ id: number; name: string }>>([]);
   const [seriesIds, setSeriesIds] = useState<number[]>([]);
+  const playedItem = useRef<Parameters<typeof rememberLastPlayed>[0] | null>(null);
   const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => vaultStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
   const [similarVideos, setSimilarVideos] = useState<SimilarVideo[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
@@ -146,6 +147,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     setError("");
     setSeriesOptions([]);
     setSeriesIds([]);
+    playedItem.current = null;
     setSimilarVideos([]);
     setSimilarLoading(false);
     api<MediaDetail>(`/api/items/${itemId}`)
@@ -176,6 +178,8 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
       if (!active) return;
       setSeriesOptions(allSeries.map((entry) => ({ id: entry.id, name: entry.title })));
       setSeriesIds(memberships.map((entry) => entry.id));
+      // Playback can begin before the memberships request finishes.
+      if (playedItem.current?.itemId === itemId) rememberLastPlayed(playedItem.current, memberships);
     }).catch((requestError) => { if (active) setError(requestError instanceof Error ? requestError.message : "Could not load series and sets."); });
     return () => { active = false; };
   }, [itemId, galleryContext]);
@@ -384,8 +388,9 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
           {item?.media_type === "video" && (
             <div className="video-stage">
               <VideoPlayer key={item.id} itemId={item.id} src={vaultUrl(`/api/items/${item.id}/file`)} compact={floating} autoPlay={readBooleanPreference("vaultly.video.autoplay", true)} onPlaybackStarted={() => {
-                const series = seriesContext ?? seriesOptions.filter((entry) => seriesIds.includes(entry.id)).map((entry) => ({ seriesId: entry.id, seriesTitle: entry.name }))[0];
-                rememberLastPlayed({ itemId: item.id, title: item.title, ...(series ? { seriesId: series.seriesId, seriesTitle: series.seriesTitle } : {}) });
+                const series = seriesContext;
+                playedItem.current = { itemId: item.id, title: item.title, ...(series ? { seriesId: series.seriesId, seriesTitle: series.seriesTitle } : {}) };
+                rememberLastPlayed(playedItem.current, seriesOptions.filter((entry) => seriesIds.includes(entry.id)));
               }} onEnded={readBooleanPreference("vaultly.video.autoAdvance", true) ? openNextItem : undefined} onError={setError} />
             </div>
           )}
