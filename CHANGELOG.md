@@ -5,6 +5,15 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.5.7] - 2026-10-16
+
+### Changed
+
+- bug fixes, youtube playback. (1469da8)
+- Youtube playlist, music update UI update. (6c0f5c4)
+- NEW Feat : music player impl (e002b86)
+- Exit confirmation, filename refactoring option, Theme-aware text bugs, Remember last played series (7ac3223)
+
 ## [0.4.6] - 2026-10-13
 
 ### Changed
