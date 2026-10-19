@@ -32,7 +32,7 @@ const jane = { id: 1, name: "Jane Doe", patterns: ["JD"] };
 const tag = { id: 2, name: "Travel diary", patterns: ["vacation"] };
 test("cleans names, aliases, brackets and junk separators before composing a stable filename", () => {
   const result = refactoredFilename("[JD]..An__Evening-vacation.#Travel_diary.MP4", [jane], [tag], [jane, tag]);
-  expect(result).toEqual({ filename: "Jane Doe - An Evening #Travel_diary.MP4", title: "An Evening" });
+  expect(result).toEqual({ filename: "Jane Doe - An Evening #Travel_diary.MP4", title: "Jane Doe - An Evening #Travel_diary.MP4" });
   expect(refactoredFilename(result.filename, [jane], [tag], [jane, tag])).toEqual(result);
   expect(refactoredFilename("lone__title.mkv", [], [], []).filename).toBe("lone title.mkv");
   expect(refactoredFilename("JD.mp4", [jane], [], [jane]).filename).toBe("Jane Doe - Untitled.mp4");
@@ -42,6 +42,7 @@ test("cleans names, aliases, brackets and junk separators before composing a sta
 test("bounded Unicode filenames keep their extension and attributes", () => {
   const result = refactoredFilename(`${"語".repeat(150)}.mp4`, [jane], [tag], [jane, tag]);
   expect(Buffer.byteLength(result.filename)).toBeLessThanOrEqual(240);
+  expect(result.title).toBe(result.filename);
   expect(result.filename).toMatch(/^Jane Doe - 語+ #Travel_diary\.mp4$/);
 });
 
@@ -76,15 +77,17 @@ test("opt-in scan keeps IDs, credits, favorites, collections, sidecar covers and
   expect((await readdir(root)).sort()).toEqual(expectedFiles);
   expect(await readFile(path.join(root, filename), "utf8")).toBe("original video bytes");
   expect((await stat(path.join(root, filename))).mtimeMs).toBeCloseTo(before.mtimeMs, 1);
-  expect(database.prepare("SELECT id, relative_path, filename, title, favorite FROM media_items WHERE source_id = ?").get(sourceId)).toEqual({ id: item.id, relative_path: filename, filename, title: "Evening", favorite: 1 });
+  expect(database.prepare("SELECT id, relative_path, filename, title, favorite FROM media_items WHERE source_id = ?").get(sourceId)).toEqual({ id: item.id, relative_path: filename, filename, title: filename, favorite: 1 });
   expect(database.prepare("SELECT person_id FROM item_people WHERE item_id = ? AND role = 'cast'").get(item.id)).toMatchObject({ person_id: castId });
   expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").get(item.id)).toMatchObject({ tag_id: tagId });
   expect(database.prepare("SELECT series_id FROM series_items WHERE item_id = ?").get(item.id)).toMatchObject({ series_id: series });
   expect(database.prepare("SELECT cover_path FROM media_items WHERE id = ?").get(item.id)).toMatchObject({ cover_path: cover });
   database.prepare("UPDATE media_items SET title = 'Stale title' WHERE id = ?").run(item.id);
   await scanSource(sourceId, root, { refactorFilenames: true });
-  expect(database.prepare("SELECT title FROM media_items WHERE id = ?").get(item.id)).toEqual({ title: "Evening" });
+  expect(database.prepare("SELECT title FROM media_items WHERE id = ?").get(item.id)).toEqual({ title: filename });
+  database.prepare("UPDATE media_items SET title = 'Stale after refactor' WHERE id = ?").run(item.id);
   await scanSource(sourceId, root);
+  expect(database.prepare("SELECT title FROM media_items WHERE id = ?").get(item.id)).toEqual({ title: filename });
   expect((await readdir(root)).sort()).toEqual(expectedFiles);
   expect(database.prepare("SELECT cover_path FROM media_items WHERE id = ?").get(item.id)).toMatchObject({ cover_path: cover });
   expect(database.prepare("SELECT COUNT(*) AS count FROM media_items WHERE source_id = ?").get(sourceId)).toMatchObject({ count: 1 });

@@ -103,6 +103,7 @@ type SourceStatus = "idle" | "scanning" | "ready" | "error";
 interface LibrarySource {
   enabled?: number;
   filename_refactoring?: number;
+  prefix_grouping?: number;
   id: number;
   name: string;
   root_path: string;
@@ -221,6 +222,7 @@ function AddSourceDialog({
   const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [name, setName] = useState("");
   const [mediaType, setMediaType] = useState(initialMediaType);
+  const [prefixGrouping, setPrefixGrouping] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -260,6 +262,7 @@ function AddSourceDialog({
           rootPath: rootPath.trim(),
           name: name.trim() || undefined,
           mediaType,
+          prefixGrouping,
           tagIds,
           categoryIds,
         }),
@@ -308,6 +311,11 @@ function AddSourceDialog({
           <option value="pictures">Pictures</option>
           <option value="music">Music / music videos</option>
         </Select>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={prefixGrouping} onChange={(event) => setPrefixGrouping(event.target.checked)} />
+          Group files by shared filename prefixes
+        </label>
+        <p className="attribute-help">Disable this for sources where filenames share generic words. Folder and numbered sequence grouping still works.</p>
         <label htmlFor="source-path">Folder path</label>
         <div className="path-control">
           <ClearableInput
@@ -703,6 +711,17 @@ function SourceCard({
                 .finally(() => setWorking(false));
             }} />
           Enable filename refactoring
+        </label>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={source.prefix_grouping !== 0} disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              setWorking(true); setActionError("");
+              void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, prefixGrouping: event.target.checked }) })
+                .then(onChanged)
+                .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change prefix grouping."))
+                .finally(() => setWorking(false));
+            }} />
+          Group files by shared filename prefixes
         </label>
         <p className="attribute-help">Use “Scan + refactor filenames” to rename files using assigned casts and tags. Each run asks for confirmation.</p>
         <div className="source-common-attributes">

@@ -12,7 +12,7 @@ export function attributeGalleryFields(attribute: BrowseAttribute, mediaType: At
     selectedCategoryIds: [], selectedTagIds: [], selectedCastIds: [], selectedArtistIds: [],
     filename: "", pathText: "", selectedType: "", sourceType: "", sourceId: "", folderPath: "", extension: "", seriesFilter: "", circleFilter: "",
     minMb: "", maxMb: "", modifiedFrom: "", modifiedTo: "", uncategorized: false, untagged: false,
-    browseCategory: null, page: 0, sort: "title", advancedOpen: ["cast", "artist", "series", "circle"].includes(attribute.kind),
+    browseCategory: null, page: 0, sort: "title", advancedOpen: false,
   };
   const personKind = mediaType === "video" || mediaType === "all" ? "cast" : "artist";
   const kind = attribute.kind === "cast" || attribute.kind === "artist" ? personKind : attribute.kind;

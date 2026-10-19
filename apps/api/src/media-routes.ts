@@ -527,7 +527,7 @@ export async function registerMediaRoutes(
         const result = database.prepare(`
           UPDATE media_items SET title = ?, filename = ?, file_extension = ?, relative_path = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ? AND available = 1 AND relative_path = ?
-        `).run(title, fileName, extension.slice(1).toLowerCase(), relativePath, id, item.relative_path);
+        `).run(fileName, fileName, extension.slice(1).toLowerCase(), relativePath, id, item.relative_path);
         if (!result.changes) throw new Error("The media item changed while renaming. Please reload and try again.");
         const updateChild = database.prepare("UPDATE media_items SET relative_path = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND relative_path = ?");
         for (const child of descendants) updateChild.run(path.join(relativePath, child.suffix), child.id, child.relative_path);
@@ -541,7 +541,7 @@ export async function registerMediaRoutes(
       throw error;
     }
 
-    return { id, title, filename: fileName, file_extension: extension.slice(1).toLowerCase(), relative_path: relativePath };
+    return { id, title: fileName, filename: fileName, file_extension: extension.slice(1).toLowerCase(), relative_path: relativePath };
   };
   app.patch("/api/items/:id", renameItem);
   app.post("/api/items/:id/rename", renameItem);

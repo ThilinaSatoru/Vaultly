@@ -30,15 +30,15 @@ test("classifies mixed and nested media without indexing individual comic pages"
 
   expect(items).toHaveLength(4);
   expect(items.map((item) => [item.mediaType, item.title]).sort()).toEqual([
-    ["comic", "Archive"],
+    ["comic", "Archive.cbz"],
     ["comic", "Issue 01"],
-    ["story", "My Story"],
-    ["video", "Sample Movie"],
+    ["story", "My Story.pdf"],
+    ["video", "Sample Movie.mp4"],
   ]);
   expect(items.find((item) => item.title === "Issue 01")?.fileCount).toBe(2);
   expect(items.find((item) => item.title === "Issue 01")?.fileExtension).toBe("");
-  expect(items.find((item) => item.title === "My Story")?.filename).toBe("My Story.pdf");
-  expect(items.find((item) => item.title === "My Story")?.fileExtension).toBe("pdf");
+  expect(items.find((item) => item.title === "My Story.pdf")?.filename).toBe("My Story.pdf");
+  expect(items.find((item) => item.title === "My Story.pdf")?.fileExtension).toBe("pdf");
 });
 
 test("scans the root and every branch at arbitrary depth, including children of comic folders", async () => {

@@ -194,14 +194,14 @@ test("scan synchronizes renamed titles while preserving identity and assignments
 
     const after = database.prepare("SELECT id, filename, title, favorite, available FROM media_items WHERE id = ?")
       .get(before.id);
-    expect(after).toEqual({ id: before.id, filename: renamed, title: `Renamed ${token}`, favorite: 1, available: 1 });
+    expect(after).toEqual({ id: before.id, filename: renamed, title: renamed, favorite: 1, available: 1 });
     expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").all(before.id)).toEqual([{ tag_id: tagId }]);
     if (process.platform === "win32") {
       const caseRenamed = renamed.toUpperCase();
       await rename(path.join(root, renamed), path.join(root, caseRenamed));
       await scanSource(sourceId, root);
       expect(database.prepare("SELECT id, filename, title FROM media_items WHERE source_id = ? AND available = 1").all(sourceId))
-        .toEqual([{ id: before.id, filename: caseRenamed, title: `RENAMED ${token.toUpperCase()}` }]);
+        .toEqual([{ id: before.id, filename: caseRenamed, title: caseRenamed }]);
     }
   } finally {
     if (sourceId) database.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
@@ -230,7 +230,7 @@ test("batch renames preserve distinct identities when many documents share the s
     await scanSource(sourceId, root, { generateThumbnails: false });
     for (const item of originals) {
       expect(database.prepare("SELECT filename, title, favorite, available FROM media_items WHERE id = ?").get(item.id))
-        .toEqual({ filename: item.filename.replace("Original", "Renamed"), title: item.filename.replace("Original", "Renamed").replace(/\.pdf$/, ""), favorite: 1, available: 1 });
+        .toEqual({ filename: item.filename.replace("Original", "Renamed"), title: item.filename.replace("Original", "Renamed"), favorite: 1, available: 1 });
     }
     expect(database.prepare("SELECT COUNT(*) AS count FROM media_items WHERE source_id = ?").get(sourceId)).toEqual({ count: 32 });
   } finally {

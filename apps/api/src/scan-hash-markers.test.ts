@@ -61,7 +61,7 @@ test("existing marked titles and filenames keep their IDs, assignments, and coll
       const items = rows(sourceId);
       expect(items.map((item) => item.id).sort()).toEqual([...ids].sort());
       expect(items.map((item) => [item.title, item.filename, item.favorite])).toEqual([
-        ["First#", "First#.pdf", 1], ["#Custom## title#", "Plain.pdf", 0], ["Second##", "Second##.pdf", 1],
+        ["First#.pdf", "First#.pdf", 1], ["Plain.pdf", "Plain.pdf", 0], ["Second##.pdf", "Second##.pdf", 1],
       ]);
       expect(database.prepare("SELECT tag_id FROM item_tags WHERE item_id = ?").all(ids[0])).toEqual([{ tag_id: tagId }]);
       expect(database.prepare("SELECT item_id FROM series_items WHERE series_id = ?").all(seriesId)).toEqual([{ item_id: ids[0] }]);
@@ -100,17 +100,17 @@ test("comic folder renames update nested indexed paths and preserve all existing
   });
 });
 
-test("a source-root comic gets a clean title and favourite without moving its source directory", async () => {
+test("a source-root comic keeps its folder name as title and favourite without moving its source directory", async () => {
   await fixture(async (root, sourceId) => {
     const comicRoot = path.join(root, "##Root# comic##");
     await mkdir(comicRoot);
     await writeFile(path.join(comicRoot, "001.jpg"), "page");
     database.prepare("UPDATE sources SET root_path = ?, normalized_path = ? WHERE id = ?").run(comicRoot, comicRoot, sourceId);
     await scanSource(sourceId, comicRoot);
-    expect(rows(sourceId)).toMatchObject([{ title: "Root# comic##", relative_path: ".", favorite: 1 }]);
+    expect(rows(sourceId)).toMatchObject([{ title: "##Root# comic##", relative_path: ".", favorite: 1 }]);
     database.prepare("UPDATE media_items SET favorite = 0 WHERE source_id = ?").run(sourceId);
     await scanSource(sourceId, comicRoot);
-    expect(rows(sourceId)).toMatchObject([{ title: "Root# comic##", relative_path: ".", favorite: 0 }]);
+    expect(rows(sourceId)).toMatchObject([{ title: "##Root# comic##", relative_path: ".", favorite: 0 }]);
     expect(await readFile(path.join(comicRoot, "001.jpg"), "utf8")).toBe("page");
   });
 });

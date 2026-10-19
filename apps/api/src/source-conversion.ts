@@ -160,10 +160,10 @@ export function startSourceConversion(id: number, root: string, mode: Conversion
             controller.signal.throwIfAborted();
             const latest = await stat(src);
             if (before.size !== latest.size || before.mtimeMs !== latest.mtimeMs) throw new Error("Source changed during conversion; original kept");
-            const updated = database.prepare(`UPDATE media_items SET filename = ?, file_extension = '.mp4', relative_path = ?,
+            const updated = database.prepare(`UPDATE media_items SET title = ?, filename = ?, file_extension = '.mp4', relative_path = ?,
               size_bytes = ?, modified_at_ms = ?, video_metadata_signature = NULL, updated_at = CURRENT_TIMESTAMP
               WHERE id = ? AND source_id = ? AND relative_path = ?`)
-              .run(path.basename(dst), path.relative(resolvedRoot, dst), output.size, (await stat(dst)).mtimeMs, item.id, id, item.relative_path);
+              .run(path.basename(dst), path.basename(dst), path.relative(resolvedRoot, dst), output.size, (await stat(dst)).mtimeMs, item.id, id, item.relative_path);
             if (!updated.changes) throw new Error("Library item changed during conversion");
           } catch (error) { await unlink(dst); throw error; }
           progress.converted++;

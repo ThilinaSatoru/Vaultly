@@ -61,7 +61,7 @@ test("changing a PDF source to manga and back preserves the item and its favouri
     database.prepare("UPDATE sources SET media_type = 'manga' WHERE id = ?").run(source);
     await scanSource(source, root);
     const comic = (await app.inject(`/api/items?type=comic&sourceType=manga&source=${source}`)).json();
-    expect(comic.items[0]).toMatchObject({ id: previous.id, title: "My manga", favorite: 1, media_type: "comic", file_extension: "pdf" });
+    expect(comic.items[0]).toMatchObject({ id: previous.id, title: "Chapter 01.pdf", favorite: 1, media_type: "comic", file_extension: "pdf" });
     expect((await app.inject(`/api/items/${previous.id}/file`)).statusCode).toBe(200);
     database.prepare("UPDATE sources SET media_type = 'ebooks' WHERE id = ?").run(source);
     await scanSource(source, root);

@@ -75,9 +75,6 @@ const newProgress = (): ScanProgress => ({
   videoMetadataProcessed: 0, videoMetadataTotal: 0,
 });
 
-const titleFromFilename = (filename: string) =>
-  path.basename(filename, path.extname(filename)).replace(/[._]+/g, " ").trim();
-
 const strictIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "modifiedAtMs" | "fileCount">) =>
   `${item.mediaType}|${item.sizeBytes}|${item.modifiedAtMs}|${item.fileCount}`;
 const looseIdentity = (item: Pick<ScannedItem, "mediaType" | "sizeBytes" | "fileCount">) =>
@@ -125,7 +122,7 @@ async function normalizeHashMarkers(sourceId: number, rootPath: string, items: S
       const candidates = strictMatches.get(strictIdentity(item))?.filter((entry) => !consumedIds.has(entry.id));
       if (candidates?.length === 1 && incomingCounts.get(strictIdentity(item)) === 1) previous = candidates[0];
     }
-    const rootMarkerHandled = item.relativePath === "." && previous && !previous.title.startsWith("#");
+    const rootMarkerHandled = item.relativePath === "." && previous;
     if (!item.filename.startsWith("#") || rootMarkerHandled) continue;
     const oldRelativePath = item.relativePath;
     const oldPath = path.resolve(rootPath, oldRelativePath);
@@ -151,8 +148,7 @@ async function normalizeHashMarkers(sourceId: number, rootPath: string, items: S
     signal.throwIfAborted();
     const nextPath = path.resolve(rootPath, relativePath);
     const changedPath = relativePath !== oldRelativePath;
-    const previousDefaultTitle = previous && (previous.fileExtension ? titleFromFilename(previous.filename) : previous.filename);
-    const title = (previous && previous.title !== previousDefaultTitle ? previous.title : stripHashes(item.title)) || "Untitled";
+    const title = filename;
     const descendants = isFolder && changedPath ? existing.filter((child) => {
       const suffix = path.relative(oldPath, path.resolve(rootPath, child.relativePath));
       return suffix && suffix !== ".." && !suffix.startsWith(`..${path.sep}`) && !path.isAbsolute(suffix);
@@ -226,7 +222,7 @@ export function inferCollectionPattern(filename: string): { title: string; order
 
 /** Assign each file to at most one set, keeping source and media boundaries. */
 export function automaticCollectionGroups(sourceId: number, rootPath: string, sourceType: SourceMediaType,
-  indexedItems: Array<{ id: number; item: Pick<ScannedItem, "filename" | "relativePath" | "mediaType"> }>) {
+  indexedItems: Array<{ id: number; item: Pick<ScannedItem, "filename" | "relativePath" | "mediaType"> }>, prefixGrouping = true) {
   type Group = { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> };
   const groups = new Map<string, Group>();
   const pending: Array<{ id: number; item: typeof indexedItems[number]["item"]; words: string[]; order: number }> = [];
@@ -249,13 +245,15 @@ export function automaticCollectionGroups(sourceId: number, rootPath: string, so
     if (group.entries.length < 2) groups.delete(key);
     else group.entries.forEach(({ id }) => assigned.add(id));
   }
-  // Prefer two shared words, then accept a single shared word for remaining files.
-  for (const length of [2, 1]) {
+  // Prefer two shared words, then accept a useful single shared word for remaining files.
+  const genericPrefixes = new Set(["a", "an", "and", "at", "for", "from", "in", "is", "it", "like", "new", "of", "on", "or", "the", "to", "with"]);
+  for (const length of (prefixGrouping ? [2, 1] : [])) {
     const buckets = new Map<string, typeof pending>();
     for (const entry of pending) {
       if (assigned.has(entry.id) || entry.words.length < length) continue;
       const prefix = entry.words.slice(0, length).join(" ").toLocaleLowerCase();
       if (!/\p{L}/u.test(prefix)) continue;
+      if (length === 1 && genericPrefixes.has(prefix)) continue;
       const key = `${sourceId}|${entry.item.mediaType}|prefix|${prefix}`;
       const bucket = buckets.get(key) ?? [];
       bucket.push(entry); buckets.set(key, bucket);
@@ -312,7 +310,7 @@ export async function collectItems(rootPath: string, signal?: AbortSignal, progr
           }
           items.push({
             mediaType: videoExtensions.has(extension) ? "video" : storyExtensions.has(extension) && !(sourceType === "manga" && extension === ".pdf") ? "story" : "comic",
-            title: titleFromFilename(name), filename: name, fileExtension: extension.slice(1),
+            title: name, filename: name, fileExtension: extension.slice(1),
             relativePath: path.relative(rootPath, absolutePath), sizeBytes: fileStat.size,
             modifiedAtMs: Math.round(fileStat.mtimeMs), fileCount: 1,
           });
@@ -417,8 +415,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
   const controller = new AbortController();
   const { signal } = controller;
   const progress = newProgress();
-  const previousSource = database.prepare("SELECT status, last_error, media_type, filename_refactoring FROM sources WHERE id = ?")
-    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType; filename_refactoring: number } | undefined;
+  const previousSource = database.prepare("SELECT status, last_error, media_type, filename_refactoring, prefix_grouping FROM sources WHERE id = ?")
+    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType; filename_refactoring: number; prefix_grouping: number } | undefined;
 
   database.prepare(
       "UPDATE sources SET status = 'scanning', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -507,6 +505,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
             size_bytes, modified_at_ms, file_count, indexed, available
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
           ON CONFLICT(source_id, media_type, relative_path) DO UPDATE SET
+            title = excluded.title,
             filename = excluded.filename,
             file_extension = excluded.file_extension,
             duration_seconds = CASE
@@ -545,7 +544,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
               row = upsert.get(sourceId, item.mediaType, item.title, item.filename, item.fileExtension,
                 item.relativePath, item.sizeBytes, item.modifiedAtMs, item.fileCount) as { id: number };
             }
-          } else if (previous.indexed === 1 && previous.available === 1 && previous.filename === item.filename
+          } else if (previous.indexed === 1 && previous.available === 1 && previous.title === item.title && previous.filename === item.filename
             && previous.fileExtension === item.fileExtension && previous.relativePath === item.relativePath
             && previous.sizeBytes === item.sizeBytes && previous.modifiedAtMs === item.modifiedAtMs && previous.fileCount === item.fileCount) {
             row = { id: previous.id };
@@ -603,7 +602,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         progress.currentPath = "";
         await yieldBetweenBatches();
 
-        const collectionGroups = automaticCollectionGroups(sourceId, rootPath, previousSource?.media_type ?? "mixed", indexedItems);
+        const collectionGroups = automaticCollectionGroups(sourceId, rootPath, previousSource?.media_type ?? "mixed", indexedItems, previousSource?.prefix_grouping !== 0);
         const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
         const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
         const addSeriesItem = database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?) ON CONFLICT(series_id, item_id) DO UPDATE SET position = excluded.position");
