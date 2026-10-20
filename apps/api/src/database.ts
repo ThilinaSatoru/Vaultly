@@ -249,6 +249,9 @@ if (!sourceColumns.includes("connected")) database.exec("ALTER TABLE sources ADD
 if (!sourceColumns.includes("enabled")) database.exec("ALTER TABLE sources ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1");
 if (!sourceColumns.includes("filename_refactoring")) database.exec("ALTER TABLE sources ADD COLUMN filename_refactoring INTEGER NOT NULL DEFAULT 0");
 if (!sourceColumns.includes("prefix_grouping")) database.exec("ALTER TABLE sources ADD COLUMN prefix_grouping INTEGER NOT NULL DEFAULT 1");
+if (!sourceColumns.includes("directory_grouping")) database.exec("ALTER TABLE sources ADD COLUMN directory_grouping INTEGER NOT NULL DEFAULT 1");
+if (!sourceColumns.includes("filename_metadata_matching")) database.exec("ALTER TABLE sources ADD COLUMN filename_metadata_matching INTEGER NOT NULL DEFAULT 1");
+if (!sourceColumns.includes("hash_favorite_markers")) database.exec("ALTER TABLE sources ADD COLUMN hash_favorite_markers INTEGER NOT NULL DEFAULT 1");
 
 // Filename and format are stored separately from the relative path so a filename
 // filter never matches an unrelated parent directory.
@@ -385,6 +388,9 @@ export interface SourceRow {
   enabled: number;
   filename_refactoring: number;
   prefix_grouping: number;
+  directory_grouping: number;
+  filename_metadata_matching: number;
+  hash_favorite_markers: number;
   last_error: string | null;
   last_scanned_at: string | null;
   created_at: string;

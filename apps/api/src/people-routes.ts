@@ -8,6 +8,12 @@ import { getPeopleRepairProgress, repairPeopleMatches } from "./people-repair.js
 const idInput = z.object({ id: z.coerce.number().int().positive() });
 const itemRoleInput = z.object({ id: z.coerce.number().int().positive(), role: z.enum(["cast", "artist"]) });
 const nameInput = z.object({ name: z.string().trim().min(1).max(100) });
+const profileInput = z.object({
+  name: z.string().trim().min(1).max(100),
+  gender: z.string().trim().max(80).nullable().optional(),
+  country: z.string().trim().max(100).nullable().optional(),
+  profile_url: z.union([z.string().trim().url().max(2000), z.literal("")]).nullable().optional(),
+}).strict();
 
 function creditsForItem(id: number, role: "cast" | "artist") {
   return database.prepare(`
@@ -90,9 +96,15 @@ export async function registerPeopleRoutes(app: FastifyInstance) {
 
   app.patch("/api/people/:id", async (request, reply) => {
     const { id } = idInput.parse(request.params);
-    const { name } = nameInput.parse(request.body);
+    const profile = profileInput.parse(request.body);
+    const name = profile.name;
     try {
-      const changed = database.prepare("UPDATE people SET name = ? WHERE id = ?").run(name, id).changes;
+      const changed = database.prepare(`UPDATE people SET name = ?,
+        gender = CASE WHEN ? THEN ? ELSE gender END,
+        country = CASE WHEN ? THEN ? ELSE country END,
+        profile_url = CASE WHEN ? THEN ? ELSE profile_url END WHERE id = ?`)
+        .run(name, "gender" in profile, profile.gender?.trim() || null, "country" in profile, profile.country?.trim() || null,
+          "profile_url" in profile, profile.profile_url?.trim() || null, id).changes;
       if (!changed) return reply.code(404).send({ message: "Person not found." });
       return { id, name };
     } catch (error) {

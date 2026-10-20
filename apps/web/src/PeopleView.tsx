@@ -5,6 +5,7 @@ import { RenameAttributeDialog } from "./RenameAttributeDialog";
 import { AttributeBadge } from "./AttributeBadge";
 import { PersonPhoto } from "./PersonProfile";
 import { PersonImageDialog } from "./PersonImageDialog";
+import { PersonProfileDialog } from "./PersonProfileDialog";
 import { AttributeBulkUpload } from "./AttributeBulkUpload";
 import { PeopleMatchingRepair } from "./PeopleMatchingRepair";
 import { Select } from "./Select";
@@ -24,6 +25,7 @@ export function PeopleView({ people, onChanged, allowBrowse = true, creditFilter
   const [renaming, setRenaming] = useState<Person | null>(null);
   const [patternEntry, setPatternEntry] = useState<Person | null>(null);
   const [imagePerson, setImagePerson] = useState<Person | null>(null);
+  const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [creditFilter, setCreditFilter] = useUiState<PeopleCreditFilter>("vaultly.ui.people.creditFilter", creditFilterRequest?.filter ?? "all");
   const [previousRequest, setPreviousRequest] = useState(creditFilterRequest);
   if (creditFilterRequest !== previousRequest) {
@@ -85,12 +87,13 @@ export function PeopleView({ people, onChanged, allowBrowse = true, creditFilter
         <footer className="person-profile-actions">
           <button className="secondary-button" type="button" onClick={() => setImagePerson(person)} aria-label={`Set profile image for ${person.name}`}><Pencil size={14} />{person.profile_image || person.avatar_url ? "Edit photo" : "Add photo"}</button>
           <AttributePatternButton name={person.name} onClick={() => setPatternEntry(person)} />
-          <button className="icon-button" type="button" title="Rename" aria-label={`Rename ${person.name}`} onClick={() => setRenaming(person)}><Pencil size={17} /></button>
+          <button className="icon-button" type="button" title="Edit profile" aria-label={`Edit profile for ${person.name}`} onClick={() => setEditingPerson(person)}><Pencil size={17} /></button>
           <button className="icon-button danger-icon" type="button" title="Delete" aria-label={`Delete ${person.name}`} onClick={() => void remove(person)}><Trash2 size={17} /></button>
         </footer>
       </article>)}</div>
     {pagination}
     {renaming && <RenameAttributeDialog kind="people" attribute={renaming} onClose={() => setRenaming(null)} onSaved={onChanged} />}
+    {editingPerson && <PersonProfileDialog person={editingPerson} onClose={() => setEditingPerson(null)} onSaved={onChanged} />}
     {patternEntry && <AttributePatterns key={patternEntry.id} kind="people" attribute={patternEntry} onChanged={onChanged} editorOnly onClose={() => setPatternEntry(null)} />}
     {imagePerson && <PersonImageDialog person={imagePerson} onClose={() => setImagePerson(null)} onSaved={onChanged} />}
   </section>;

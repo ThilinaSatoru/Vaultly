@@ -222,13 +222,16 @@ export function inferCollectionPattern(filename: string): { title: string; order
 
 /** Assign each file to at most one set, keeping source and media boundaries. */
 export function automaticCollectionGroups(sourceId: number, rootPath: string, sourceType: SourceMediaType,
-  indexedItems: Array<{ id: number; item: Pick<ScannedItem, "filename" | "relativePath" | "mediaType"> }>, prefixGrouping = true) {
+  indexedItems: Array<{ id: number; item: Pick<ScannedItem, "filename" | "relativePath" | "mediaType"> }>, prefixGrouping = true, directoryGrouping = true) {
   type Group = { title: string; mediaType: ScannedItem["mediaType"]; entries: Array<{ id: number; order: number; path: string }> };
   const groups = new Map<string, Group>();
   const pending: Array<{ id: number; item: typeof indexedItems[number]["item"]; words: string[]; order: number }> = [];
   for (const { id, item } of indexedItems) {
     const folderType = item.mediaType === "video" && sourceType === "mixed" ? "movies" : sourceType;
-    const folder = folderCollection(item.relativePath, item.filename, folderType, path.basename(rootPath));
+    // A directory in a comic source is an organizational location, not a
+    // declaration that its contents belong to a set. Keep directory-derived
+    // sets for episodic video/story source types only.
+    const folder = !directoryGrouping || item.mediaType === "comic" ? null : folderCollection(item.relativePath, item.filename, folderType, path.basename(rootPath));
     const pattern = inferCollectionPattern(item.filename);
     if (folder) {
       const key = `${sourceId}|${item.mediaType}|${folder.key}|${folder.title.toLocaleLowerCase()}`;
@@ -415,8 +418,8 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
   const controller = new AbortController();
   const { signal } = controller;
   const progress = newProgress();
-  const previousSource = database.prepare("SELECT status, last_error, media_type, filename_refactoring, prefix_grouping FROM sources WHERE id = ?")
-    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType; filename_refactoring: number; prefix_grouping: number } | undefined;
+  const previousSource = database.prepare("SELECT status, last_error, media_type, filename_refactoring, prefix_grouping, directory_grouping, filename_metadata_matching, hash_favorite_markers FROM sources WHERE id = ?")
+    .get(sourceId) as { status: string; last_error: string | null; media_type: SourceMediaType; filename_refactoring: number; prefix_grouping: number; directory_grouping: number; filename_metadata_matching: number; hash_favorite_markers: number } | undefined;
 
   database.prepare(
       "UPDATE sources SET status = 'scanning', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -432,7 +435,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         AND media_type <> ? AND NOT EXISTS (SELECT 1 FROM media_items other
           WHERE other.source_id = media_items.source_id AND other.relative_path = media_items.relative_path AND other.media_type = ?)`)
         .run(pdfType, sourceId, pdfType, pdfType);
-      await normalizeHashMarkers(sourceId, rootPath, items, signal);
+      if (previousSource?.hash_favorite_markers !== 0) await normalizeHashMarkers(sourceId, rootPath, items, signal);
       const previousItems = (database.prepare(`SELECT id, media_type AS mediaType, title, filename,
         file_extension AS fileExtension, relative_path AS relativePath, size_bytes AS sizeBytes,
         modified_at_ms AS modifiedAtMs, file_count AS fileCount, indexed, available
@@ -562,16 +565,14 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
           reconciledIds.add(row.id);
           if (item.mediaType === "video") invalidateVideoMetadata.run(row.id, `${item.sizeBytes}:${item.modifiedAtMs}`);
           indexedItems.push({ id: row.id, item });
-          const normalizedFilename = normalizeMetadataFilename(item.filename, item.fileExtension);
-          for (const category of categoryMatcher.matchNormalized(normalizedFilename)) {
-            addCategory.run(row.id, category.id);
-          }
-          for (const tag of tagMatcher.matchNormalized(normalizedFilename)) {
-            addTag.run(row.id, tag.id);
-          }
-          clearFilenamePeople.run(row.id);
-          for (const person of peopleMatcher.matchNormalized(normalizedFilename)) {
-            addPerson.run(row.id, item.mediaType === "video" ? "cast" : "artist", "filename", person.id);
+          if (previousSource?.filename_metadata_matching !== 0) {
+            const normalizedFilename = normalizeMetadataFilename(item.filename, item.fileExtension);
+            for (const category of categoryMatcher.matchNormalized(normalizedFilename)) addCategory.run(row.id, category.id);
+            for (const tag of tagMatcher.matchNormalized(normalizedFilename)) addTag.run(row.id, tag.id);
+            clearFilenamePeople.run(row.id);
+            for (const person of peopleMatcher.matchNormalized(normalizedFilename)) {
+              addPerson.run(row.id, item.mediaType === "video" ? "cast" : "artist", "filename", person.id);
+            }
           }
           if (item.comicMetadata) {
             metadataTagMatcher ??= new AttributeNameMatcher(patternedTags);
@@ -602,7 +603,7 @@ export function scanSource(sourceId: number, rootPath: string, options: { genera
         progress.currentPath = "";
         await yieldBetweenBatches();
 
-        const collectionGroups = automaticCollectionGroups(sourceId, rootPath, previousSource?.media_type ?? "mixed", indexedItems, previousSource?.prefix_grouping !== 0);
+        const collectionGroups = automaticCollectionGroups(sourceId, rootPath, previousSource?.media_type ?? "mixed", indexedItems, previousSource?.prefix_grouping !== 0, previousSource?.directory_grouping !== 0);
         const findAutoSeries = database.prepare("SELECT id FROM series WHERE auto_key = ?");
         const createAutoSeries = database.prepare("INSERT OR IGNORE INTO series(title, preferred_type, auto_key) VALUES (?, ?, ?)");
         const addSeriesItem = database.prepare("INSERT INTO series_items(series_id, item_id, position) VALUES (?, ?, ?) ON CONFLICT(series_id, item_id) DO UPDATE SET position = excluded.position");

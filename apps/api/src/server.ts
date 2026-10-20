@@ -67,6 +67,9 @@ await app.register(registerAttributeRoutes);
 const sourceInput = z.object({
   mediaType: z.enum(sourceMediaTypes).optional(),
   prefixGrouping: z.boolean().optional(),
+  directoryGrouping: z.boolean().optional(),
+  filenameMetadataMatching: z.boolean().optional(),
+  hashFavoriteMarkers: z.boolean().optional(),
   name: z.string().trim().min(1).max(80).optional(),
   rootPath: z.string().trim().min(1),
 });
@@ -181,9 +184,10 @@ app.post("/api/sources", async (request, reply) => {
     let sourceId: number;
     try {
       const result = database.prepare(`
-        INSERT INTO sources (name, root_path, normalized_path, media_type, prefix_grouping, status)
-        VALUES (?, ?, ?, ?, ?, 'idle')
-      `).run(name, resolvedPath, normalizedPath, input.mediaType ?? "mixed", input.prefixGrouping === false ? 0 : 1);
+        INSERT INTO sources (name, root_path, normalized_path, media_type, prefix_grouping, directory_grouping, filename_metadata_matching, hash_favorite_markers, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'idle')
+      `).run(name, resolvedPath, normalizedPath, input.mediaType ?? "mixed", input.prefixGrouping === false ? 0 : 1, input.directoryGrouping === false ? 0 : 1,
+        input.filenameMetadataMatching === false ? 0 : 1, input.hashFavoriteMarkers === false ? 0 : 1);
       sourceId = Number(result.lastInsertRowid);
       setSourceAttributes(sourceId, input);
       database.exec("COMMIT");
@@ -273,9 +277,13 @@ app.patch("/api/sources/:id", async (request, reply) => {
   const normalizedPath = process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
   const name = input.name || source.name;
   try {
-    database.prepare(`UPDATE sources SET name = ?, root_path = ?, normalized_path = ?, media_type = ?, prefix_grouping = ?, connected = 1,
+    database.prepare(`UPDATE sources SET name = ?, root_path = ?, normalized_path = ?, media_type = ?, prefix_grouping = ?, directory_grouping = ?, filename_metadata_matching = ?, hash_favorite_markers = ?, connected = 1,
       status = 'idle', last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
-      .run(name, resolvedPath, normalizedPath, input.mediaType ?? source.media_type, input.prefixGrouping === undefined ? source.prefix_grouping : Number(input.prefixGrouping), id);
+      .run(name, resolvedPath, normalizedPath, input.mediaType ?? source.media_type,
+        input.prefixGrouping === undefined ? source.prefix_grouping : Number(input.prefixGrouping),
+        input.directoryGrouping === undefined ? source.directory_grouping : Number(input.directoryGrouping),
+        input.filenameMetadataMatching === undefined ? source.filename_metadata_matching : Number(input.filenameMetadataMatching),
+        input.hashFavoriteMarkers === undefined ? source.hash_favorite_markers : Number(input.hashFavoriteMarkers), id);
   } catch (error) {
     if (error instanceof Error && error.message.includes("UNIQUE constraint failed")) {
       return reply.code(409).send({ message: "That folder is already used by another source." });

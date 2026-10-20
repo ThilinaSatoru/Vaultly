@@ -119,3 +119,19 @@ test("shared one/two-word prefixes cover introductions, trailing credits and Uni
     { id: 2, item: { filename: "Harbor Return.mp4", relativePath: "Second/Harbor Return.mp4", mediaType: "video" } },
   ]).values()].map((group) => group.entries.length)).toEqual([2]);
 });
+
+test("comic files in the same source directory do not become an automatic set", () => {
+  const groups = automaticCollectionGroups(10, "/manga", "manga", [
+    { id: 1, item: { filename: "Cover.cbz", relativePath: "Series/Cover.cbz", mediaType: "comic" } },
+    { id: 2, item: { filename: "Volume.cbz", relativePath: "Series/Volume.cbz", mediaType: "comic" } },
+  ]);
+  expect(groups.size).toBe(0);
+});
+
+test("directory grouping can be disabled independently from filename prefix grouping", () => {
+  const groups = automaticCollectionGroups(11, "/shows", "tv", [
+    { id: 1, item: { filename: "Pilot.mp4", relativePath: "Series/Pilot.mp4", mediaType: "video" } },
+    { id: 2, item: { filename: "Finale.mp4", relativePath: "Series/Finale.mp4", mediaType: "video" } },
+  ], true, false);
+  expect(groups.size).toBe(0);
+});
