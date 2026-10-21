@@ -5,6 +5,17 @@ and edit them into user-facing notes before starting a release when needed.
 
 ## [Unreleased]
 
+## [0.6.12] - 2026-10-21
+
+### Changed
+
+- type bugs fixed. (6a345fa)
+- type bugs fixed. (caaf0ee)
+- type error bug fix (824acc1)
+- type check fix (f58cc32)
+- grouping loc updates, refatoring, Ui fixes, bug fixes. (44ea7e4)
+- bug fixes and ui updates (3a139a4)
+
 ## [0.5.7] - 2026-10-16
 
 ### Changed
