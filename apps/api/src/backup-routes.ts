@@ -84,11 +84,19 @@ function importValue(table: string, column: string, value: unknown): unknown {
 export async function registerBackupRoutes(app: FastifyInstance) {
   app.addContentTypeParser(["application/gzip", "application/octet-stream"], { parseAs: "buffer", bodyLimit: maxBackupBytes }, (_request, body, done) => done(null, body));
   const exportBackup = async () => {
-    const data = Object.fromEntries(tableOrder.map((table) => [
-      table,
-      (database.prepare(`SELECT ${columns[table].join(", ")} FROM ${table}`).all() as BackupRow[])
-        .map((row) => exportRow(table, row)),
-    ]));
+    const data = Object.fromEntries(tableOrder.map((table) => {
+      const rows = (database.prepare(`SELECT ${columns[table].join(", ")} FROM ${table}`).all() as BackupRow[])
+        .map((row) => exportRow(table, row));
+      if (table === "music_tracks") {
+        // Album artwork is shared by the library and may be stored on only one track.
+        const albumCovers = new Map(rows.filter((row) => typeof row.cover_data === "string")
+          .map((row) => [row.album_id as number, row.cover_data as string]));
+        for (const row of rows) if (row.cover_data == null && albumCovers.has(row.album_id as number)) {
+          row.cover_data = albumCovers.get(row.album_id as number);
+        }
+      }
+      return [table, rows];
+    }));
     const profileImages: Record<string, string> = {};
     for (const person of data.people!) {
       if (typeof person.profile_image === "string") profileImages[person.profile_image] = (await readProfileImage(person.profile_image)).toString("base64");
