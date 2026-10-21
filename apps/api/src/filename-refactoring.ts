@@ -23,13 +23,21 @@ export function refactoredFilename(filename: string, casts: Attribute[], tags: A
   }
   const { matcher, maxWords } = cleaner;
   const titleWords: string[] = [];
+  const seenTitleWords = new Set<string>();
   for (let i = 0; i < words.length;) {
     let matched = 0;
     for (let length = Math.min(maxWords, words.length - i); length > 0; length--) {
       if (matcher.matchNormalized(normalizeMetadataPhrase(words.slice(i, i + length).join(" ")), true).length) { matched = length; break; }
     }
     if (matched) i += matched;
-    else titleWords.push(words[i++]);
+    else {
+      const word = words[i++];
+      const key = normalizeMetadataPhrase(word);
+      if (!seenTitleWords.has(key)) {
+        seenTitleWords.add(key);
+        titleWords.push(word);
+      }
+    }
   }
   const title = safeText(titleWords.join(" ")) || "Untitled";
   const credits = casts.map((entry) => safeText(entry.name)).filter(Boolean).join(", ");
@@ -42,7 +50,8 @@ export function refactoredFilename(filename: string, casts: Attribute[], tags: A
   let shortened = title;
   while (Buffer.byteLength(shortened) > available) shortened = [...shortened].slice(0, -1).join("");
   const result = `${prefix}${shortened.trim()}${suffix}`;
-  return { filename: /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result) ? `_${result}` : result, title: shortened.trim() };
+  const nextFilename = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(result) ? `_${result}` : result;
+  return { filename: nextFilename, title: nextFilename };
 }
 
 const within = (root: string, file: string) => {

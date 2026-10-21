@@ -30,15 +30,15 @@ test("classifies mixed and nested media without indexing individual comic pages"
 
   expect(items).toHaveLength(4);
   expect(items.map((item) => [item.mediaType, item.title]).sort()).toEqual([
-    ["comic", "Archive"],
+    ["comic", "Archive.cbz"],
     ["comic", "Issue 01"],
-    ["story", "My Story"],
-    ["video", "Sample Movie"],
+    ["story", "My Story.pdf"],
+    ["video", "Sample Movie.mp4"],
   ]);
   expect(items.find((item) => item.title === "Issue 01")?.fileCount).toBe(2);
   expect(items.find((item) => item.title === "Issue 01")?.fileExtension).toBe("");
-  expect(items.find((item) => item.title === "My Story")?.filename).toBe("My Story.pdf");
-  expect(items.find((item) => item.title === "My Story")?.fileExtension).toBe("pdf");
+  expect(items.find((item) => item.title === "My Story.pdf")?.filename).toBe("My Story.pdf");
+  expect(items.find((item) => item.title === "My Story.pdf")?.fileExtension).toBe("pdf");
 });
 
 test("scans the root and every branch at arbitrary depth, including children of comic folders", async () => {
@@ -118,4 +118,20 @@ test("shared one/two-word prefixes cover introductions, trailing credits and Uni
     { id: 1, item: { filename: "Harbor Beginning.mp4", relativePath: "First/Harbor Beginning.mp4", mediaType: "video" } },
     { id: 2, item: { filename: "Harbor Return.mp4", relativePath: "Second/Harbor Return.mp4", mediaType: "video" } },
   ]).values()].map((group) => group.entries.length)).toEqual([2]);
+});
+
+test("comic files in the same source directory do not become an automatic set", () => {
+  const groups = automaticCollectionGroups(10, "/manga", "manga", [
+    { id: 1, item: { filename: "Cover.cbz", relativePath: "Series/Cover.cbz", mediaType: "comic" } },
+    { id: 2, item: { filename: "Volume.cbz", relativePath: "Series/Volume.cbz", mediaType: "comic" } },
+  ]);
+  expect(groups.size).toBe(0);
+});
+
+test("directory grouping can be disabled independently from filename prefix grouping", () => {
+  const groups = automaticCollectionGroups(11, "/shows", "tv", [
+    { id: 1, item: { filename: "Pilot.mp4", relativePath: "Series/Pilot.mp4", mediaType: "video" } },
+    { id: 2, item: { filename: "Finale.mp4", relativePath: "Series/Finale.mp4", mediaType: "video" } },
+  ], true, false);
+  expect(groups.size).toBe(0);
 });

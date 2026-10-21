@@ -112,7 +112,7 @@ test.each(["both", "quick", "slow"] as const)("real %s converter preserves IDs a
       await expect(readFile(path.join(root, "encode.mp4"))).rejects.toMatchObject({ code: "ENOENT" });
     } else expect(progress.logs.join("\n")).toContain("video RE-ENCODE (slow)");
     const item = database.prepare("SELECT title, filename, favorite FROM media_items WHERE id = ?").get(mediaId);
-    expect(item).toEqual({ title: "Custom title", filename: "convert.mp4", favorite: 1 });
+    expect(item).toEqual({ title: "convert.mp4", filename: "convert.mp4", favorite: 1 });
     await expect(readFile(path.join(root, "convert.mkv"))).rejects.toMatchObject({ code: "ENOENT" });
     expect((await readFile(path.join(root, "convert.mp4"))).length).toBeGreaterThan(0);
     expect(await readFile(path.join(root, "broken.avi"), "utf8")).toBe("keep broken original");

@@ -10,7 +10,7 @@ export function RenameMediaDialog({ item, onClose, onSaved }: {
   onClose: () => void;
   onSaved: (renamed: RenamedMedia) => void;
 }) {
-  const [title, setTitle] = useState(item.title);
+  const [title, setTitle] = useState(() => item.file_extension ? item.filename.slice(0, item.filename.lastIndexOf(".")) : item.filename);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const inputId = useId();

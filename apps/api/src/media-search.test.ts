@@ -43,6 +43,7 @@ test("indexed search combines tokens and filters, paginates, and follows edits a
     expect((await search({ q: "00" })).items.map((item: { id: number }) => item.id)).toEqual([ids[0]]);
     const edit = await app.inject({ method: "PATCH", url: `/api/items/${ids[0]}`, payload: { title: "Edited title" } });
     expect(edit.statusCode, edit.body).toBe(200);
+    expect(edit.json()).toMatchObject({ title: "Edited title.pdf", filename: "Edited title.pdf" });
     expect((await search({ q: "holiday summer" })).total).toBe(54);
     expect((await search({ q: "edited summer" })).items.map((item: { id: number }) => item.id)).toEqual([ids[0]]);
     expect((await search({ filename: "Trip_00" })).total).toBe(0);

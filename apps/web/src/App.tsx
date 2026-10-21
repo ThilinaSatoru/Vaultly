@@ -103,6 +103,10 @@ type SourceStatus = "idle" | "scanning" | "ready" | "error";
 interface LibrarySource {
   enabled?: number;
   filename_refactoring?: number;
+  prefix_grouping?: number;
+  directory_grouping?: number;
+  filename_metadata_matching?: number;
+  hash_favorite_markers?: number;
   id: number;
   name: string;
   root_path: string;
@@ -221,6 +225,7 @@ function AddSourceDialog({
   const [categoryIds, setCategoryIds] = useState<number[]>([]);
   const [name, setName] = useState("");
   const [mediaType, setMediaType] = useState(initialMediaType);
+  const [prefixGrouping, setPrefixGrouping] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -260,6 +265,7 @@ function AddSourceDialog({
           rootPath: rootPath.trim(),
           name: name.trim() || undefined,
           mediaType,
+          prefixGrouping,
           tagIds,
           categoryIds,
         }),
@@ -308,6 +314,12 @@ function AddSourceDialog({
           <option value="pictures">Pictures</option>
           <option value="music">Music / music videos</option>
         </Select>
+        <p className="attribute-help"><strong>Initial scan option</strong></p>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={prefixGrouping} onChange={(event) => setPrefixGrouping(event.target.checked)} />
+          Group files by shared filename prefixes
+        </label>
+        <p className="attribute-help">Disable this for sources where filenames share generic words. Folder and numbered sequence grouping still works.</p>
         <label htmlFor="source-path">Folder path</label>
         <div className="path-control">
           <ClearableInput
@@ -693,6 +705,53 @@ function SourceCard({
             <option value="pictures">Pictures</option>
           </Select>
         </label>
+        <p className="attribute-help"><strong>Grouping rules</strong> · Each source can use a different combination.</p>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={source.prefix_grouping !== 0} disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              setWorking(true); setActionError("");
+              void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, prefixGrouping: event.target.checked }) })
+                .then(onChanged)
+                .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change prefix grouping."))
+                .finally(() => setWorking(false));
+            }} />
+          Group remaining files by shared filename prefixes (two-word, then one-word matches)
+        </label>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={source.directory_grouping !== 0} disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              setWorking(true); setActionError("");
+              void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, directoryGrouping: event.target.checked }) })
+                .then(onChanged)
+                .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change directory grouping."))
+                .finally(() => setWorking(false));
+            }} />
+          Group files by directory structure (season, episode, chapter, and folder ordering)
+        </label>
+        <p className="attribute-help"><strong>Filename matching and naming rules</strong></p>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={source.filename_metadata_matching !== 0} disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              setWorking(true); setActionError("");
+              void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, filenameMetadataMatching: event.target.checked }) })
+                .then(onChanged)
+                .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change filename metadata matching."))
+                .finally(() => setWorking(false));
+            }} />
+          Match people, tags, and categories from filenames
+        </label>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={source.hash_favorite_markers !== 0} disabled={working || converting || source.status === "scanning"}
+            onChange={(event) => {
+              setWorking(true); setActionError("");
+              void api(`/api/sources/${source.id}`, { method: "PATCH", body: JSON.stringify({ rootPath: source.root_path, hashFavoriteMarkers: event.target.checked }) })
+                .then(onChanged)
+                .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change hash marker handling."))
+                .finally(() => setWorking(false));
+            }} />
+          Treat leading # in filenames as favorite markers and remove it
+        </label>
+        <p className="attribute-help">Filename matching assigns existing people, tags, and categories by names and aliases. Comic archive metadata is read independently. Leading # markers set favorites and are removed from files when enabled.</p>
         <label className="source-refactoring-option">
           <input type="checkbox" checked={Boolean(source.filename_refactoring)} disabled={working || converting || source.status === "scanning"}
             onChange={(event) => {
@@ -702,9 +761,9 @@ function SourceCard({
                 .catch((reason: unknown) => setActionError(reason instanceof Error ? reason.message : "Could not change filename refactoring."))
                 .finally(() => setWorking(false));
             }} />
-          Enable filename refactoring
+          Rename files using matched people and tags
         </label>
-        <p className="attribute-help">Use “Scan + refactor filenames” to rename files using assigned casts and tags. Each run asks for confirmation.</p>
+        <p className="attribute-help">Off by default. A confirmed “Scan + refactor filenames” run names supported files across media types using the remaining title words, matched cast, and tags. It renames files on disk and syncs library paths; image-folder items are not renamed.</p>
         <div className="source-common-attributes">
           <div className="attribute-badges">
             {(source.tags ?? []).map((tag) => (

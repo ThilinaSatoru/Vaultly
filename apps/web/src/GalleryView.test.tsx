@@ -95,6 +95,19 @@ test("a collection-only e-book page renders its cards and paginates by visible c
   expect(vi.mocked(api).mock.calls.some(([url]) => url.startsWith("/api/items?") && new URLSearchParams(url.split("?")[1]).get("groupSeries") === "1")).toBe(true);
 });
 
+test("gallery layout can be switched and is saved in the current gallery navigation state", async () => {
+  vi.mocked(api).mockImplementation(async (url) => url.startsWith("/api/items?")
+    ? { items: [{ id: 7, title: "An item", media_type: "story", tags: [], categories: [], cast: [], artists: [] }], total: 1, pageSize: 48 } : []);
+  render(); await settle();
+  let node = render();
+  const toggle = find(node, (element) => element.props["aria-label"] === "List view")!;
+  toggle.props.onClick();
+  node = render();
+  expect(hooks.fields["gallery.story.browse.layout"]).toBe("list");
+  expect(find(node, (element) => element.props.className === "media-grid media-grid-list")).toBeDefined();
+  expect(find(node, (element) => element.props["aria-label"] === "List view")!.props["aria-pressed"]).toBe(true);
+});
+
 test("the grid waits for collection details instead of showing a temporarily sparse page", async () => {
   let resolveSeries!: (series: SeriesSummary[]) => void;
   const series = new Promise<SeriesSummary[]>((resolve) => { resolveSeries = resolve; });

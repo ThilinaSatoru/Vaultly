@@ -2,7 +2,7 @@ import { ClearableInput } from "./ClearableField";
 import { Select } from "./Select";
 import { mediaCardOrientation, useArtworkOrientation } from "./artwork";
 import { vaultUrl } from "./vault-session";
-import { ArrowLeft, BookOpen, Check, Clapperboard, Folder, FolderPlus, Heart, Image, Layers3, ListPlus, LoaderCircle, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Check, Clapperboard, Folder, FolderPlus, Grid2X2, Heart, Image, Layers3, List, ListPlus, LoaderCircle, Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useContext, type Dispatch, type SetStateAction } from "react";
 import { NavigationContext, useNavigationField } from "./navigation";
@@ -273,6 +273,7 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
   const filterAttributes = creditedAttributes?.type === effectiveType ? creditedAttributes : null;
   const hasMedia = (entry: SeriesSummary | CircleSummary) => (effectiveType ? entry[`${effectiveType}_count`] : entry.item_count) > 0;
   const [sort, setSort] = useGalleryField<"auto" | "folders" | "relevance" | "title" | "filename" | "recent" | "oldest" | "size" | "smallest">("sort", "auto");
+  const [layout, setLayout] = useGalleryField<"grid" | "list">("layout", "grid");
   const [searchMode, setSearchMode] = useGalleryField<"literal" | "fuzzy" | "english">("searchMode", "english");
   const [page, setPage] = useGalleryField("page", 0);
   const [result, setResult] = useState<ItemPage | null>(null);
@@ -468,10 +469,11 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
     <button className="secondary-button" type="button" onClick={() => setPage((value) => value + 1)} disabled={(page + 1) * result.pageSize >= result.total}>Next</button>
   </div> : null;
 
-  const profile = !type && view === "browse" ? people.find((person) => person.id === navigation.entry.fields.personProfileId && [...selectedCastIds, ...selectedArtistIds].includes(person.id)) : undefined;
+  const profile = view === "browse" ? people.find((person) => person.id === navigation.entry.fields.personProfileId && [...selectedCastIds, ...selectedArtistIds].includes(person.id)) : undefined;
   return (
-    <AttributeMediaContext.Provider value={type || selectedType || undefined}><section className="gallery-view">
-      {profile && <PersonProfileHeader person={profile} />}
+    <AttributeMediaContext.Provider value={type || selectedType || undefined}><section className={`gallery-view${profile ? " gallery-view--person-profile" : ""}`}>
+      {profile && <aside className="gallery-person-profile"><PersonProfileHeader person={profile} /></aside>}
+      <div className="gallery-profile-content">
       <div className="page-heading gallery-heading">
         <div>{view === "categories" && browseCategory !== null && <button className="category-back" type="button" onClick={() => { if (navigation.entry.breadcrumbs.length) navigation.back(); else { setBrowseCategory(null); setSelectedItemIds([]); } }}><ArrowLeft size={16} /> All categories</button>}<p className="eyebrow">Your library</p><h1>{title}</h1><p>{view === "categories" && browseCategory === null ? "Choose a category to open its media library." : search ? `Results for “${search}”` : "Browse files indexed from your local folders."}</p></div>
         <span className="result-count">{view === "categories" && browseCategory === null ? categoryOverview ? `${formatCount(categoryOverview.categories.length + (categoryOverview.uncategorized_count ? 1 : 0))} categories` : "Loading…" : loading && !result ? "Loading…" : resultCount}</span>
@@ -498,6 +500,10 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
             <option value="smallest">Smallest first</option>
           </Select>
         </label>
+        <div className="gallery-layout-toggle" role="group" aria-label="Gallery layout">
+          <button type="button" className={layout === "grid" ? "is-active" : ""} aria-label="Grid view" aria-pressed={layout === "grid"} onClick={() => setLayout("grid")}><Grid2X2 size={16} /></button>
+          <button type="button" className={layout === "list" ? "is-active" : ""} aria-label="List view" aria-pressed={layout === "list"} onClick={() => setLayout("list")}><List size={17} /></button>
+        </div>
         <button className={`gallery-more-button${advancedOpen ? " is-open" : ""}`} type="button" aria-expanded={advancedOpen} aria-controls="media-advanced-filters" onClick={() => setAdvancedOpen((value) => !value)}><SlidersHorizontal size={16} /> Advanced filters{extraFilterCount + selectedCategoryIds.length + selectedTagIds.length > 0 ? ` (${extraFilterCount + selectedCategoryIds.length + selectedTagIds.length})` : ""}</button>
         {hasFilters && <button className="gallery-clear-button" type="button" onClick={clearFilters}><X size={15} /> Clear filters</button>}
       </div>}
@@ -530,12 +536,12 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
       {sort === "folders" && <div className="folder-navigation"><button type="button" className="secondary-button" onClick={() => { setSourceId(""); setFolderPath(""); }}>All source folders</button>{sourceId && <><button type="button" className="secondary-button" onClick={() => { if (folderPath) setFolderPath(folderPath.split("/").slice(0, -1).join("/")); else setSourceId(""); }}><ArrowLeft size={16} /> Up</button><span>{sources.find((source) => String(source.id) === sourceId)?.name}{folderPath ? ` / ${folderPath}` : ""}</span></>}</div>}
       {sort === "folders" && !loading && Boolean(result?.folders?.length) && <div className="folder-grid">{result?.folders?.map((folder) => <button className="folder-card" type="button" key={`${folder.source_id}:${folder.path}`} onClick={() => { navigation.push({ [`gallery.${type ?? "all"}.${view}.sourceId`]: String(folder.source_id), [`gallery.${type ?? "all"}.${view}.folderPath`]: folder.path, [`gallery.${type ?? "all"}.${view}.page`]: 0 }, folder.name); }}><Folder size={30} /><strong>{folder.name}</strong><span>{formatCount(folder.item_count)} items</span></button>)}</div>}
       {error && <p className="page-error" role="alert">{error}</p>}
-      {view === "categories" && browseCategory === null ? (!categoryOverview && !error ? <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading categories…</span></div> : categoryOverview && categoryOverview.categories.length === 0 && categoryOverview.uncategorized_count === 0 ? <div className="gallery-empty"><Folder size={34} /><h2>No categorized media</h2><p>Assign categories to media, then return here.</p></div> : null) : loading || awaitingCollections ? (
+      {view === "categories" && browseCategory === null ? (!categoryOverview && !error ? <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading categories…</span></div> : categoryOverview && categoryOverview.categories.length === 0 && categoryOverview.uncategorized_count === 0 ? <div className="gallery-empty"><Folder size={34} /><h2>No categorized media</h2><p>Assign categories to media, then return here.</p></div> : null) : !result && (loading || awaitingCollections) ? (
         <div className="loading-state"><LoaderCircle className="spin" size={28} /><span>Loading media…</span></div>
       ) : result && (result.cards?.length ?? result.items.length) > 0 ? (
         <>
           {paginationControls}
-          <div className="media-grid">{renderCards()}</div>
+          <div className={`media-grid${layout === "list" ? " media-grid-list" : ""}`}>{renderCards()}</div>
           {paginationControls}
         </>
       ) : sort === "folders" && Boolean(result?.folders?.length) ? null : (
@@ -548,6 +554,7 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
       )}
       {bulkOpen && <BulkActionDialog itemIds={selectedItemIds} mediaType={type} tags={tags} categories={categories} people={people} series={seriesOptions} onTagCreated={onTagCreated} onCategoryCreated={onCategoryCreated} onPersonCreated={onPersonCreated} onSeriesCreated={createSeries} onClose={() => setBulkOpen(false)} onDeleted={mediaDeleted} onDone={() => { setBulkOpen(false); setSelectedItemIds([]); onChanged(); }} />}
       {deletingItem && <DeleteMediaDialog itemIds={[deletingItem.id]} title={deletingItem.title} onDeleted={mediaDeleted} onClose={() => setDeletingItem(null)} />}
+      </div>
     </section></AttributeMediaContext.Provider>
   );
 }

@@ -79,7 +79,7 @@ test("comic sidecars reuse tags and artist aliases, create artists once, and app
     await scanSource(source, root);
     expect(tagIds(first.id)).toEqual([male, manualTag, laterTag].sort((a, b) => a - b));
     expect(artistIds(first.id)).toHaveLength(4);
-    expect(database.prepare("SELECT title FROM media_items WHERE id = ?").get(first.id)).toEqual({ title: "My custom title" });
+    expect(database.prepare("SELECT title FROM media_items WHERE id = ?").get(first.id)).toEqual({ title: "First" });
     expect(database.prepare("SELECT COUNT(*) AS count FROM people WHERE name LIKE ?").get(`${token}%Rivera`)).toEqual({ count: 1 });
     await rm(firstMeta);
     await scanSource(source, root);
