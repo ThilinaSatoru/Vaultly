@@ -47,7 +47,7 @@ export async function readMusicMetadata(filename: string, signal: AbortSignal) {
     if (metadata.hasCover) {
       try {
         const result = await runBinaryCommand(ffmpegInstaller.path, ["-hide_banner", "-loglevel", "error", "-nostdin", "-threads", "1", "-i", filename,
-          "-map", "0:v:m:attached_pic", "-frames:v", "1", "-vf", "scale=480:480:force_original_aspect_ratio=decrease", "-threads", "1", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1"],
+          "-map", "0:v:0", "-frames:v", "1", "-c:v", "copy", "-f", "image2pipe", "pipe:1"],
         { encoding: "buffer", windowsHide: true, timeout: 20000, maxBuffer: 2 * 1024 * 1024, signal });
         cover = result.stdout;
       } catch { signal.throwIfAborted(); }
