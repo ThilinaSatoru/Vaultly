@@ -103,8 +103,8 @@ export async function registerPeopleRoutes(app: FastifyInstance) {
         gender = CASE WHEN ? THEN ? ELSE gender END,
         country = CASE WHEN ? THEN ? ELSE country END,
         profile_url = CASE WHEN ? THEN ? ELSE profile_url END WHERE id = ?`)
-        .run(name, "gender" in profile, profile.gender?.trim() || null, "country" in profile, profile.country?.trim() || null,
-          "profile_url" in profile, profile.profile_url?.trim() || null, id).changes;
+        .run(name, Number("gender" in profile), profile.gender?.trim() || null, Number("country" in profile), profile.country?.trim() || null,
+          Number("profile_url" in profile), profile.profile_url?.trim() || null, id).changes;
       if (!changed) return reply.code(404).send({ message: "Person not found." });
       return { id, name };
     } catch (error) {
