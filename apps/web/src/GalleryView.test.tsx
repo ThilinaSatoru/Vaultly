@@ -90,9 +90,16 @@ test("a collection-only e-book page renders its cards and paginates by visible c
     : url === "/api/series" ? [{ id: 1, title: "First" }, { id: 2, title: "Second" }] : []);
   render(); await settle(); const node = render();
   expect(find(node, (element) => element.props.className === "media-grid")!.props.children).toHaveLength(2);
-  expect(find(node, (element) => element.type === "button" && element.props.children === "Next")!.props.disabled).toBe(true);
+  expect(find(node, (element) => element.type === "button" && element.props.children === "Next")).toBeUndefined();
   expect(find(node, (element) => element.props.className === "result-count")!.props.children).toBe("2 cards · 120 items");
   expect(vi.mocked(api).mock.calls.some(([url]) => url.startsWith("/api/items?") && new URLSearchParams(url.split("?")[1]).get("groupSeries") === "1")).toBe(true);
+});
+
+test("pagination controls appear only when results span several pages", async () => {
+  vi.mocked(api).mockImplementation(async (url) => url.startsWith("/api/items?")
+    ? { items: [{ id: 7, title: "An item", media_type: "story", tags: [], categories: [], cast: [], artists: [] }], total: 100, pageSize: 48, page: 0 } : []);
+  render(); await settle(); const node = render();
+  expect(find(node, (element) => element.type === "button" && element.props.children === "Next")!.props.disabled).toBe(false);
 });
 
 test("gallery layout can be switched and is saved in the current gallery navigation state", async () => {

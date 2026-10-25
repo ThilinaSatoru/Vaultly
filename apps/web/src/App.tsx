@@ -314,19 +314,13 @@ function AddSourceDialog({
           <option value="pictures">Pictures</option>
           <option value="music">Music / music videos</option>
         </Select>
-        <p className="attribute-help"><strong>Initial scan option</strong></p>
-        <label className="source-refactoring-option">
-          <input type="checkbox" checked={prefixGrouping} onChange={(event) => setPrefixGrouping(event.target.checked)} />
-          Group files by shared filename prefixes
-        </label>
-        <p className="attribute-help">Disable this for sources where filenames share generic words. Folder and numbered sequence grouping still works.</p>
         <label htmlFor="source-path">Folder path</label>
         <div className="path-control">
           <ClearableInput
             id="source-path"
             value={rootPath}
             onChange={(event) => setRootPath(event.target.value)}
-            placeholder="D:\\Media"
+            placeholder={"D:\\Media"}
             autoFocus
           />
           <button
@@ -361,6 +355,13 @@ function AddSourceDialog({
           onCategoriesChange={setCategoryIds}
           disabled={saving}
         />}
+
+        <p className="attribute-help"><strong>Initial scan option</strong></p>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={prefixGrouping} onChange={(event) => setPrefixGrouping(event.target.checked)} />
+          Group files by shared filename prefixes
+        </label>
+        <p className="attribute-help">Disable this for sources where filenames share generic words. Folder and numbered sequence grouping still works.</p>
 
         <div className="mixed-note">
           <Grid2X2 size={18} />

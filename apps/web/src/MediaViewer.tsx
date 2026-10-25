@@ -14,6 +14,7 @@ import { VideoPlayer } from "./VideoPlayer";
 import { api, formatDuration, formatSize, type Category, type MediaDetail, type Person, type SeriesSummary, type SeriesViewerContext, type SimilarVideo, type Tag } from "./media";
 import { matchesShortcut, readBooleanPreference, readNumberPreference } from "./preferences";
 import { useContinuousReaderScroll } from "./useContinuousReaderScroll";
+import { useGalleryContinuation } from "./useGalleryContinuation";
 import { viewerNavigationItems, type GalleryVideoContext } from "./video-playlist";
 import { ReaderAppearance, useReaderAppearance } from "./ReaderAppearance";
 import { ActionMenu } from "./ActionMenu";
@@ -84,11 +85,12 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [sidebarTab, setSidebarTab] = useState<"playlist" | "info">(() => vaultStorage.getItem("vaultly.video.sidebarTab") === "info" ? "info" : "playlist");
   const [similarVideos, setSimilarVideos] = useState<SimilarVideo[]>([]);
   const [similarLoading, setSimilarLoading] = useState(false);
+  const { videos: galleryVideos, loading: galleryPageLoading } = useGalleryContinuation(galleryContext ?? null, itemId);
   const lastFullscreenExit = useRef(-Infinity);
   const playlistIndex = playlist.findIndex((entry) => entry.id === itemId);
   const similarNavigation = item?.media_type === "video" ? [{ id: item.id, title: item.title }, ...similarVideos] : undefined;
-  const navigationItems = viewerNavigationItems(itemId, galleryContext, playlist, seriesContext, similarNavigation);
-  const suggestedVideos = galleryContext?.videos ?? similarVideos;
+  const navigationItems = galleryContext ? galleryVideos : viewerNavigationItems(itemId, null, playlist, seriesContext, similarNavigation);
+  const suggestedVideos = galleryVideos ?? similarVideos;
   const hasPlaylist = playlist.length > 0 || Boolean(galleryContext?.videos.length);
   const seriesIndex = navigationItems?.findIndex((entry) => entry.id === itemId) ?? -1;
   const previousItem = seriesIndex > 0 ? navigationItems?.[seriesIndex - 1] : undefined;
@@ -445,7 +447,8 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
                 <div>{playlist.map((entry, index) => <div className={entry.id === itemId ? "is-playing" : ""} key={entry.id}><button type="button" onClick={() => onNavigatePlaylistItem(entry.id)}><span>{index + 1}</span><strong>{entry.title}</strong></button><button type="button" onClick={() => onRemoveFromPlaylist(entry.id)} aria-label={`Remove ${entry.title} from playlist`}><Trash2 size={14} /></button></div>)}</div>
               </section>}
               <section className={`similar-playlist${galleryContext ? " gallery-playlist" : ""}`}>
-                <div className="similar-playlist-heading"><span>{galleryContext ? `Current page · ${galleryContext.page + 1}` : "Similar videos"}</span><small>{suggestedVideos.length || ""}</small></div>
+                <div className="similar-playlist-heading"><span>{galleryContext ? `Gallery · page ${galleryContext.page + 1}${galleryVideos && galleryVideos.length > galleryContext.videos.length ? " + next" : ""}` : "Similar videos"}</span><small>{suggestedVideos.length || ""}</small></div>
+                {galleryPageLoading && <div className="viewer-playlist-state"><LoaderCircle className="spin" size={16} /> Loading next gallery page…</div>}
                 {!galleryContext && similarLoading && <div className="viewer-playlist-state"><LoaderCircle className="spin" size={16} /> Finding similar videos…</div>}
                 {!similarLoading && suggestedVideos.length === 0 && <p className="viewer-playlist-state">{galleryContext ? "No videos on this gallery page." : "No other videos are available yet."}</p>}
                 <div className="similar-playlist-list">{suggestedVideos.map((video) => <button type="button" key={video.id} className={video.id === itemId ? "is-playing" : undefined} aria-current={video.id === itemId ? "true" : undefined} onClick={() => { if (video.id !== itemId) onNavigateItem(video.id); }} title={video.filename}>

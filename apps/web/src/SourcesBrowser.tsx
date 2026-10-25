@@ -54,6 +54,18 @@ export function buildSourceTree<T extends SourceSummary>(sources: T[]): SourceTr
   return roots;
 }
 
+/** Merge chains of folders that only lead to one child folder ("C:/ › Users › Me") into a single row. */
+export function compactSourceTree<T>(nodes: SourceTreeNode<T>[]): SourceTreeNode<T>[] {
+  return nodes.map((node) => {
+    let { key, label, children, sources } = node;
+    while (sources.length === 0 && children.length === 1) {
+      label = `${label} › ${children[0].label}`;
+      ({ key, children, sources } = children[0]);
+    }
+    return { key, label, sources, children: compactSourceTree(children) };
+  });
+}
+
 export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource }: {
   sources: T[]; renderSource: (source: T, expanded: boolean, toggle: () => void) => ReactNode;
 }) {
@@ -64,11 +76,11 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
   const [collapsed, setCollapsed] = useUiState<string[]>("vaultly.ui.sources.collapsed", []);
   const [expanded, setExpanded] = useUiState<number[]>("vaultly.ui.sources.expanded", []);
   const visible = useMemo(() => rankSearchResults(sources.filter((source) => matchesSource(source, media, status, query) && (category === "all" || sourceMediaGroup(source) === category)), query, (source) => [source.name, source.root_path]), [sources, media, status, query, category]);
-  const tree = useMemo(() => buildSourceTree(visible), [visible]);
+  const tree = useMemo(() => compactSourceTree(buildSourceTree(visible)), [visible]);
   const categories = [...new Set(sources.map(sourceMediaGroup))].sort();
   const renderBranch = (node: SourceTreeNode<T>, depth: number): ReactNode => <li key={node.key}>
     <details className="source-tree-branch" open={!collapsed.includes(node.key)} onToggle={(event) => { const open = event.currentTarget.open; setCollapsed((current) => open ? current.filter((key) => key !== node.key) : current.includes(node.key) ? current : [...current, node.key]); }}>
-      <summary>{depth === 0 ? <HardDrive size={16} /> : <Folder size={15} />}<span>{node.label}</span></summary>
+      <summary>{depth === 0 ? <HardDrive size={16} /> : <Folder size={15} />}<span title={node.label}>{node.label}</span></summary>
       {node.sources.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.includes(source.id), () => toggle(source.id))}</Fragment>)}
       {node.children.length > 0 && <ul>{node.children.map((child) => renderBranch(child, depth + 1))}</ul>}
     </details>
