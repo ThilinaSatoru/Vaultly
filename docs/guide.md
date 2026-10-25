@@ -79,17 +79,18 @@ Desktop builds generate the application PNG and Windows ICO from `apps/web/publi
 
 Releases run only when you start **Actions → Manual release → Run workflow**, selecting the repository's default branch. There are no automatic push/tag triggers and no release PRs. Set the repository Actions **secret** `GH_TOKEN` to a GitHub token with **Contents: read and write** access to this repository. It is used to push the release commit/tag and publish release assets; keep the token out of ordinary repository variables and source files.
 
-Choose `patch`, `minor`, `major`, or an exact version such as `0.2.0-beta.1`. Versions follow SemVer and stay synchronized in the root, API, web and desktop manifests. `patch` makes backward-compatible fixes, `minor` adds backward-compatible features, and `major` marks breaking changes. An exact prerelease version publishes a GitHub prerelease without making it the latest stable release. The default is `patch`; use `0.1.0` explicitly to publish the current initial version.
+Pick **bump**: `patch`, `minor`, `major`, or `custom` (then type an exact version such as `0.2.0-beta.1` in **version**). The last number is the running **build number**: every release, including minor and major ones, adds 1 to it (`0.5.7` → patch `0.5.8`, minor `0.6.8`, major `1.0.8`). Run `pnpm release:suggest` to see the next versions; the workflow run summary shows the same table. Versions follow SemVer and stay synchronized in the root, API, web and desktop manifests. `patch` makes backward-compatible fixes, `minor` adds backward-compatible features, and `major` marks breaking changes. A custom prerelease version publishes a GitHub prerelease without making it the latest stable release. The default is `patch`; use `custom` with `0.1.0` to publish the initial version.
 
 Add user-facing notes under **Unreleased** in [CHANGELOG.md](../CHANGELOG.md) before running the workflow, or provide extra Markdown in its **notes** input. New releases move these notes into a dated version entry and append commit summaries since the previous reachable version tag. Conventional Commit subjects such as `feat:`, `fix:`, `docs:` and `feat!:` are grouped into change categories; other subjects appear under Changed. With no prior version tag, the first generated entry includes the repository's history. Existing-version retries keep the tagged notes unchanged.
 
 The workflow validates versions/notes, runs release-tooling tests, production typechecks and application tests, then commits `chore(release): vX.Y.Z` directly to the default branch and pushes an annotated tag atomically. It never force-pushes. Native runners build Windows x64 NSIS, macOS Intel/Apple Silicon DMGs, and Linux x64 AppImage/Debian installers. All builds must succeed before publication. The release starts as a draft, receives all five installers plus `SHA256SUMS.txt`, and becomes public only after every upload succeeds. Artifact names include version, operating system and architecture. Installers are currently unsigned and macOS builds are not notarized.
 
-If a build/upload fails after tagging, rerun **Manual release** with the same **exact version** (for example `0.1.1`), rather than `patch`. It reuses the original tagged source, replaces matching draft assets and finishes publication. Published releases cannot be overwritten; use a new version for further changes. A concurrent default-branch change causes the atomic push to fail safely; rerun against the updated default branch.
+If a build/upload fails after tagging, rerun **Manual release** with bump `custom` and the same exact version (for example `0.1.1`), rather than `patch`. It reuses the original tagged source, replaces matching draft assets and finishes publication. Published releases cannot be overwritten; use a new version for further changes. A concurrent default-branch change causes the atomic push to fail safely; rerun against the updated default branch.
 
 The same version/changelog tools are available locally on a clean checkout:
 
 ```powershell
+pnpm release:suggest
 pnpm release:prepare minor
 pnpm release:check v0.2.0
 pnpm release:notes v0.2.0

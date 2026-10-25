@@ -3,10 +3,19 @@ name: Manual release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: "patch, minor, major, or an exact version (use the same exact version to retry a failed release)"
+      bump:
+        description: "Version bump. patch, minor and major each also add 1 to the build number (the last digit); see the run summary for the result"
         required: true
         default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - custom
+      version:
+        description: "Only for bump = custom: exact version such as 0.6.0-beta.1. Reuse the same exact version to retry a failed release"
+        required: false
         type: string
       notes:
         description: "Optional extra Markdown change notes for a new version"
@@ -31,7 +40,8 @@ jobs:
       sha: ${{ steps.commit.outputs.sha }}
     env:
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_VERSION: ${{ inputs.bump == 'custom' && inputs.version || inputs.bump }}
+      RELEASE_BUMP: ${{ inputs.bump }}
       RELEASE_NOTES: ${{ inputs.notes }}
     steps:
       - name: Require default branch and release token
@@ -40,6 +50,7 @@ jobs:
         run: |
           test "$GITHUB_REF_NAME" = "$DEFAULT_BRANCH" || { echo "Run this workflow on $DEFAULT_BRANCH."; exit 1; }
           test -n "$GH_TOKEN" || { echo "Add the repository Actions secret GH_TOKEN with Contents write permission."; exit 1; }
+          if [ "$RELEASE_BUMP" = custom ] && [ -z "${RELEASE_VERSION#custom}" ]; then echo "Enter an exact version when bump is custom."; exit 1; fi
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.repository.default_branch }}
