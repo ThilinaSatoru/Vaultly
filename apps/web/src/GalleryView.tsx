@@ -118,6 +118,24 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
   />;
 }
 
+// Cards missing a stored duration ask the API to probe the file. Run those
+// requests two at a time so a freshly loaded page cannot start dozens of probes.
+const durationQueue: Array<() => void> = [];
+let activeDurationRequests = 0;
+function queueDurationRequest<T>(task: () => Promise<T>, isCancelled: () => boolean): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    durationQueue.push(() => {
+      if (isCancelled()) { resolve(undefined); pumpDurationQueue(); return; }
+      activeDurationRequests++;
+      task().then(resolve, () => resolve(undefined)).finally(() => { activeDurationRequests--; pumpDurationQueue(); });
+    });
+    pumpDurationQueue();
+  });
+}
+function pumpDurationQueue() {
+  while (activeDurationRequests < 2 && durationQueue.length) durationQueue.shift()!();
+}
+
 function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQueue, onDelete }: { item: MediaItem; selected: boolean; queued: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void; onQueue: () => void; onDelete: () => void }) {
   const cardRef = useRef<HTMLElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -147,9 +165,8 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
   useEffect(() => {
     if (item.media_type !== "video" || duration) return;
     let active = true;
-    api<{ duration_seconds: number | null }>(`/api/items/${item.id}/video-metadata`)
-      .then((metadata) => { if (active) setDuration(metadata.duration_seconds); })
-      .catch(() => undefined);
+    void queueDurationRequest(() => api<{ duration_seconds: number | null }>(`/api/items/${item.id}/video-metadata`), () => !active)
+      .then((metadata) => { if (active && metadata) setDuration(metadata.duration_seconds); });
     return () => { active = false; };
   }, [item.id, item.media_type, duration]);
 

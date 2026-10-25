@@ -163,24 +163,31 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
       values.push(tagId);
       values.push(tagId);
     }
+    // One pass over series_items for counts and first members, instead of seven
+    // correlated subqueries per series.
     const rows = database.prepare(`
+      WITH members AS (
+        SELECT si.series_id, m.id, m.media_type, m.relative_path,
+          ROW_NUMBER() OVER (PARTITION BY si.series_id ORDER BY si.position, si.item_id) AS rank
+        FROM series_items si JOIN media_items m ON m.id = si.item_id WHERE m.available = 1
+      ), stats AS (
+        SELECT series_id, COUNT(*) AS item_count,
+          SUM(media_type = 'video') AS video_count,
+          SUM(media_type = 'comic') AS comic_count,
+          SUM(media_type = 'story') AS story_count
+        FROM members GROUP BY series_id
+      )
       SELECT s.id, s.title, s.description, s.preferred_type, s.favorite,
-        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1) AS item_count,
-        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'video') AS video_count,
-        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'comic') AS comic_count,
-        (SELECT COUNT(*) FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1 AND m.media_type = 'story') AS story_count,
-        (SELECT m.id FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1 ORDER BY si.position LIMIT 1) AS cover_item_id,
-        (SELECT m.media_type FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1 ORDER BY si.position LIMIT 1) AS cover_item_type,
-        (SELECT m.relative_path FROM series_items si JOIN media_items m ON m.id = si.item_id
-          WHERE si.series_id = s.id AND m.available = 1 ORDER BY si.position LIMIT 1) AS cover_item_path,
+        COALESCE(st.item_count, 0) AS item_count,
+        COALESCE(st.video_count, 0) AS video_count,
+        COALESCE(st.comic_count, 0) AS comic_count,
+        COALESCE(st.story_count, 0) AS story_count,
+        first.id AS cover_item_id, first.media_type AS cover_item_type, first.relative_path AS cover_item_path,
         (s.cover_data IS NOT NULL) AS has_cover
-      FROM series s WHERE ${conditions.join(" AND ")}
+      FROM series s
+      LEFT JOIN stats st ON st.series_id = s.id
+      LEFT JOIN members first ON first.series_id = s.id AND first.rank = 1
+      WHERE ${conditions.join(" AND ")}
       ORDER BY s.title COLLATE NOCASE, s.id
     `).all(...values) as unknown as SeriesRow[];
     const tagsBySeries = seriesTags(rows.map((row) => row.id));
@@ -378,11 +385,15 @@ export async function registerSeriesRoutes(app: FastifyInstance) {
 
   app.get("/api/series/:id/cover", async (request, reply) => {
     const { id } = idInput.parse(request.params);
-    const row = database.prepare("SELECT cover_data, cover_mime FROM series WHERE id = ?")
-      .get(id) as { cover_data: Uint8Array | null; cover_mime: string | null } | undefined;
-    if (!row?.cover_data || !row.cover_mime) return reply.code(404).send({ message: "No cover image." });
-    return reply.header("Content-Type", row.cover_mime).header("Cache-Control", "private, no-cache")
-      .send(Buffer.from(row.cover_data));
+    // Validate with the cheap columns first so a matching ETag never reads the BLOB.
+    const meta = database.prepare("SELECT cover_mime, updated_at FROM series WHERE id = ? AND cover_data IS NOT NULL")
+      .get(id) as { cover_mime: string | null; updated_at: string } | undefined;
+    if (!meta?.cover_mime) return reply.code(404).send({ message: "No cover image." });
+    const etag = `"series-${id}-${meta.updated_at}"`;
+    reply.header("Cache-Control", "private, no-cache").header("ETag", etag);
+    if (request.headers["if-none-match"] === etag) return reply.code(304).send();
+    const row = database.prepare("SELECT cover_data FROM series WHERE id = ?").get(id) as { cover_data: Uint8Array };
+    return reply.header("Content-Type", meta.cover_mime).send(Buffer.from(row.cover_data));
   });
 
   app.put("/api/series/:id/cover", async (request, reply) => {
