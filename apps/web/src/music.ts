@@ -20,10 +20,13 @@ export interface MusicLibrary {
 export interface MusicPage { items: MusicTrack[]; total: number; page: number; pageSize: number }
 export type MusicScope = { kind: "all" | "artist" | "playlist"; id?: number; name: string };
 /** Text search covers artist and file name only and spans the whole library, so it replaces the artist/playlist scope. */
-export function musicQuery(scope: MusicScope, search: string) {
+export const musicSorts = [["", "Default order"], ["rating", "Rating"], ["title", "Title"], ["artist", "Artist"], ["album", "Album"], ["duration", "Longest"], ["bitrate", "Bitrate"], ["size", "Size"]] as const;
+export function musicQuery(scope: MusicScope, search: string, sort = "", minRating = 0) {
   const params = new URLSearchParams({ q: search, sort: scope.kind === "playlist" ? "playlist" : "artist" });
   if (scope.kind !== "all" && scope.id && !search.trim()) params.set(scope.kind, String(scope.id));
   if (search.trim()) params.set("sort", "artist");
+  if (sort) params.set("sort", sort);
+  if (minRating > 0) params.set("rating", String(minRating));
   return params.toString();
 }
 /** "Artist - Song", as in foobar2000-style file names. */

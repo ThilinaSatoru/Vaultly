@@ -1006,7 +1006,6 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const [sidebarHidden, setSidebarHidden] = useUiState("vaultly.ui.sidebarHidden", false);
   const [sidebarWidth, setSidebarWidth] = useUiState("vaultly.ui.sidebarWidth", 252);
   const [musicSidebarHost, setMusicSidebarHost] = useState<HTMLDivElement | null>(null);
-  const [musicPlayerHost, setMusicPlayerHost] = useState<HTMLDivElement | null>(null);
   const compactHeader = useCompactHeader();
   useEffect(() => {
     const titles: Record<Section, string> = {
@@ -1827,11 +1826,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 </div>
               </div>
             </header>
-            <div className="music-player-host music-root" ref={setMusicPlayerHost} />
 
             </div>
 
-            <MusicWorkspace sourceRevision={musicSources.map((source) => `${source.id}:${source.status}:${source.track_count}:${source.last_scanned_at}`).join("|")} onOpenSources={() => openManagement("sources")} onAddSource={() => { setNewSourceType("music"); openManagement("sources"); setShowAddSource(true); }} visible={section === "music"} search={section === "music" ? search : ""} sidebarHost={musicSidebarHost} playerHost={musicPlayerHost} />
+            <MusicWorkspace sourceRevision={musicSources.map((source) => `${source.id}:${source.status}:${source.track_count}:${source.last_scanned_at}`).join("|")} onOpenSources={() => openManagement("sources")} onAddSource={() => { setNewSourceType("music"); openManagement("sources"); setShowAddSource(true); }} visible={section === "music"} search={section === "music" ? search : ""} sidebarHost={musicSidebarHost} />
             <div className="content" hidden={section === "music"}>
               <nav className="navigation-trail" aria-label="Navigation history">
                 <button
