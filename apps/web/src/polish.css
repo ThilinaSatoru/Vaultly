@@ -572,3 +572,21 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .management-dock-tools button svg { color: var(--acid); }
 .management-dock:not(.is-collapsed) .management-dock-toggle { width: 38px; height: 38px; color: var(--muted); border-radius: 50%; }
 @media (max-width: 600px) { .management-dock-tools button { min-width: 0; flex-direction: row; } }
+
+/* Minimized players collapse into a slim floating bar; the player stays mounted so its state is kept. */
+.viewer-backdrop.is-minimized { position: fixed; inset: auto auto 14px 14px !important; z-index: 1300; width: min(420px, calc(100vw - 28px)) !important; height: auto !important; min-width: 0 !important; padding: 0; background: transparent; backdrop-filter: none; pointer-events: none; }
+.viewer.viewer-minimized { pointer-events: auto; display: block; width: 100% !important; height: 48px !important; min-width: 0 !important; min-height: 0 !important; resize: none; border-radius: 14px; border-color: var(--accent-border); box-shadow: var(--soft-shadow); }
+.viewer-minimized .viewer-header { height: 48px; padding: 0 8px 0 14px; gap: 10px; border: 0; border-radius: 14px; }
+.viewer-minimized .viewer-title span, .viewer-minimized .viewer-details { display: none; }
+.viewer-minimized .viewer-main { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.viewer-minimized .viewer-title strong { font-size: .82rem; }
+.youtube-playback-window.is-minimized { position: fixed; left: 14px; right: auto; bottom: 14px; width: min(420px, calc(100vw - 28px)); padding: 0; }
+.youtube-playback-window.is-minimized > :not(.youtube-playback-heading) { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.viewer-floating .viewer-header-actions > .viewer-float-toggle { display: inline-flex !important; }
+/* Header actions are icon-only; titles carry the names, which leaves more room for the media. */
+.viewer-header { min-height: 0; }
+.viewer-header-actions > button { min-width: 34px; padding-inline: 8px; }
+.viewer-header-actions > .viewer-panel-toggle[aria-pressed="true"] { color: var(--acid); background: var(--accent-soft); }
+.viewer:not(.viewer-floating):not(.viewer-minimized) { grid-template-columns: minmax(0, 1fr) clamp(220px, 20vw, 270px); grid-template-rows: 52px minmax(0, 1fr); }
+.viewer.viewer-sidebar-hidden:not(.viewer-floating) { grid-template-columns: minmax(0, 1fr); grid-template-rows: 52px minmax(0, 1fr); }
+.viewer-details { padding: 12px 14px; }

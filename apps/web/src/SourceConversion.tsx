@@ -9,6 +9,7 @@ interface Progress {
   currentPath: string; errors: string[];
   logs?: string[];
   failed?: number;
+  skipReasons?: Record<string, number>;
 }
 
 interface UnsupportedSummary { total: number; formats: Array<{ extension: string; count: number }> }
@@ -103,7 +104,7 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
         </div>
         <p>Converts unsupported video formats and codecs to MP4. Originals are replaced only after verification; library details are kept.</p>
         <div role="status">
-          <p>{running ? `Converting: ${progress.currentPath || "checking videos"}` : `Conversion ${progress.status}.`} {progress.processed} / {progress.total} checked · {progress.converted} converted · {progress.skipped} skipped.</p>
+          <p>{running ? `Converting: ${progress.currentPath || "checking videos"}` : `Conversion ${progress.status}.`} {progress.processed} / {progress.total} checked · {progress.converted} converted · {progress.skipped} skipped{Object.keys(progress.skipReasons ?? {}).length > 0 && ` (${Object.entries(progress.skipReasons!).map(([reason, count]) => `${count} ${reason}`).join(", ")})`}.</p>
           {running && <progress value={progress.processed} max={Math.max(1, progress.total)} aria-label="Conversion progress" />}
           {!!progress.logs?.length && <LogView revision={progress.logs.join("\n")} label="Conversion log">{progress.logs.map((line, index) => <p key={index}>{line}</p>)}</LogView>}
           {progress.errors.length > 0 && <details><summary>{progress.failed ?? progress.errors.length} conversion errors{(progress.failed ?? 0) > progress.errors.length && " (latest 100 shown)"}</summary><LogView revision={progress.errors.join("\n")} label="Conversion errors"><ul>{progress.errors.map((message, index) => <li key={index}>{message}</li>)}</ul></LogView></details>}

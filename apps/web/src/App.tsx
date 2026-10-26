@@ -1087,6 +1087,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     if (floatingSession) setFloatingSession({ ...floatingSession, id });
     else navigation.push({ selectedItemId: id }, `File ${id}`);
   };
+  // "full" restores the page viewer; "floating" restores the pop-out window.
+  const [viewerMinimized, setViewerMinimized] = useState<false | "full" | "floating">(false);
   const toggleFloating = () => {
     if (floatingSession) {
       navigation.update({
@@ -1103,6 +1105,15 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       });
       navigation.update({ selectedItemId: null });
     }
+  };
+  const minimizeViewer = () => {
+    if (!floatingSession) { toggleFloating(); setViewerMinimized("full"); }
+    else setViewerMinimized("floating");
+  };
+  const restoreViewer = () => {
+    const from = viewerMinimized;
+    setViewerMinimized(false);
+    if (from === "full" && floatingSession) toggleFloating();
   };
   const [viewerSeriesContext, setViewerSeriesContext] =
     useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
@@ -1416,6 +1427,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     context: SeriesViewerContext | null = null,
     gallery: GalleryVideoContext | null = null,
   ) => {
+    // Opening another file replaces whatever player was floating or minimized.
+    setViewerMinimized(false);
+    setFloatingSession(null);
+    setYoutubeSession(null);
     navigation.push(
       {
         selectedItemId: id,
@@ -1838,7 +1853,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 ))}
                 <strong aria-current="page">{navigation.entry.label}</strong>
               </nav>
-              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} onPlay={(playback) => setYoutubeSession({ playback, floating: false, pageKey: youtubePageKey })} /> : section === "home" ? (
+              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} onPlay={(playback) => { setFloatingSession(null); setViewerMinimized(false); setYoutubeSession({ playback, floating: false, pageKey: youtubePageKey }); }} /> : section === "home" ? (
                 <HomeView
                   sources={sources}
                   categories={categories}
@@ -1931,6 +1946,9 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 floatingSession ? floatingSession.gallery : viewerGalleryContext
               }
               floating={viewerFloating}
+              minimized={viewerMinimized !== false}
+              onMinimize={minimizeViewer}
+              onRestore={restoreViewer}
               onToggleFloating={toggleFloating}
               onNavigateItem={navigateViewer}
               onNavigatePlaylistItem={(id) => {
@@ -1947,6 +1965,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                   );
               }}
               onClose={() => {
+                setViewerMinimized(false);
                 if (floatingSession) {
                   setFloatingSession(null);
                   if (selectedItemId === floatingSession.id)

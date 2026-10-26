@@ -3,7 +3,7 @@ import { Select } from "./Select";
 import { MediaCoverEditor } from "./VideoCoverEditor";
 import { vaultUrl } from "./vault-session";
 import { vaultStorage } from "./vault-session";
-import { BookOpen, ChevronsLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
+import { BookOpen, ChevronsLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Heart, ListVideo, LoaderCircle, Maximize2, Minimize2, Minus, Pencil, PanelRightClose, PanelRightOpen, PictureInPicture2, Plus, SlidersHorizontal, Trash2, X, ZoomIn } from "lucide-react";
 import { lazy, Suspense, useContext, useEffect, useRef, useState } from "react";
 import { AttributeManagerContext } from "./attribute-manager";
 import { TagCombobox } from "./TagCombobox";
@@ -41,6 +41,9 @@ interface MediaViewerProps {
   galleryContext: GalleryVideoContext | null;
   playlist: Array<{ id: number; title: string }>;
   floating: boolean;
+  minimized?: boolean;
+  onMinimize?: () => void;
+  onRestore?: () => void;
   onToggleFloating: () => void;
   onRemoveFromPlaylist: (id: number) => void;
   onClearPlaylist: () => void;
@@ -58,7 +61,7 @@ interface MediaViewerProps {
   attributeRevision?: number;
 }
 
-export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, floating, onToggleFloating, onRemoveFromPlaylist, onClearPlaylist, onNavigateItem, onNavigatePlaylistItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged, attributeRevision = 0 }: MediaViewerProps) {
+export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, floating, minimized = false, onMinimize, onRestore, onToggleFloating, onRemoveFromPlaylist, onClearPlaylist, onNavigateItem, onNavigatePlaylistItem, categories, tags, people, onCategoryCreated, onTagCreated, onPersonCreated, onOpenSeries, onClose, onChanged, attributeRevision = 0 }: MediaViewerProps) {
   const manager = useContext(AttributeManagerContext);
   const previousAttributeRevision = useRef(attributeRevision);
   const viewerRef = useRef<HTMLElement>(null);
@@ -76,6 +79,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   const [floatSize, setFloatSize] = useState(() => ({ width: readNumberPreference("vaultly.video.floatWidth", 520, 320, 1000), height: readNumberPreference("vaultly.video.floatHeight", 342, 160, 900) }));
   const [floatDetails, setFloatDetails] = useState(() => readBooleanPreference("vaultly.video.floatDetails", false));
   const [sidebarVisible, setSidebarVisible] = useUiState("vaultly.video.sidebarVisible", true);
+  const compactChrome = floating || minimized;
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [showRename, setShowRename] = useState(false);
@@ -116,7 +120,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   useEffect(() => { vaultStorage.setItem("vaultly.video.floatDetails", String(floatDetails)); }, [floatDetails]);
 
   useEffect(() => {
-    if (floating) return;
+    if (compactChrome) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -133,11 +137,11 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus({ preventScroll: true });
     };
-  }, [floating]);
+  }, [compactChrome]);
 
   useEffect(() => {
-    if (!floating && viewerRef.current && !viewerRef.current.contains(document.activeElement)) viewerRef.current.focus({ preventScroll: true });
-  }, [itemId, floating]);
+    if (!compactChrome && viewerRef.current && !viewerRef.current.contains(document.activeElement)) viewerRef.current.focus({ preventScroll: true });
+  }, [itemId, compactChrome]);
 
   useEffect(() => {
     let active = true;
@@ -245,7 +249,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
         return;
       }
       if (document.activeElement instanceof HTMLElement && document.activeElement.closest(".viewer") && !viewerRef.current?.contains(document.activeElement)) return;
-      if (floating && !viewerRef.current?.contains(document.activeElement)) return;
+      if (minimized || (floating && !viewerRef.current?.contains(document.activeElement))) return;
       if (matchesShortcut(event, "viewer.close")) {
         // While the video is in fullscreen, let the browser exit fullscreen first;
         // a second Escape press then closes the viewer.
@@ -280,7 +284,7 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [item, page, pages.length, navigationItems, previousItem, nextItem, onClose, onNavigateItem, manager?.isOpen, floating]);
+  }, [item, page, pages.length, navigationItems, previousItem, nextItem, onClose, onNavigateItem, manager?.isOpen, floating, minimized]);
 
   const toggleFavorite = async () => {
     if (!item) return;
@@ -369,18 +373,23 @@ export function MediaViewer({ itemId, seriesContext, galleryContext, playlist, f
   };
 
   return (
-    <div className={`viewer-backdrop${floating ? " is-floating" : ""}${hasPlaylist ? " has-playlist" : ""}`} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} role="presentation" onMouseDown={floating ? undefined : onClose}>
-      <section ref={viewerRef} style={floating ? { width: floatSize.width, height: floatSize.height } : undefined} className={`viewer${floating ? " viewer-floating" : ""}${hasPlaylist ? " has-playlist" : ""}${floating && floatDetails ? " show-float-details" : ""}${!floating && item?.media_type === "video" && !sidebarVisible ? " viewer-sidebar-hidden" : ""}`} role="dialog" aria-modal={!floating} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
+    <div className={`viewer-backdrop${floating ? " is-floating" : ""}${minimized ? " is-minimized" : ""}${hasPlaylist ? " has-playlist" : ""}`} style={floating && !minimized ? { width: floatSize.width, height: floatSize.height } : undefined} role="presentation" onMouseDown={compactChrome ? undefined : onClose}>
+      <section ref={viewerRef} style={floating && !minimized ? { width: floatSize.width, height: floatSize.height } : undefined} className={`viewer${floating ? " viewer-floating" : ""}${minimized ? " viewer-minimized" : ""}${hasPlaylist ? " has-playlist" : ""}${floating && floatDetails ? " show-float-details" : ""}${!floating && !sidebarVisible ? " viewer-sidebar-hidden" : ""}`} role="dialog" aria-modal={!compactChrome} aria-label={item?.title || "Media viewer"} tabIndex={-1} onMouseDown={(event) => event.stopPropagation()}>
         <header className="viewer-header">
           <div className="viewer-title"><strong>{item?.title || "Opening media…"}</strong><span>{galleryContext && seriesIndex >= 0 ? `Gallery page ${galleryContext.page + 1} · ${seriesIndex + 1} / ${galleryContext.videos.length}` : playlistIndex >= 0 ? `Temporary playlist · ${playlistIndex + 1} / ${playlist.length}` : seriesContext && seriesIndex >= 0 ? `${seriesContext.seriesTitle} · ${seriesIndex + 1} / ${seriesContext.items.length}` : item ? `${item.source_name} · ${formatSize(item.size_bytes)}` : ""}</span></div>
           <div className="viewer-header-actions">
-            {!floating && item?.media_type === "video" && <button type="button" aria-label={sidebarVisible ? "Hide side panel" : "Show side panel"} aria-expanded={sidebarVisible} onClick={() => setSidebarVisible((value) => !value)}><ListVideo size={17} />{sidebarVisible ? "Hide panel" : "Show panel"}</button>}
+            {minimized ? <>
+              <button type="button" onClick={onRestore} title="Restore player" aria-label="Restore player"><Maximize2 size={17} /></button>
+            </> : <>
+            {!floating && <button type="button" className="viewer-panel-toggle" aria-label={sidebarVisible ? "Hide side panel" : "Show side panel"} title={sidebarVisible ? "Hide side panel" : "Show side panel"} aria-pressed={sidebarVisible} aria-expanded={sidebarVisible} onClick={() => setSidebarVisible((value) => !value)}>{sidebarVisible ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>}
             {floating && <label className="float-size-control" title="Player size"><input type="range" aria-label="Floating player size" min="320" max={Math.max(320, Math.min(1000, window.innerWidth - 36))} step="20" value={floatSize.width} onChange={(event) => { const width = Number(event.target.value); setFloatSize({ width, height: Math.min(window.innerHeight - 36, width * 9 / 16 + (floatDetails ? 189 : 49)) }); }} /></label>}
             {floating && hasPlaylist && <button type="button" aria-label="Show floating playlist and details" aria-pressed={floatDetails} onClick={() => { setFloatDetails((value) => !value); setFloatSize((value) => ({ ...value, height: Math.max(230, Math.min(window.innerHeight - 36, value.height + (floatDetails ? -140 : 140))) })); }}><ListVideo size={17} /></button>}
-            {manager && <button type="button" onClick={() => manager.open("tags")} title="Manage attributes without leaving this media" aria-label="Manage attributes"><SlidersHorizontal size={17} /><span className="viewer-manage-label">Attributes</span></button>}
+            {manager && <button type="button" onClick={() => manager.open("tags")} title="Manage attributes without leaving this media" aria-label="Manage attributes"><SlidersHorizontal size={17} /></button>}
             {item && <button className={item.favorite ? "is-favorite" : ""} type="button" onClick={() => void toggleFavorite()} aria-label={item.favorite ? "Remove from favorites" : "Add to favorites"} title={item.favorite ? "Remove from favorites" : "Add to favorites"}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>}
-            {navigationItems && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file"><ChevronLeft size={17} /> Previous</button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file">Next <ChevronRight size={17} /></button></>}
-            {item?.media_type === "video" && <button className="viewer-float-toggle" type="button" onClick={onToggleFloating} title={floating ? "Return to full player" : "Keep playing while browsing"} aria-pressed={floating}>{floating ? <Maximize2 size={18} /> : <PictureInPicture2 size={18} />}{floating ? "Full view" : "Float"}</button>}
+            {navigationItems && <><button type="button" onClick={() => previousItem && onNavigateItem(previousItem.id)} disabled={!previousItem} title={previousItem ? `Previous: ${previousItem.title}` : "First item"} aria-label="Previous file"><ChevronLeft size={17} /></button><button type="button" onClick={() => nextItem && onNavigateItem(nextItem.id)} disabled={!nextItem} title={nextItem ? `Next: ${nextItem.title}` : "Last item"} aria-label="Next file"><ChevronRight size={17} /></button></>}
+            {item && <button className="viewer-float-toggle" type="button" onClick={onToggleFloating} title={floating ? "Return to full player" : "Pop out and keep browsing"} aria-label={floating ? "Return to full player" : "Pop out player"} aria-pressed={floating}>{floating ? <Maximize2 size={18} /> : <PictureInPicture2 size={18} />}</button>}
+            {onMinimize && <button type="button" onClick={onMinimize} title="Minimize to the floating bar" aria-label="Minimize player"><Minus size={18} /></button>}
+            </>}
             <button className="icon-button" type="button" onClick={onClose} aria-label="Close viewer"><X size={21} /></button>
           </div>
         </header>
