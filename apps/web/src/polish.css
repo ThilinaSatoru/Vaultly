@@ -553,3 +553,22 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .clearable-field--multiline > .clear-field-button { top: 6px; transform: none; }
 .clearable-field input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; }
 .path-control > .clearable-field, .music-path-input > .clearable-field { flex: 1; }
+
+.source-list-tools > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.source-list-tools button:disabled { opacity: .4; cursor: default; }
+.source-branch-flag { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; font-size: .66rem; font-style: normal; color: var(--muted); background: var(--panel-2); }
+.source-branch-count { margin-left: auto; padding: 0 7px; border-radius: 999px; font-size: .68rem; color: var(--muted); background: var(--panel-2); }
+.convert-alert { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin: 0 0 10px; padding: 9px 11px; border: 1px solid var(--accent-border, var(--border)); border-radius: 9px; background: var(--accent-soft, var(--panel-2)); font-size: .76rem; }
+.convert-alert > div { display: grid; gap: 4px; min-width: 0; }
+.convert-alert span { display: flex; flex-wrap: wrap; gap: 4px; }
+.convert-alert code { padding: 1px 6px; border-radius: 5px; background: var(--panel); font-size: .7rem; }
+.convert-alert button { flex-shrink: 0; }
+
+/* Floating management toolbox. */
+.management-dock:not(.is-collapsed) { gap: 6px; padding: 7px; border-radius: 18px; backdrop-filter: blur(10px); box-shadow: 0 14px 44px #0006, 0 0 0 1px color-mix(in srgb, var(--acid) 14%, transparent); animation: management-rise .16s ease-out; }
+.management-dock-tools { align-items: center; padding-left: 6px; border-left: 1px solid var(--border); }
+.management-dock-tools button { flex-direction: column; gap: 3px; min-width: 68px; padding: 8px 10px; border-radius: 12px; font-size: .68rem; font-weight: 600; color: var(--muted); }
+.management-dock-tools button:hover { color: var(--text); background: var(--accent-soft); }
+.management-dock-tools button svg { color: var(--acid); }
+.management-dock:not(.is-collapsed) .management-dock-toggle { width: 38px; height: 38px; color: var(--muted); border-radius: 50%; }
+@media (max-width: 600px) { .management-dock-tools button { min-width: 0; flex-direction: row; } }

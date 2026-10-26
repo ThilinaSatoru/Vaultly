@@ -11,6 +11,18 @@ import { runCommand, trackProcess } from "./background-processes.js";
 const run = runCommand;
 const python = () => process.env.VAULTLY_PYTHON || "python";
 export type ConversionMode = "quick" | "slow" | "both";
+/** "unsupported" only touches files whose container browsers cannot play; "all" also probes MP4/WebM codecs. */
+export type ConversionScope = "unsupported" | "all";
+const browserContainers = new Set([".mp4", ".m4v", ".webm"]);
+export interface UnsupportedVideoSummary { total: number; formats: Array<{ extension: string; count: number }> }
+export function getUnsupportedVideoSummary(id: number): UnsupportedVideoSummary {
+  const rows = database.prepare(`SELECT lower(file_extension) AS extension, COUNT(*) AS count FROM media_items
+    WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 GROUP BY lower(file_extension)`)
+    .all(id) as Array<{ extension: string | null; count: number }>;
+  const formats = rows.filter((row) => !browserContainers.has(row.extension ?? "")).map((row) => ({ extension: row.extension || "unknown", count: row.count }))
+    .sort((a, b) => b.count - a.count);
+  return { total: formats.reduce((sum, row) => sum + row.count, 0), formats };
+}
 export interface ConversionProgress {
   status: "running" | "completed" | "cancelled" | "failed";
   processed: number; total: number; converted: number; skipped: number;
@@ -121,13 +133,14 @@ export async function checkConversionRuntime() {
   await run(python(), ["-c", "import shutil; assert shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg and ffprobe must be on PATH'"], { windowsHide: true, timeout: 10_000 });
 }
 
-export function startSourceConversion(id: number, root: string, mode: ConversionMode = "both"): ConversionProgress {
+export function startSourceConversion(id: number, root: string, mode: ConversionMode = "both", scope: ConversionScope = "all"): ConversionProgress {
   if (isSourceConverting(id)) return getConversionProgress(id)!;
-  const items = database.prepare("SELECT id, relative_path FROM media_items WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 ORDER BY id")
-    .all(id) as Array<{ id: number; relative_path: string }>;
+  const items = (database.prepare("SELECT id, relative_path, file_extension FROM media_items WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 ORDER BY id")
+    .all(id) as Array<{ id: number; relative_path: string; file_extension: string | null }>)
+    .filter((item) => scope === "all" || !browserContainers.has((item.file_extension ?? "").toLowerCase()));
   const progress: ConversionProgress = { status: "running", processed: 0, total: items.length, converted: 0, skipped: 0, failed: 0, currentPath: "", errors: [], logs: [] };
   const controller = new AbortController();
-  addConversionLog(progress, `Conversion method: ${mode}`);
+  addConversionLog(progress, `Conversion method: ${mode}; ${scope === "all" ? "checking every video" : "unsupported formats only"}`);
   const promise = (async () => {
     try {
       const resolvedRoot = await realpath(root);

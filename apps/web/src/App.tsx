@@ -1207,11 +1207,26 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   };
 
   const [initializing, setInitializing] = useState(true);
+  const startupScanned = useRef(false);
   useEffect(() => {
     let mounted = true;
     void Promise.all([loadSources(), loadCategories(), loadTags(), loadPeople()]).finally(() => { if (mounted) setInitializing(false); });
     return () => { mounted = false; };
   }, [loadSources, loadCategories, loadTags, loadPeople]);
+
+  // Pick up new media once per app launch; failures are silent because a manual rescan reports errors.
+  useEffect(() => {
+    if (initializing || startupScanned.current) return;
+    startupScanned.current = true;
+    void (async () => {
+      try {
+        await api("/api/sources/scan", { method: "POST", body: JSON.stringify({ englishAttributes: true, refactorFilenames: false, confirmFilenameChanges: false }) });
+        const music = await api<Array<{ id: number; enabled?: number; path_available?: boolean; status: string }>>("/api/music/sources");
+        await Promise.all(music.filter((source) => source.enabled !== 0 && source.path_available !== false && source.status !== "scanning").map((source) => api(`/api/music/sources/${source.id}/scan`, { method: "POST" })));
+        await loadSources(true);
+      } catch { /* ignored */ }
+    })();
+  }, [initializing, loadSources]);
 
   useEffect(() => {
     let stopped = false;

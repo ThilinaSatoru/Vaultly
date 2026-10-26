@@ -30,7 +30,7 @@
 
 - Scans run in the background and report their phase, progress, current path, counts, and errors. A scan can be cancelled.
 - Source scans are serialized. During a source scan, media subprocess concurrency is reduced to limit resource use.
-- Existing sources are **not** automatically rescanned at app startup. Adding or relocating an enabled source starts a scan; later updates require a manual rescan.
+- On each app launch the web UI starts one background rescan of all enabled sources (never with filename refactoring) to pick up new media. Adding or relocating an enabled source also starts a scan.
 - Rescans reconcile the index against files currently found. Unchanged items can retain their existing records and cached previews.
 - When an item disappears from a completed scan, it is no longer available in the library. A cancelled scan preserves the prior index.
 - Scans can group eligible media into automatic collections using folder structure and, if enabled, filename prefixes. TV/anime folder names and episode patterns help determine ordering; extras and specials are placed after regular episodes.
@@ -90,7 +90,8 @@
 
 - Music is a distinct library with its own artists, albums, tracks, tags/categories, playlists, ratings, and scan process. It does not enter the shared gallery or shared people directory.
 - Music scans recurse into folders and skip symlinks. They recognize supported audio formats and video files used as music videos.
-- Embedded metadata and cover art are read when available. Untagged files fall back to filename and artist/album folder information.
+- Artist and title come from the usual `Artist - Song.ext` file name (a leading track number is ignored); otherwise embedded tags, then the artist/album folder. All embedded metadata is kept and shown in the track's info panel.
+- The music UI has only Artists and Playlists. Text search matches artist and file name only.
 - Genres become categories. Codec, lossless status, mood, and language can become tags.
 - Matching music attribute names and patterns use offline English normalization and can be learned from embedded text and paths during scans.
 - Manual attributes, ratings, playlists, and track IDs are intended to survive rescans at the same path. Scan-derived attributes are refreshed.

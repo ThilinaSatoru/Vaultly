@@ -47,11 +47,10 @@ function trackQuery(input: z.infer<typeof queryInput>) {
   add("EXISTS(SELECT 1 FROM music_track_attributes ta WHERE ta.track_id=t.id AND ta.attribute_id=?)", input.attribute);
   add("t.codec=?", input.codec);
   for (const term of input.q.trim().split(/\s+/).filter(Boolean)) {
-    conditions.push(`(t.title || ' ' || t.artist || ' ' || t.album_artist || ' ' || COALESCE(a.title,'') || ' ' || t.filename || ' ' || t.relative_path || ' ' || t.year || ' ' || t.codec || ' ' ||
-      COALESCE((SELECT group_concat(ma.name, ' ') FROM music_track_attributes ta JOIN music_attributes ma ON ma.id=ta.attribute_id WHERE ta.track_id=t.id),'')) LIKE ? ESCAPE '\\'`);
+    conditions.push("(t.artist || ' ' || t.filename) LIKE ? ESCAPE '\\'");
     values.push(`%${term.replace(/[\\%_]/g, "\\$&")}%`);
   }
-  const sorts = { title: "t.title COLLATE NOCASE", artist: "t.artist COLLATE NOCASE, a.title COLLATE NOCASE, t.disc_number, t.track_number",
+  const sorts = { title: "t.title COLLATE NOCASE", artist: "t.artist COLLATE NOCASE, t.title COLLATE NOCASE",
     album: "a.title COLLATE NOCASE, a.artist COLLATE NOCASE, t.disc_number, t.track_number", rating: "t.rating DESC", duration: "t.duration DESC", bitrate: "t.bitrate DESC", size: "t.size_bytes DESC",
     playlist: input.playlist ? `(SELECT p.position FROM music_playlist_tracks p WHERE p.track_id=t.id AND p.playlist_id=${input.playlist})` : "t.title COLLATE NOCASE" };
   return { where: ` WHERE ${conditions.join(" AND ")}`, values, order: ` ORDER BY ${sorts[input.sort]}, t.title COLLATE NOCASE, t.id` };
