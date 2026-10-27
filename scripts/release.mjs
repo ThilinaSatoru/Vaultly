@@ -34,13 +34,30 @@ export function compareVersions(left, right) {
   return 0;
 }
 
+/**
+ * The patch number is the running build number: every new release, including minor and major ones,
+ * increments it by one (0.5.7 → 0.5.8 patch, 0.6.8 minor, 1.0.8 major). Graduating a prerelease
+ * keeps its numbers.
+ */
 export function nextVersion(current, requested) {
   const { parts, pre } = parseVersion(current);
   const index = ["major", "minor", "patch"].indexOf(requested);
   if (index < 0) { parseVersion(requested); return requested; }
-  if (!pre.length || parts.slice(index + 1).some((part) => part !== 0)) parts[index]++;
+  const build = parts[2];
+  const bumps = !pre.length || parts.slice(index + 1).some((part) => part !== 0);
+  if (bumps) parts[index]++;
   for (let i = index + 1; i < 3; i++) parts[i] = 0;
+  if (bumps && index < 2) parts[2] = build + 1;
   const version = parts.join("."); parseVersion(version); return version;
+}
+
+export function suggestVersions(current) {
+  return { current, build: parseVersion(current).parts[2], patch: nextVersion(current, "patch"), minor: nextVersion(current, "minor"), major: nextVersion(current, "major") };
+}
+
+function suggestionMarkdown(current) {
+  const s = suggestVersions(current);
+  return `### Next release versions\n\nCurrent: \`${s.current}\` (build ${s.build})\n\n| Input | Result | Use for |\n| --- | --- | --- |\n| patch | \`${s.patch}\` | fixes (build +1) |\n| minor | \`${s.minor}\` | features (build +1) |\n| major | \`${s.major}\` | breaking changes (build +1) |\n`;
 }
 
 export function checkRelease(tag, cwd = process.cwd()) {
@@ -120,8 +137,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       const result = prepareRelease(value ?? "patch", { extraNotes: process.env.RELEASE_NOTES ?? "" });
       if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(result).map(([key, item]) => `${key}=${item}\n`).join(""));
       console.log(`Prepared ${result.tag}${result.existing ? " (retry existing tag)" : ""}.`);
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `## Releasing ${result.tag}${result.existing ? " (retry)" : ""}\n\nBuild number: ${parseVersion(result.version).parts[2]}\n\n${suggestionMarkdown(result.version)}`);
+    } else if (command === "suggest") {
+      const current = JSON.parse(read(process.cwd(), "package.json")).version;
+      const s = suggestVersions(current);
+      console.log(`Current ${s.current} (build ${s.build})\n  patch -> ${s.patch}\n  minor -> ${s.minor}\n  major -> ${s.major}`);
+      if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, suggestionMarkdown(current));
     } else if (command === "check") console.log(`Validated ${checkRelease(value)}.`);
     else if (command === "notes") console.log(releaseNotes(value));
-    else throw new Error("Usage: node scripts/release.mjs prepare <patch|minor|major|version> | check <tag> | notes <tag>");
+    else throw new Error("Usage: node scripts/release.mjs suggest | prepare <patch|minor|major|version> | check <tag> | notes <tag>");
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

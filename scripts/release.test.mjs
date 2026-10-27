@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { manifests, parseVersion, compareVersions, nextVersion, prepareRelease, checkRelease, releaseNotes } from "./release.mjs";
+import { manifests, parseVersion, compareVersions, nextVersion, suggestVersions, prepareRelease, checkRelease, releaseNotes } from "./release.mjs";
 
 function fixture(t) {
   const prefix = path.join(tmpdir(), "vaultly-release-");
@@ -26,10 +26,18 @@ test("SemVer ordering, prerelease validation and release increments", () => {
   for (let i = 1; i < ordered.length; i++) assert.ok(compareVersions(ordered[i - 1], ordered[i]) < 0);
   for (const invalid of ["v1.0.0", "01.0.0", "1.0", "1.0.0-beta.01", "1.0.0-", "../../file", "1.0.0;echo bad"]) assert.throws(() => parseVersion(invalid));
   assert.equal(nextVersion("0.1.0", "patch"), "0.1.1");
-  assert.equal(nextVersion("0.1.0", "minor"), "0.2.0");
-  assert.equal(nextVersion("0.1.0", "major"), "1.0.0");
+  assert.equal(nextVersion("0.1.0", "minor"), "0.2.1");
+  assert.equal(nextVersion("0.1.0", "major"), "1.0.1");
   assert.equal(nextVersion("0.2.0-beta.1", "patch"), "0.2.0");
   assert.equal(nextVersion("0.1.0", "0.2.0-beta.1"), "0.2.0-beta.1");
+});
+
+test("every bump increments the build number and suggestions list the results", () => {
+  assert.equal(nextVersion("0.5.7", "patch"), "0.5.8");
+  assert.equal(nextVersion("0.5.7", "minor"), "0.6.8");
+  assert.equal(nextVersion("0.5.7", "major"), "1.0.8");
+  assert.equal(nextVersion("0.6.8-beta.1", "minor"), "0.7.9");
+  assert.deepEqual(suggestVersions("0.5.7"), { current: "0.5.7", build: 7, patch: "0.5.8", minor: "0.6.8", major: "1.0.8" });
 });
 
 test("release preparation synchronizes every package and preserves reviewed notes and history", (t) => {
@@ -37,15 +45,15 @@ test("release preparation synchronizes every package and preserves reviewed note
   f.git("commit", "--allow-empty", "-m", "feat(search): add synonyms");
   f.git("commit", "--allow-empty", "-m", "fix: repair file rename");
   const result = prepareRelease("minor", { cwd: f.cwd, date: "2026-10-11", extraNotes: "### Highlights\n\n- Faster searching." });
-  assert.deepEqual(result, { version: "0.2.0", tag: "v0.2.0", existing: false });
-  for (const file of manifests) assert.equal(JSON.parse(f.read(file)).version, "0.2.0");
-  assert.equal(checkRelease(result.tag, f.cwd), "0.2.0");
+  assert.deepEqual(result, { version: "0.2.1", tag: "v0.2.1", existing: false });
+  for (const file of manifests) assert.equal(JSON.parse(f.read(file)).version, "0.2.1");
+  assert.equal(checkRelease(result.tag, f.cwd), "0.2.1");
   const notes = releaseNotes(result.tag, f.cwd);
   assert.match(notes, /Curated search notes/); assert.match(notes, /Faster searching/);
   assert.match(notes, /add synonyms/); assert.match(notes, /### Fixed/);
   assert.doesNotMatch(notes, /initial library/);
   assert.equal(releaseNotes("v0.1.0", f.cwd), "### Added\n\n- Initial library.");
-  assert.match(f.read("CHANGELOG.md"), /## \[Unreleased\]\n\n## \[0.2.0\]/);
+  assert.match(f.read("CHANGELOG.md"), /## \[Unreleased\]\n\n## \[0.2.1\]/);
 });
 
 test("release preparation refuses dirty trees, downgrade and version drift", (t) => {
@@ -62,9 +70,9 @@ test("release preparation refuses dirty trees, downgrade and version drift", (t)
 test("retrying an existing tag preserves original source and does not bump again", (t) => {
   const f = fixture(t); f.git("tag", "v0.1.0");
   prepareRelease("minor", { cwd: f.cwd });
-  f.git("add", "."); f.git("commit", "-m", "chore(release): v0.2.0"); f.git("tag", "v0.2.0");
+  f.git("add", "."); f.git("commit", "-m", "chore(release): v0.2.1"); f.git("tag", "v0.2.1");
   assert.deepEqual(prepareRelease("0.1.0", { cwd: f.cwd }), { version: "0.1.0", tag: "v0.1.0", existing: true });
-  assert.equal(JSON.parse(f.read("package.json")).version, "0.2.0");
+  assert.equal(JSON.parse(f.read("package.json")).version, "0.2.1");
   assert.equal(f.git("status", "--porcelain"), "");
 });
 

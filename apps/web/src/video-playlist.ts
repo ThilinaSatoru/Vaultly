@@ -4,14 +4,16 @@ export type SuggestedVideo = Pick<MediaItem, "id" | "title" | "filename" | "sour
 
 export interface GalleryVideoContext {
   page: number;
+  query: string;
   videos: SuggestedVideo[];
 }
 
 /** Snapshot the already filtered, sorted page that the user opened the video from. */
-export function galleryVideoContext(result: ItemPage | null, itemId: number): GalleryVideoContext | null {
+export function galleryVideoContext(result: ItemPage | null, itemId: number, query = ""): GalleryVideoContext | null {
   if (!result?.items.some((item) => item.id === itemId && item.media_type === "video")) return null;
   return {
     page: result.page,
+    query,
     videos: result.items.filter((item) => item.media_type === "video")
       .map(({ id, title, filename, source_name, duration_seconds }) => ({ id, title, filename, source_name, duration_seconds })),
   };

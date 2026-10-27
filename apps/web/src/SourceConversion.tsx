@@ -9,7 +9,10 @@ interface Progress {
   currentPath: string; errors: string[];
   logs?: string[];
   failed?: number;
+  skipReasons?: Record<string, number>;
 }
+
+interface UnsupportedSummary { total: number; formats: Array<{ extension: string; count: number }> }
 
 export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, expanded, filenameRefactoring, onScan, onExpand, onChanged, onRunning }: {
   sourceId: number; enabled: boolean; scanEnabled: boolean; scanBusy: boolean; expanded: boolean;
@@ -21,6 +24,7 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [selection, setSelection] = useState("scan-all");
+  const [unsupported, setUnsupported] = useState<UnsupportedSummary | null>(null);
   const callbacks = useRef({ onChanged, onRunning });
   callbacks.current = { onChanged, onRunning };
   const running = progress?.status === "running";
@@ -45,6 +49,20 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
     void poll();
     return () => { stopped = true; clearTimeout(timer); };
   }, [sourceId, running]);
+  useEffect(() => {
+    if (!enabled || running) return;
+    let stopped = false;
+    api<UnsupportedSummary>(`/api/sources/${sourceId}/conversion/unsupported`).then((next) => { if (!stopped) setUnsupported(next); }).catch(() => { if (!stopped) setUnsupported(null); });
+    return () => { stopped = true; };
+  }, [sourceId, enabled, running, progress?.converted]);
+  const convertUnsupported = async () => {
+    setBusy(true); setError("");
+    try {
+      setProgress(await api<Progress>(`/api/sources/${sourceId}/conversion`, { method: "POST", body: JSON.stringify({ mode: "both", scope: "unsupported" }) }));
+      callbacks.current.onChanged();
+    } catch (requestError) { setError(requestError instanceof Error ? requestError.message : "Could not convert videos."); }
+    finally { setBusy(false); }
+  };
   const action = async (cancel = false) => {
     if (!cancel) {
       if (!expanded) onExpand();
@@ -74,6 +92,11 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
         {busy || scanBusy ? "Working…" : "Run"}
       </button>
     </div>
+    {enabled && !running && unsupported && unsupported.total > 0 && <div className="convert-alert" role="alert">
+      <div><strong>{unsupported.total} video{unsupported.total === 1 ? "" : "s"} can't play in the app</strong>
+        <span>{unsupported.formats.map((format) => <code key={format.extension}>{format.extension} × {format.count}</code>)}</span></div>
+      <button className="secondary-button" type="button" disabled={busy || scanBusy} onClick={() => void convertUnsupported()}>{busy ? "Working…" : `Convert ${unsupported.total}`}</button>
+    </div>}
     <div hidden={!expanded}>
       {progress && <section className="scan-progress" aria-label="Video conversion">
         <div className="scan-progress-heading"><strong>Video conversion</strong>
@@ -81,7 +104,7 @@ export function SourceConversion({ sourceId, enabled, scanEnabled, scanBusy, exp
         </div>
         <p>Converts unsupported video formats and codecs to MP4. Originals are replaced only after verification; library details are kept.</p>
         <div role="status">
-          <p>{running ? `Converting: ${progress.currentPath || "checking videos"}` : `Conversion ${progress.status}.`} {progress.processed} / {progress.total} checked · {progress.converted} converted · {progress.skipped} skipped.</p>
+          <p>{running ? `Converting: ${progress.currentPath || "checking videos"}` : `Conversion ${progress.status}.`} {progress.processed} / {progress.total} checked · {progress.converted} converted · {progress.skipped} skipped{Object.keys(progress.skipReasons ?? {}).length > 0 && ` (${Object.entries(progress.skipReasons!).map(([reason, count]) => `${count} ${reason}`).join(", ")})`}.</p>
           {running && <progress value={progress.processed} max={Math.max(1, progress.total)} aria-label="Conversion progress" />}
           {!!progress.logs?.length && <LogView revision={progress.logs.join("\n")} label="Conversion log">{progress.logs.map((line, index) => <p key={index}>{line}</p>)}</LogView>}
           {progress.errors.length > 0 && <details><summary>{progress.failed ?? progress.errors.length} conversion errors{(progress.failed ?? 0) > progress.errors.length && " (latest 100 shown)"}</summary><LogView revision={progress.errors.join("\n")} label="Conversion errors"><ul>{progress.errors.map((message, index) => <li key={index}>{message}</li>)}</ul></LogView></details>}

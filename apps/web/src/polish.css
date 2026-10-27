@@ -553,3 +553,40 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--acid); }
 .clearable-field--multiline > .clear-field-button { top: 6px; transform: none; }
 .clearable-field input[type=search]::-webkit-search-cancel-button { -webkit-appearance: none; }
 .path-control > .clearable-field, .music-path-input > .clearable-field { flex: 1; }
+
+.source-list-tools > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 2px; }
+.source-list-tools button:disabled { opacity: .4; cursor: default; }
+.source-branch-flag { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; font-size: .66rem; font-style: normal; color: var(--muted); background: var(--panel-2); }
+.source-branch-count { margin-left: auto; padding: 0 7px; border-radius: 999px; font-size: .68rem; color: var(--muted); background: var(--panel-2); }
+.convert-alert { display: flex; align-items: center; justify-content: space-between; gap: 10px; width: 100%; margin: 0 0 10px; padding: 9px 11px; border: 1px solid var(--accent-border, var(--border)); border-radius: 9px; background: var(--accent-soft, var(--panel-2)); font-size: .76rem; }
+.convert-alert > div { display: grid; gap: 4px; min-width: 0; }
+.convert-alert span { display: flex; flex-wrap: wrap; gap: 4px; }
+.convert-alert code { padding: 1px 6px; border-radius: 5px; background: var(--panel); font-size: .7rem; }
+.convert-alert button { flex-shrink: 0; }
+
+/* Floating management toolbox. */
+.management-dock:not(.is-collapsed) { gap: 6px; padding: 7px; border-radius: 18px; backdrop-filter: blur(10px); box-shadow: 0 14px 44px #0006, 0 0 0 1px color-mix(in srgb, var(--acid) 14%, transparent); animation: management-rise .16s ease-out; }
+.management-dock-tools { align-items: center; padding-left: 6px; border-left: 1px solid var(--border); }
+.management-dock-tools button { flex-direction: column; gap: 3px; min-width: 68px; padding: 8px 10px; border-radius: 12px; font-size: .68rem; font-weight: 600; color: var(--muted); }
+.management-dock-tools button:hover { color: var(--text); background: var(--accent-soft); }
+.management-dock-tools button svg { color: var(--acid); }
+.management-dock:not(.is-collapsed) .management-dock-toggle { width: 38px; height: 38px; color: var(--muted); border-radius: 50%; }
+@media (max-width: 600px) { .management-dock-tools button { min-width: 0; flex-direction: row; } }
+
+/* Minimized players collapse into a slim floating bar; the player stays mounted so its state is kept. */
+.viewer-backdrop.is-minimized { position: fixed; inset: auto auto 14px 14px !important; z-index: 1300; width: min(420px, calc(100vw - 28px)) !important; height: auto !important; min-width: 0 !important; padding: 0; background: transparent; backdrop-filter: none; pointer-events: none; }
+.viewer.viewer-minimized { pointer-events: auto; display: block; width: 100% !important; height: 48px !important; min-width: 0 !important; min-height: 0 !important; resize: none; border-radius: 14px; border-color: var(--accent-border); box-shadow: var(--soft-shadow); }
+.viewer-minimized .viewer-header { height: 48px; padding: 0 8px 0 14px; gap: 10px; border: 0; border-radius: 14px; }
+.viewer-minimized .viewer-title span, .viewer-minimized .viewer-details { display: none; }
+.viewer-minimized .viewer-main { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.viewer-minimized .viewer-title strong { font-size: .82rem; }
+.youtube-playback-window.is-minimized { position: fixed; left: 14px; right: auto; bottom: 14px; width: min(420px, calc(100vw - 28px)); padding: 0; }
+.youtube-playback-window.is-minimized > :not(.youtube-playback-heading) { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.viewer-floating .viewer-header-actions > .viewer-float-toggle { display: inline-flex !important; }
+/* Header actions are icon-only; titles carry the names, which leaves more room for the media. */
+.viewer-header { min-height: 0; }
+.viewer-header-actions > button { min-width: 34px; padding-inline: 8px; }
+.viewer-header-actions > .viewer-panel-toggle[aria-pressed="true"] { color: var(--acid); background: var(--accent-soft); }
+.viewer:not(.viewer-floating):not(.viewer-minimized) { grid-template-columns: minmax(0, 1fr) clamp(220px, 20vw, 270px); grid-template-rows: 52px minmax(0, 1fr); }
+.viewer.viewer-sidebar-hidden:not(.viewer-floating) { grid-template-columns: minmax(0, 1fr); grid-template-rows: 52px minmax(0, 1fr); }
+.viewer-details { padding: 12px 14px; }

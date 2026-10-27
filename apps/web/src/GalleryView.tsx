@@ -118,6 +118,24 @@ function VideoHoverPreview({ itemId, knownDuration }: { itemId: number; knownDur
   />;
 }
 
+// Cards missing a stored duration ask the API to probe the file. Run those
+// requests two at a time so a freshly loaded page cannot start dozens of probes.
+const durationQueue: Array<() => void> = [];
+let activeDurationRequests = 0;
+function queueDurationRequest<T>(task: () => Promise<T>, isCancelled: () => boolean): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    durationQueue.push(() => {
+      if (isCancelled()) { resolve(undefined); pumpDurationQueue(); return; }
+      activeDurationRequests++;
+      task().then(resolve, () => resolve(undefined)).finally(() => { activeDurationRequests--; pumpDurationQueue(); });
+    });
+    pumpDurationQueue();
+  });
+}
+function pumpDurationQueue() {
+  while (activeDurationRequests < 2 && durationQueue.length) durationQueue.shift()!();
+}
+
 function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQueue, onDelete }: { item: MediaItem; selected: boolean; queued: boolean; onSelect: () => void; onOpen: () => void; onFavorite: () => void; onQueue: () => void; onDelete: () => void }) {
   const cardRef = useRef<HTMLElement>(null);
   const [hovered, setHovered] = useState(false);
@@ -147,9 +165,8 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
   useEffect(() => {
     if (item.media_type !== "video" || duration) return;
     let active = true;
-    api<{ duration_seconds: number | null }>(`/api/items/${item.id}/video-metadata`)
-      .then((metadata) => { if (active) setDuration(metadata.duration_seconds); })
-      .catch(() => undefined);
+    void queueDurationRequest(() => api<{ duration_seconds: number | null }>(`/api/items/${item.id}/video-metadata`), () => !active)
+      .then((metadata) => { if (active && metadata) setDuration(metadata.duration_seconds); });
     return () => { active = false; };
   }, [item.id, item.media_type, duration]);
 
@@ -168,7 +185,7 @@ function MediaCard({ item, selected, queued, onSelect, onOpen, onFavorite, onQue
   };
 
   return (
-    <article ref={cardRef} className={`media-card media-card-selectable media-card-${orientation}${item.media_type === "video" ? " media-card-video" : ""}${selected ? " is-selected" : ""}`}>
+    <article ref={cardRef} tabIndex={0} onClick={(event) => { if ((event.target as HTMLElement).closest("button, a, input, select, textarea, label, [role=button], [role=menu], [role=menuitem], .tag-combobox")) return; onOpen(); }} onKeyDown={(event) => { if (event.target !== event.currentTarget) return; if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpen(); } }} className={`media-card media-card-clickable media-card-selectable media-card-${orientation}${item.media_type === "video" ? " media-card-video" : ""}${selected ? " is-selected" : ""}`}>
       <div className="media-card-menu"><ActionMenu label={`Actions for ${item.title}`} contextTarget={cardRef} actions={[{ label: "Open media", icon: <BookOpen size={16} />, onSelect: onOpen }, { label: item.favorite ? "Remove from favorites" : "Add to favorites", icon: <Heart size={16} />, onSelect: onFavorite }, { label: selected ? "Deselect item" : "Select item", icon: <Check size={16} />, onSelect }, ...(item.media_type === "video" ? [{ label: queued ? "Already in playlist" : "Add to playlist", icon: <ListPlus size={16} />, onSelect: onQueue, disabled: queued }] : []), { label: "Delete permanently…", icon: <Trash2 size={16} />, onSelect: onDelete, danger: true }]} /></div>
       <label className="media-card-select" title={`Select ${item.title}`}><input type="checkbox" checked={selected} onChange={onSelect} aria-label={`Select ${item.title}`} /></label>
       <button className={`media-card-favorite${item.favorite ? " is-favorite" : ""}`} type="button" onClick={onFavorite} aria-label={item.favorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`}><Heart size={17} fill={item.favorite ? "currentColor" : "none"} /></button>
@@ -276,11 +293,20 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
   const [layout, setLayout] = useGalleryField<"grid" | "list">("layout", "grid");
   const [searchMode, setSearchMode] = useGalleryField<"literal" | "fuzzy" | "english">("searchMode", "english");
   const [page, setPage] = useGalleryField("page", 0);
+  const previousPage = useRef(page);
+  const galleryQuery = useRef("");
   const [result, setResult] = useState<ItemPage | null>(null);
   const [categoryOverview, setCategoryOverview] = useState<{ categories: Category[]; uncategorized_count: number } | null>(null);
   const [browseCategory, setBrowseCategory] = useGalleryField<number | "uncategorized" | null>("browseCategory", null, "Category");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (previousPage.current !== page) {
+      previousPage.current = page;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [page]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setDebouncedFilename(filename); setDebouncedPath(pathText); setDebouncedSearch(search); }, 180);
@@ -372,6 +398,9 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
     if (view === "browse" && debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
     if (sourceId) params.set("source", sourceId);
     if (view !== "browse") {
+      params.delete("page");
+      galleryQuery.current = params.toString();
+      params.set("page", String(page));
       setLoading(true);
       api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
         .then((data) => { if (!controller.signal.aborted) { setResult(data); setError(""); } })
@@ -395,6 +424,9 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
     if (selectedTagIds.length) params.set("tags", selectedTagIds.join(","));
     const personIds = [...new Set([...selectedCastIds, ...selectedArtistIds])];
     if (personIds.length) params.set("people", personIds.join(","));
+    params.delete("page");
+    galleryQuery.current = params.toString();
+    params.set("page", String(page));
     setLoading(true);
     api<ItemPage>(`/api/items?${params.toString()}`, { signal: controller.signal })
       .then((data) => { if (!controller.signal.aborted) { setResult(data); setError(""); } })
@@ -460,9 +492,9 @@ export function GalleryView({ view, type, search, onSearchChange, categories, ta
       return series ? <CollectionCard key={`series-${series.id}`} series={series} mediaType={type || selectedType || undefined} onOpen={() => onOpenSeries(series.id)} /> : null;
     }
     const item = result?.items.find((entry) => entry.id === card.id);
-    return item ? <MediaCard key={`item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id, galleryVideoContext(result, item.id))} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} onDelete={() => setDeletingItem(item)} /> : null;
+    return item ? <MediaCard key={`item-${item.id}`} item={item} selected={selectedItemIds.includes(item.id)} queued={queuedVideoIds.includes(item.id)} onSelect={() => toggleItem(item.id)} onOpen={() => onOpen(item.id, galleryVideoContext(result, item.id, galleryQuery.current))} onFavorite={() => void toggleFavorite(item)} onQueue={() => onQueueVideo(item)} onDelete={() => setDeletingItem(item)} /> : null;
   });
-  const paginationControls = result ? <div className="pagination">
+  const paginationControls = result && (page > 0 || result.total > result.pageSize) ? <div className="pagination">
     <button className="secondary-button" type="button" onClick={() => { setPage(0); window.scrollTo({ top: 0, behavior: "smooth" }); }}>First page</button>
     <button className="secondary-button" type="button" onClick={() => setPage((value) => Math.max(0, value - 1))} disabled={page === 0}>Previous</button>
     <span>Page {page + 1} of {Math.max(1, Math.ceil(result.total / result.pageSize))}</span>

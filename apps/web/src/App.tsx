@@ -314,19 +314,13 @@ function AddSourceDialog({
           <option value="pictures">Pictures</option>
           <option value="music">Music / music videos</option>
         </Select>
-        <p className="attribute-help"><strong>Initial scan option</strong></p>
-        <label className="source-refactoring-option">
-          <input type="checkbox" checked={prefixGrouping} onChange={(event) => setPrefixGrouping(event.target.checked)} />
-          Group files by shared filename prefixes
-        </label>
-        <p className="attribute-help">Disable this for sources where filenames share generic words. Folder and numbered sequence grouping still works.</p>
         <label htmlFor="source-path">Folder path</label>
         <div className="path-control">
           <ClearableInput
             id="source-path"
             value={rootPath}
             onChange={(event) => setRootPath(event.target.value)}
-            placeholder="D:\\Media"
+            placeholder={"D:\\Media"}
             autoFocus
           />
           <button
@@ -361,6 +355,13 @@ function AddSourceDialog({
           onCategoriesChange={setCategoryIds}
           disabled={saving}
         />}
+
+        <p className="attribute-help"><strong>Initial scan option</strong></p>
+        <label className="source-refactoring-option">
+          <input type="checkbox" checked={prefixGrouping} onChange={(event) => setPrefixGrouping(event.target.checked)} />
+          Group files by shared filename prefixes
+        </label>
+        <p className="attribute-help">Disable this for sources where filenames share generic words. Folder and numbered sequence grouping still works.</p>
 
         <div className="mixed-note">
           <Grid2X2 size={18} />
@@ -1005,7 +1006,6 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   const [sidebarHidden, setSidebarHidden] = useUiState("vaultly.ui.sidebarHidden", false);
   const [sidebarWidth, setSidebarWidth] = useUiState("vaultly.ui.sidebarWidth", 252);
   const [musicSidebarHost, setMusicSidebarHost] = useState<HTMLDivElement | null>(null);
-  const [musicPlayerHost, setMusicPlayerHost] = useState<HTMLDivElement | null>(null);
   const compactHeader = useCompactHeader();
   useEffect(() => {
     const titles: Record<Section, string> = {
@@ -1086,6 +1086,8 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     if (floatingSession) setFloatingSession({ ...floatingSession, id });
     else navigation.push({ selectedItemId: id }, `File ${id}`);
   };
+  // "full" restores the page viewer; "floating" restores the pop-out window.
+  const [viewerMinimized, setViewerMinimized] = useState<false | "full" | "floating">(false);
   const toggleFloating = () => {
     if (floatingSession) {
       navigation.update({
@@ -1102,6 +1104,15 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
       });
       navigation.update({ selectedItemId: null });
     }
+  };
+  const minimizeViewer = () => {
+    if (!floatingSession) { toggleFloating(); setViewerMinimized("full"); }
+    else setViewerMinimized("floating");
+  };
+  const restoreViewer = () => {
+    const from = viewerMinimized;
+    setViewerMinimized(false);
+    if (from === "full" && floatingSession) toggleFloating();
   };
   const [viewerSeriesContext, setViewerSeriesContext] =
     useNavigationField<SeriesViewerContext | null>("viewerSeriesContext", null);
@@ -1206,11 +1217,26 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
   };
 
   const [initializing, setInitializing] = useState(true);
+  const startupScanned = useRef(false);
   useEffect(() => {
     let mounted = true;
     void Promise.all([loadSources(), loadCategories(), loadTags(), loadPeople()]).finally(() => { if (mounted) setInitializing(false); });
     return () => { mounted = false; };
   }, [loadSources, loadCategories, loadTags, loadPeople]);
+
+  // Pick up new media once per app launch; failures are silent because a manual rescan reports errors.
+  useEffect(() => {
+    if (initializing || startupScanned.current) return;
+    startupScanned.current = true;
+    void (async () => {
+      try {
+        await api("/api/sources/scan", { method: "POST", body: JSON.stringify({ englishAttributes: true, refactorFilenames: false, confirmFilenameChanges: false }) });
+        const music = await api<Array<{ id: number; enabled?: number; path_available?: boolean; status: string }>>("/api/music/sources");
+        await Promise.all(music.filter((source) => source.enabled !== 0 && source.path_available !== false && source.status !== "scanning").map((source) => api(`/api/music/sources/${source.id}/scan`, { method: "POST" })));
+        await loadSources(true);
+      } catch { /* ignored */ }
+    })();
+  }, [initializing, loadSources]);
 
   useEffect(() => {
     let stopped = false;
@@ -1400,6 +1426,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
     context: SeriesViewerContext | null = null,
     gallery: GalleryVideoContext | null = null,
   ) => {
+    // Opening another file replaces whatever player was floating or minimized.
+    setViewerMinimized(false);
+    setFloatingSession(null);
+    setYoutubeSession(null);
     navigation.push(
       {
         selectedItemId: id,
@@ -1796,11 +1826,10 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 </div>
               </div>
             </header>
-            <div className="music-player-host music-root" ref={setMusicPlayerHost} />
 
             </div>
 
-            <MusicWorkspace sourceRevision={musicSources.map((source) => `${source.id}:${source.status}:${source.track_count}:${source.last_scanned_at}`).join("|")} onOpenSources={() => openManagement("sources")} onAddSource={() => { setNewSourceType("music"); openManagement("sources"); setShowAddSource(true); }} visible={section === "music"} search={section === "music" ? search : ""} sidebarHost={musicSidebarHost} playerHost={musicPlayerHost} />
+            <MusicWorkspace sourceRevision={musicSources.map((source) => `${source.id}:${source.status}:${source.track_count}:${source.last_scanned_at}`).join("|")} onOpenSources={() => openManagement("sources")} onAddSource={() => { setNewSourceType("music"); openManagement("sources"); setShowAddSource(true); }} visible={section === "music"} search={section === "music" ? search : ""} sidebarHost={musicSidebarHost} />
             <div className="content" hidden={section === "music"}>
               <nav className="navigation-trail" aria-label="Navigation history">
                 <button
@@ -1822,7 +1851,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 ))}
                 <strong aria-current="page">{navigation.entry.label}</strong>
               </nav>
-              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} onPlay={(playback) => setYoutubeSession({ playback, floating: false, pageKey: youtubePageKey })} /> : section === "home" ? (
+              {section === "music" ? null : section === "youtube" ? <YoutubeLibrary search={search} onSearchChange={setSearch} onPlay={(playback) => { setFloatingSession(null); setViewerMinimized(false); setYoutubeSession({ playback, floating: false, pageKey: youtubePageKey }); }} /> : section === "home" ? (
                 <HomeView
                   sources={sources}
                   categories={categories}
@@ -1915,6 +1944,9 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                 floatingSession ? floatingSession.gallery : viewerGalleryContext
               }
               floating={viewerFloating}
+              minimized={viewerMinimized !== false}
+              onMinimize={minimizeViewer}
+              onRestore={restoreViewer}
               onToggleFloating={toggleFloating}
               onNavigateItem={navigateViewer}
               onNavigatePlaylistItem={(id) => {
@@ -1931,6 +1963,7 @@ function LibraryApp({ profiles }: { profiles: ProfileList }) {
                   );
               }}
               onClose={() => {
+                setViewerMinimized(false);
                 if (floatingSession) {
                   setFloatingSession(null);
                   if (selectedItemId === floatingSession.id)

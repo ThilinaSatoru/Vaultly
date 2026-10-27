@@ -11,6 +11,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r --workspace-concurrency=1 test && node --test scripts/*.test.mjs",
+    "release:suggest": "node scripts/release.mjs suggest",
     "release:prepare": "node scripts/release.mjs prepare",
     "release:check": "node scripts/release.mjs check",
     "release:notes": "node scripts/release.mjs notes"

@@ -1,8 +1,9 @@
 import { ChevronDown, Folder, HardDrive, Maximize2, Minimize2, Minus, Settings, Tag, Users, Wrench, X } from "lucide-react";
-import { useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ManagementPanelContext } from "./management-panel";
 import { useUiState } from "./ui-state";
+import { clearSourceFilters } from "./SourcesBrowser";
 
 export type ManagementTab = "tags" | "categories" | "people" | "sources" | "settings";
 export const managementTabs = [
@@ -21,6 +22,13 @@ export function ManagementDrawer({ open, minimized, expanded, active, visited, o
   const id = useId();
   const drawer = useRef<HTMLElement>(null);
   const [dockExpanded, setDockExpanded] = useUiState("vaultly.ui.managementDockExpanded", false);
+  // Closing the drawer discards its filters and search text: panels remount empty on the next open.
+  const [resetKey, setResetKey] = useState(0);
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) { clearSourceFilters(); setResetKey((value) => value + 1); }
+    wasOpen.current = open;
+  }, [open]);
   const select = (tab: ManagementTab) => {
     setDockExpanded(false);
     onOpen(tab);
@@ -54,7 +62,7 @@ export function ManagementDrawer({ open, minimized, expanded, active, visited, o
         }}><Icon size={17} />{label}</button>)}
       </div>
       {managementTabs.map(({ kind }) => <ManagementPanelContext.Provider key={kind} value={{ visible: open && !minimized && active === kind }}>
-        <div className="management-drawer-panel" role="tabpanel" id={`${id}-panel-${kind}`} aria-labelledby={`${id}-tab-${kind}`} hidden={!open || minimized || active !== kind} inert={!open || minimized || active !== kind}>
+        <div key={resetKey} className="management-drawer-panel" role="tabpanel" id={`${id}-panel-${kind}`} aria-labelledby={`${id}-tab-${kind}`} hidden={!open || minimized || active !== kind} inert={!open || minimized || active !== kind}>
           {visited.includes(kind) && panels[kind]}
         </div>
       </ManagementPanelContext.Provider>)}

@@ -55,6 +55,14 @@ async function* audioFiles(directory: string, signal: AbortSignal): AsyncGenerat
   }
 }
 
+/** Reads the usual "Artist - Song.mp3" naming, ignoring a leading track number ("01 - Artist - Song"). */
+export function parseMusicFilename(filename: string): { artist: string; title: string } | null {
+  const base = path.basename(filename, path.extname(filename)).replace(/_/g, " ").trim();
+  const split = (text: string) => { const match = /^(.+?)\s+[-–—]\s+(.+)$/.exec(text); return match ? { artist: match[1]!.trim(), title: match[2]!.trim() } : null; };
+  const withoutNumber = base.replace(/^\d{1,3}\s*[-.)]\s*(?=.+\s[-–—]\s)/, "");
+  const named = split(withoutNumber) ?? split(base);
+  return named && !/^\d+$/.test(named.artist) ? named : null;
+}
 export function scanMusicSource(id: number): Promise<void> {
   if (scans.has(id)) return scans.get(id)!.task;
   const source = database.prepare("SELECT * FROM music_sources WHERE id = ?").get(id) as { root_path: string; name: string } | undefined;
@@ -85,10 +93,11 @@ export function scanMusicSource(id: number): Promise<void> {
         signal.throwIfAborted();
         const t = metadata.tags;
         const folders = relative.split("/").slice(0, -1);
-        const artist = t.artist || t.author || (folders.length >= 2 ? folders[folders.length - 2] : "Unknown artist")!;
+        const named = parseMusicFilename(path.basename(filename));
+        const artist = named?.artist || t.artist || t.author || (folders.length >= 2 ? folders[folders.length - 2] : "Unknown artist")!;
         const albumArtist = t.album_artist || t.albumartist || artist;
         const album = t.album || folders.at(-1) || "Unknown album";
-        const title = t.title || path.basename(filename, path.extname(filename)).replace(/^\d+[ ._-]+/, "");
+        const title = named?.title || t.title || path.basename(filename, path.extname(filename)).replace(/^\d+[ ._-]+/, "");
         const year = t.date || t.year || "";
         database.exec("BEGIN IMMEDIATE");
         try {

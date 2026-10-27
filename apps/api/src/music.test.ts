@@ -17,7 +17,15 @@ const isolated = await vi.hoisted(async () => {
 });
 import { database } from "./database.js";
 import { buildVaultlyServer } from "./server.js";
-import { scanMusicSource, cancelMusicScan } from "./music-scanner.js";
+import { scanMusicSource, cancelMusicScan, parseMusicFilename } from "./music-scanner.js";
+
+test("reads artist and song from Artist - Song file names", () => {
+  expect(parseMusicFilename("Daft Punk - One More Time.mp3")).toEqual({ artist: "Daft Punk", title: "One More Time" });
+  expect(parseMusicFilename("01 - Daft Punk - Digital Love.flac")).toEqual({ artist: "Daft Punk", title: "Digital Love" });
+  expect(parseMusicFilename("50 Cent - Candy Shop.mp3")).toEqual({ artist: "50 Cent", title: "Candy Shop" });
+  expect(parseMusicFilename("01 - Song only.mp3")).toBeNull();
+  expect(parseMusicFilename("Plain title.mp3")).toBeNull();
+});
 import { parseMusicMetadata } from "./music-metadata.js";
 import * as musicMetadata from "./music-metadata.js";
 import { runCommand } from "./background-processes.js";
@@ -111,7 +119,8 @@ test("isolates real music scans, artwork, scopes, ratings, playlists, range play
     expect(first.attributes.map((a: { name: string }) => a.name)).toEqual(expect.arrayContaining(["Ambient","Electronic","Vacations","mp3"]));
     const image = await app.inject(`/api/music/tracks/${first.id}/cover`);
     expect(image.statusCode).toBe(200); expect(image.rawPayload.subarray(0,2)).toEqual(Buffer.from([0xff,0xd8]));
-    expect((await app.inject(`/api/music/tracks?q=Various%20Ambient`)).json().total).toBe(1);
+    expect((await app.inject(`/api/music/tracks?q=One%20Quiet`)).json().total).toBe(1);
+    expect((await app.inject(`/api/music/tracks?q=Ambient`)).json().total).toBe(0);
     expect((await app.inject(`/api/music/tracks?q=Quiet&artist=${library.artists[0].id}`)).json().total).toBe(0);
     expect((await app.inject(`/api/music/tracks?album=${library.albums[0].id}`)).json().total).toBe(2);
     expect((await app.inject(`/api/music/tracks?attribute=${attribute.id}`)).json().total).toBe(1);

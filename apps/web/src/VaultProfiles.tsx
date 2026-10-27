@@ -1,5 +1,6 @@
 import { ClearableInput } from "./ClearableField";
 import { Select } from "./Select";
+import { ActionMenu } from "./ActionMenu";
 import { useState, type FormEvent } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { api } from "./media";
@@ -51,7 +52,10 @@ export function VaultProfiles({ initial }: { initial: ProfileList }) {
   return <div className="vault-profiles">
     <div className="vault-profile-controls"><Select id="active-vault" aria-label="Active vault" value={getActiveProfile()?.id ?? initial.activeId} disabled={busy} onChange={(event) => void activate(event.target.value)}>
       {profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-    </Select><button type="button" className="icon-button" disabled={busy} aria-label="Create new profile" title="Create new profile" onClick={() => { setCreating((value) => !value); setDeleting(false); setError(""); }}><Plus size={17} /></button><button type="button" className="icon-button" disabled={busy} aria-label="Delete profile" title="Delete profile" onClick={() => { setDeleting((value) => !value); setCreating(false); setError(""); }}><Trash2 size={17} /></button></div>
+    </Select><ActionMenu label="Vault actions" actions={[
+      { label: "New vault…", icon: <Plus size={16} />, disabled: busy, onSelect: () => { setCreating(true); setDeleting(false); setError(""); } },
+      { label: `Delete ${active.name}…`, icon: <Trash2 size={16} />, disabled: busy, danger: true, onSelect: () => { setDeleting(true); setCreating(false); setError(""); } },
+    ]} /></div>
     {(creating || deleting || busy || error) && <div className="vault-profile-popover">
       {creating && <form onSubmit={(event) => void create(event)}><ClearableInput autoFocus aria-label="New profile name" placeholder="Profile name" maxLength={80} value={name} disabled={busy} onChange={(event) => setName(event.target.value)} /><p>Starts with an empty vault and its own backups.</p><button className="primary-button" disabled={busy || !name.trim()} type="submit">Create vault</button></form>}
       {deleting && <div><strong>Delete {active.name}?</strong><p>This permanently deletes its database, covers and cache. Your source media stays in place. Another vault opens after deletion.</p><div className="vault-delete-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => setDeleting(false)}>Cancel</button><button type="button" className="danger-button" disabled={busy} onClick={() => void remove()}>Delete profile and data</button></div></div>}

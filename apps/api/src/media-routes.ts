@@ -730,8 +730,17 @@ export async function registerMediaRoutes(
     const { id } = idInput.parse(request.params);
     const item = mediaRow(id);
     if (item) {
-      const cover = database.prepare("SELECT cover_data, cover_path FROM media_items WHERE id = ?").get(id) as { cover_data: Uint8Array | null; cover_path: string | null };
-      if (cover.cover_data) return reply.type("image/png").header("Cache-Control", "private, no-cache").send(Buffer.from(cover.cover_data));
+      const cover = database.prepare("SELECT cover_data IS NOT NULL AS custom, cover_path, cover_signature FROM media_items WHERE id = ?")
+        .get(id) as { custom: number; cover_path: string | null; cover_signature: string | null };
+      if (cover.custom) {
+        // Manual covers get a fresh signature on every change, so it is a valid
+        // ETag; a match skips reading the BLOB entirely.
+        const etag = `"cover-${id}-${cover.cover_signature ?? ""}"`;
+        reply.header("Cache-Control", "private, no-cache").header("ETag", etag);
+        if (request.headers["if-none-match"] === etag) return reply.code(304).send();
+        const row = database.prepare("SELECT cover_data FROM media_items WHERE id = ?").get(id) as { cover_data: Uint8Array };
+        return reply.type("image/png").send(Buffer.from(row.cover_data));
+      }
       if (cover.cover_path) {
         try {
           const root = await realpath(item.root_path);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react";
-import { GripHorizontal, Maximize2, PictureInPicture2, X } from "lucide-react";
+import { GripHorizontal, Maximize2, Minus, PictureInPicture2, X } from "lucide-react";
 import { YoutubeEmbed, type YoutubePlayback } from "./YoutubeLibrary";
 
 export function YoutubePlayer({ playback, floating, onToggleFloating, onClose }: {
@@ -9,6 +9,7 @@ export function YoutubePlayer({ playback, floating, onToggleFloating, onClose }:
   onClose: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
+  const [minimized, setMinimized] = useState(false);
   const [width, setWidth] = useState(480);
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
@@ -33,11 +34,11 @@ export function YoutubePlayer({ playback, floating, onToggleFloating, onClose }:
     event.preventDefault();
   };
   // Keep the same embed and its ancestors mounted when switching display modes.
-  return <div className={`youtube-playback-overlay${floating ? " is-floating" : ""}`} role="presentation" onClick={(event) => {
-    if (!floating && event.target === event.currentTarget) onToggleFloating();
+  return <div className={`youtube-playback-overlay${floating || minimized ? " is-floating" : ""}`} role="presentation" onClick={(event) => {
+    if (!floating && !minimized && event.target === event.currentTarget) onToggleFloating();
   }}>
-    <section ref={panel} className={`youtube-playback-window${floating ? " is-floating" : ""}`} role="dialog" aria-modal={!floating} aria-label={`YouTube player: ${playback.name}`} tabIndex={-1}
-      style={floating ? { width: floatWidth, ...(position ? { left, top: `max(calc(var(--window-bar-height) + 12px), ${top}px)`, right: "auto", bottom: "auto" } : {}) } : undefined}
+    <section ref={panel} className={`youtube-playback-window${floating || minimized ? " is-floating" : ""}${minimized ? " is-minimized" : ""}`} role="dialog" aria-modal={!floating} aria-label={`YouTube player: ${playback.name}`} tabIndex={-1}
+      style={floating && !minimized ? { width: floatWidth, ...(position ? { left, top: `max(calc(var(--window-bar-height) + 12px), ${top}px)`, right: "auto", bottom: "auto" } : {}) } : undefined}
       onKeyDown={(event) => {
         event.stopPropagation();
         if (event.key === "Escape") { event.preventDefault(); if (!floating) onToggleFloating(); else onClose(); }
@@ -56,10 +57,11 @@ export function YoutubePlayer({ playback, floating, onToggleFloating, onClose }:
         <button className="secondary-button" type="button" aria-label={floating ? "Return YouTube to full view" : "Float YouTube player"} title={floating ? "Return to full player" : "Keep playing while browsing"} onClick={onToggleFloating}>
           {floating ? <Maximize2 size={16} /> : <PictureInPicture2 size={16} />}{floating ? "Full view" : "Float"}
         </button>
+        <button className="icon-button" type="button" aria-label={minimized ? "Restore YouTube player" : "Minimize YouTube player"} title={minimized ? "Restore player" : "Minimize to the floating bar"} onClick={() => setMinimized((value) => !value)}>{minimized ? <Maximize2 size={17} /> : <Minus size={18} />}</button>
         <button className="icon-button" type="button" aria-label="Close YouTube player" onClick={onClose}><X size={19} /></button>
       </header>
       <YoutubeEmbed key={playback.key} playback={playback} />
-      <label className="youtube-float-size" hidden={!floating}>Player size<input type="range" aria-label="YouTube floating player size" min={Math.min(360, viewport.width - 24)} max={Math.max(360, Math.min(800, viewport.width - 24))} step="10" value={floatWidth} onChange={(event) => setWidth(Number(event.target.value))} /></label>
+      <label className="youtube-float-size" hidden={!floating || minimized}>Player size<input type="range" aria-label="YouTube floating player size" min={Math.min(360, viewport.width - 24)} max={Math.max(360, Math.min(800, viewport.width - 24))} step="10" value={floatWidth} onChange={(event) => setWidth(Number(event.target.value))} /></label>
     </section>
   </div>;
 }

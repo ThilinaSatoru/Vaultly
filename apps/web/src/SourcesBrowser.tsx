@@ -3,6 +3,7 @@ import { Select } from "./Select";
 import { rankSearchResults } from "./search-relevance";
 import { Fragment, type ReactNode, useMemo } from "react";
 import { useUiState } from "./ui-state";
+import { vaultStorage } from "./vault-session";
 import { Folder, HardDrive, Search } from "lucide-react";
 
 const sourceLabels: Record<string, string> = { movies: "Movies", tv: "TV series", anime: "Anime", manga: "Manga", ebooks: "E-books", pictures: "Pictures", music: "Music" };
@@ -54,6 +55,28 @@ export function buildSourceTree<T extends SourceSummary>(sources: T[]): SourceTr
   return roots;
 }
 
+/** Merge chains of folders that only lead to one child folder ("C:/ › Users › Me") into a single row. */
+export function compactSourceTree<T>(nodes: SourceTreeNode<T>[]): SourceTreeNode<T>[] {
+  return nodes.map((node) => {
+    let { key, label, children, sources } = node;
+    while (sources.length === 0 && children.length === 1) {
+      label = `${label} › ${children[0].label}`;
+      ({ key, children, sources } = children[0]);
+    }
+    return { key, label, sources, children: compactSourceTree(children) };
+  });
+}
+
+const flattenBranches = <T,>(nodes: SourceTreeNode<T>[]): SourceTreeNode<T>[] => nodes.flatMap((node) => [node, ...flattenBranches(node.children)]);
+const branchSources = <T,>(node: SourceTreeNode<T>): T[] => [...node.sources, ...node.children.flatMap(branchSources)];
+/** A branch is disconnected when every source beneath it has an unavailable folder. */
+export const isBranchDisconnected = <T extends SourceSummary>(node: SourceTreeNode<T>) => { const all = branchSources(node); return all.length > 0 && all.every((source) => !source.path_available); };
+
+/** Reset the persisted source filters (used when the management drawer is closed). */
+export function clearSourceFilters() {
+  for (const [key, value] of [["query", ""], ["media", "all"], ["status", "all"], ["category", "all"]] as const) vaultStorage.setItem(`vaultly.ui.sources.${key}`, JSON.stringify(value));
+}
+
 export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource }: {
   sources: T[]; renderSource: (source: T, expanded: boolean, toggle: () => void) => ReactNode;
 }) {
@@ -61,14 +84,18 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
   const [media, setMedia] = useUiState<MediaFilter>("vaultly.ui.sources.media", "all");
   const [status, setStatus] = useUiState("vaultly.ui.sources.status", "all");
   const [category, setCategory] = useUiState("vaultly.ui.sources.category", "all");
-  const [collapsed, setCollapsed] = useUiState<string[]>("vaultly.ui.sources.collapsed", []);
+  // Explicit open/closed choices per folder; folders never chosen follow their connection state.
+  const [branches, setBranches] = useUiState<Record<string, boolean>>("vaultly.ui.sources.branches", {});
   const [expanded, setExpanded] = useUiState<number[]>("vaultly.ui.sources.expanded", []);
   const visible = useMemo(() => rankSearchResults(sources.filter((source) => matchesSource(source, media, status, query) && (category === "all" || sourceMediaGroup(source) === category)), query, (source) => [source.name, source.root_path]), [sources, media, status, query, category]);
-  const tree = useMemo(() => buildSourceTree(visible), [visible]);
+  const tree = useMemo(() => compactSourceTree(buildSourceTree(visible)), [visible]);
+  const branchOpen = (node: SourceTreeNode<T>) => branches[node.key] ?? !isBranchDisconnected(node);
+  const setAllBranches = (open: boolean | ((node: SourceTreeNode<T>) => boolean)) => setBranches(Object.fromEntries(flattenBranches(tree).map((node) => [node.key, typeof open === "boolean" ? open : open(node)])));
   const categories = [...new Set(sources.map(sourceMediaGroup))].sort();
   const renderBranch = (node: SourceTreeNode<T>, depth: number): ReactNode => <li key={node.key}>
-    <details className="source-tree-branch" open={!collapsed.includes(node.key)} onToggle={(event) => { const open = event.currentTarget.open; setCollapsed((current) => open ? current.filter((key) => key !== node.key) : current.includes(node.key) ? current : [...current, node.key]); }}>
-      <summary>{depth === 0 ? <HardDrive size={16} /> : <Folder size={15} />}<span>{node.label}</span></summary>
+    <details className="source-tree-branch" open={branchOpen(node)} onToggle={(event) => { const open = event.currentTarget.open; if (open !== branchOpen(node)) setBranches((current) => ({ ...current, [node.key]: open })); }}>
+      <summary>{depth === 0 ? <HardDrive size={16} /> : <Folder size={15} />}<span title={node.label}>{node.label}</span>
+        {isBranchDisconnected(node) && <em className="source-branch-flag">Disconnected</em>}<small className="source-branch-count">{branchSources(node).length}</small></summary>
       {node.sources.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.includes(source.id), () => toggle(source.id))}</Fragment>)}
       {node.children.length > 0 && <ul>{node.children.map((child) => renderBranch(child, depth + 1))}</ul>}
     </details>
@@ -91,8 +118,10 @@ export function SourcesBrowser<T extends SourceSummary>({ sources, renderSource 
       </button>)}
     </div>
     <div className="source-list-tools"><span>{visible.length} / {sources.length} sources</span><div>
-      <button type="button" onClick={() => { setCollapsed([]); setExpanded((current) => [...new Set([...current, ...visible.map((source) => source.id)])]); }}>Expand all</button>
-      <button type="button" onClick={() => { setCollapsed(tree.map((node) => node.key)); setExpanded([]); }}>Collapse all</button>
+      <button type="button" onClick={() => setAllBranches(true)}>Expand all</button>
+      <button type="button" onClick={() => { setAllBranches(false); setExpanded([]); }}>Collapse all</button>
+      <button type="button" onClick={() => setAllBranches((node) => !isBranchDisconnected(node) && branchOpen(node))} disabled={!flattenBranches(tree).some(isBranchDisconnected)}>Collapse disconnected</button>
+      <button type="button" onClick={() => setExpanded([])} disabled={expanded.length === 0}>Collapse cards</button>
     </div></div>
     {query.trim() ? <div className="source-search-results">{visible.map((source) => <Fragment key={source.id}>{renderSource(source, expanded.includes(source.id), () => toggle(source.id))}</Fragment>)}</div> : <ul className="source-tree">{tree.map((node) => renderBranch(node, 0))}</ul>}
     {visible.length === 0 && <div className="source-filter-empty"><p>No sources match these filters.</p><button className="secondary-button" onClick={() => { setMedia("all"); setCategory("all"); setStatus("all"); setQuery(""); }}>Clear filters</button></div>}

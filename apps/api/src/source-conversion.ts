@@ -11,12 +11,26 @@ import { runCommand, trackProcess } from "./background-processes.js";
 const run = runCommand;
 const python = () => process.env.VAULTLY_PYTHON || "python";
 export type ConversionMode = "quick" | "slow" | "both";
+/** "unsupported" only touches files whose container browsers cannot play; "all" also probes MP4/WebM codecs. */
+export type ConversionScope = "unsupported" | "all";
+const browserContainers = new Set([".mp4", ".m4v", ".webm"]);
+export interface UnsupportedVideoSummary { total: number; formats: Array<{ extension: string; count: number }> }
+export function getUnsupportedVideoSummary(id: number): UnsupportedVideoSummary {
+  const rows = database.prepare(`SELECT lower(file_extension) AS extension, COUNT(*) AS count FROM media_items
+    WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 GROUP BY lower(file_extension)`)
+    .all(id) as Array<{ extension: string | null; count: number }>;
+  const formats = rows.filter((row) => !browserContainers.has(row.extension ?? "")).map((row) => ({ extension: row.extension || "unknown", count: row.count }))
+    .sort((a, b) => b.count - a.count);
+  return { total: formats.reduce((sum, row) => sum + row.count, 0), formats };
+}
 export interface ConversionProgress {
   status: "running" | "completed" | "cancelled" | "failed";
   processed: number; total: number; converted: number; skipped: number;
   currentPath: string; errors: string[];
   logs: string[];
   failed: number;
+  /** Why files were skipped, e.g. { "already browser compatible": 44 }. */
+  skipReasons: Record<string, number>;
 }
 const jobs = new Map<number, { root: string; progress: ConversionProgress; controller: AbortController; promise: Promise<void> }>();
 onVaultChanged(() => jobs.clear());
@@ -70,6 +84,7 @@ if plan(tmp) != (True, True):
     raise RuntimeError('Output does not contain browser-compatible video and audio')
 `;
 
+export const addSkipReason = (progress: ConversionProgress, reason: string) => { progress.skipped++; progress.skipReasons[reason] = (progress.skipReasons[reason] ?? 0) + 1; addConversionLog(progress, `Skipped: ${reason}`); };
 export const addConversionLog = (progress: ConversionProgress, line: string) => {
   progress.logs.push(line.slice(0, 800));
   if (progress.logs.length > 100) progress.logs.splice(0, progress.logs.length - 100);
@@ -121,13 +136,14 @@ export async function checkConversionRuntime() {
   await run(python(), ["-c", "import shutil; assert shutil.which('ffmpeg') and shutil.which('ffprobe'), 'ffmpeg and ffprobe must be on PATH'"], { windowsHide: true, timeout: 10_000 });
 }
 
-export function startSourceConversion(id: number, root: string, mode: ConversionMode = "both"): ConversionProgress {
+export function startSourceConversion(id: number, root: string, mode: ConversionMode = "both", scope: ConversionScope = "all"): ConversionProgress {
   if (isSourceConverting(id)) return getConversionProgress(id)!;
-  const items = database.prepare("SELECT id, relative_path FROM media_items WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 ORDER BY id")
-    .all(id) as Array<{ id: number; relative_path: string }>;
-  const progress: ConversionProgress = { status: "running", processed: 0, total: items.length, converted: 0, skipped: 0, failed: 0, currentPath: "", errors: [], logs: [] };
+  const items = (database.prepare("SELECT id, relative_path, file_extension FROM media_items WHERE source_id = ? AND media_type = 'video' AND indexed = 1 AND available = 1 ORDER BY id")
+    .all(id) as Array<{ id: number; relative_path: string; file_extension: string | null }>)
+    .filter((item) => scope === "all" || !browserContainers.has((item.file_extension ?? "").toLowerCase()));
+  const progress: ConversionProgress = { status: "running", processed: 0, total: items.length, converted: 0, skipped: 0, failed: 0, currentPath: "", errors: [], logs: [], skipReasons: {} };
   const controller = new AbortController();
-  addConversionLog(progress, `Conversion method: ${mode}`);
+  addConversionLog(progress, `Conversion method: ${mode}; ${scope === "all" ? "checking every video" : "unsupported formats only"}`);
   const promise = (async () => {
     try {
       const resolvedRoot = await realpath(root);
@@ -143,12 +159,12 @@ export function startSourceConversion(id: number, root: string, mode: Conversion
           const before = await stat(src);
           const parsed = path.parse(src);
           const dst = path.join(parsed.dir, `${parsed.name}${parsed.ext.toLowerCase() === ".mp4" ? ".browser" : ""}.mp4`);
-          try { await access(dst); progress.skipped++; addConversionLog(progress, "Skipped: output already exists"); continue; }
+          try { await access(dst); addSkipReason(progress, "converted file already exists"); continue; }
           catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
           tmp = path.join(parsed.dir, `.vaultly-${randomUUID()}.converting.tmp`);
           addConversionLog(progress, "Waiting for process slot / available resources");
           const result = await withMediaProcess(() => worker(src, tmp!, controller.signal, progress, mode), controller.signal);
-          if (result === 3) { progress.skipped++; addConversionLog(progress, "Skipped: already browser compatible or needs a different conversion method"); continue; }
+          if (result === 3) { addSkipReason(progress, progress.logs.some((line) => line.includes("needs slow video encoding")) && mode === "quick" ? "needs slow encoding (quick method selected)" : "already browser compatible"); continue; }
           controller.signal.throwIfAborted();
           const after = await stat(src);
           if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("Source changed during conversion; original kept");
